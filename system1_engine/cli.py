@@ -234,7 +234,7 @@ def main() -> None:
     parser.add_argument("--env", type=str, default="CartPole-v1", help="Gymnasium environment ID or 'vizdoom'")
     parser.add_argument("--scenario", type=str, default=None, help="Scenario file for vizdoom/native environment")
     parser.add_argument("--steps", type=int, default=40000, help="Training steps or benchmark steps")
-    parser.add_argument("--save", type=str, default="s1_cartpole.pt", help="Path to save checkpoint")
+    parser.add_argument("--save", type=str, default=None, help="Path to save checkpoint (default: None)")
     parser.add_argument("--load", type=str, default=None, help="Path to load checkpoint for run mode")
     parser.add_argument(
         "--transfer-from",
