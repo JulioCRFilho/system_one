@@ -7,3 +7,5 @@ dist/
 build/
 _vizdoom.ini
 *.ini
+*.app
+.DS_Store
