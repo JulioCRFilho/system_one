@@ -32,8 +32,12 @@ Bem-vindo ao manual completo de operação do **Universal System 1 RL Agent Engi
    - [Receita 3: Fábrica dos 3 Níveis de Integração (`make_game_env`)](#receita-3-fábrica-dos-3-níveis-de-integração-make_game_env)
    - [Receita 4: Arbitragem System 1 → System 2 com `act_with_confidence`](#receita-4-arbitragem-system-1--system-2-com-act_with_confidence)
    - [Receita 5: Servidor Web de Telemetria e Streaming SSE Programático](#receita-5-servidor-web-de-telemetria-e-streaming-sse-programático)
-6. [Resolução de Problemas e Boas Práticas](#6-resolução-de-problemas-e-boas-práticas)
-7. [Referência dos Módulos](#7-referência-dos-módulos)
+6. [Guia Completo da Interface CLI (`system1_engine.cli`)](#6-guia-completo-da-interface-cli-system1_enginecli)
+   - [Tabela Completa de Argumentos e Flags](#tabela-completa-de-argumentos-e-flags)
+   - [Exemplos Práticos por Modo](#exemplos-práticos-por-modo)
+7. [Diferenças entre Scripts de Demonstração e CLI Runner](#7-diferenças-entre-scripts-de-demonstração-e-cli-runner)
+8. [Resolução de Problemas e Boas Práticas](#8-resolução-de-problemas-e-boas-práticas)
+9. [Referência dos Módulos](#9-referência-dos-módulos)
 
 ---
 
@@ -281,7 +285,7 @@ Carrega os pesos consolidados em [`s1_cartpole.pt`](file:///Users/juliocesarreis
 .venv/bin/python -m system1_engine.cli --mode run --env CartPole-v1 --load s1_cartpole.pt --episodes 5
 ```
 
-#### Saída Esperada
+#### Saída Esperada (Opção A - Script de Avaliação Detalhado)
 ```text
 ======================================================================
 🎮 TASK 2: AVALIAÇÃO DE CHECKPOINT TREINADO (CartPole-v1)
@@ -304,6 +308,21 @@ Episódio  5/5 | Recompensa: 459.0 | Passos: 459 | Tempo total:  73.1 ms | ✅ E
 ----------------------------------------------------------------------
 🌟 [PERFEITO] Agente System 1 dominou o ambiente com controle balanceado!
 ```
+
+#### Saída Esperada (Opção B - CLI Padrão UNIX)
+A CLI emite uma saída propositalmente limpa e concisa, ideal para scripts shell e automações:
+```text
+=== Running Agent Evaluation on CartPole-v1 ===
+Loaded weights from s1_cartpole.pt
+Episode 1/5 | Return: 477.0 | Steps: 477
+Episode 2/5 | Return: 500.0 | Steps: 500
+Episode 3/5 | Return: 500.0 | Steps: 500
+Episode 4/5 | Return: 451.0 | Steps: 451
+Episode 5/5 | Return: 459.0 | Steps: 459
+```
+> [!NOTE]
+> Para obter observabilidade em tempo real rica via CLI, utilize a flag `--live-stats` (painel terminal Rich) ou `--web-panel` (painel gráfico web no navegador). Para mais detalhes sobre as diferenças de design, consulte a [Seção 7](#7-diferenças-entre-scripts-de-demonstração-e-cli-runner).
+
 
 ---
 
@@ -1054,7 +1073,112 @@ with server:  # Context manager gerencia automaticamente start() e stop()
 
 ---
 
-## 6. Resolução de Problemas e Boas Práticas
+## 6. Guia Completo da Interface CLI (`system1_engine.cli`)
+
+O System 1 Engine inclui uma interface de linha de comando (CLI) completa e padronizada, permitindo operar todas as capacidades do agente diretamente pelo terminal, em scripts shell ou em pipelines de CI/CD.
+
+### Tabela Completa de Argumentos e Flags
+
+| Argumento / Flag | Tipo | Padrão | Descrição |
+| :--- | :--- | :--- | :--- |
+| `--mode` | `str` | `benchmark` | Modo de operação: `train`, `run` ou `benchmark`. |
+| `--env` | `str` | `CartPole-v1` | Identificador do ambiente Gymnasium (`CartPole-v1`, `Pendulum-v1`, `Acrobot-v1`) ou `vizdoom`. |
+| `--scenario` | `str` | `None` | Arquivo de cenário nativo (ex.: `basic.cfg` para ViZDoom). |
+| `--steps` | `int` | `40000` | Passos máximos de treino (no modo `train`) ou iterações (no modo `benchmark`). |
+| `--episodes` | `int` | `5` | Número de episódios a executar no modo de avaliação (`run`). |
+| `--load` | `str` | `None` | Caminho do arquivo de checkpoint `.pt` para carregar pesos no modo `run`. |
+| `--save` | `str` | `None` | Caminho de destino para salvar o checkpoint treinado (`train`). |
+| `--transfer-from` | `str` | `None` | Caminho do checkpoint de origem para transferir pesos do tronco (`System1Trunk`). |
+| `--freeze-trunk` | `flag` | `True` | Congela os parâmetros do tronco (`requires_grad = False`) durante a transferência. |
+| `--lr` | `float` | `7e-4` | Taxa de aprendizado inicial do otimizador Adam. |
+| `--target-return` | `float` | `475.0` | Meta de recompensa média móvel para parada antecipada no treino. |
+| `--rollout-steps` | `int` | `1024` | Tamanho do buffer de coleta por iteração do algoritmo PPO. |
+| `--chunk-length` | `int` | `16` | Comprimento temporal $T$ de cada chunk na BPTT (Backpropagation Through Time). |
+| `--chunk-batch-size` | `int` | `16` | Quantidade de chunks por mini-batch durante a otimização PPO. |
+| `--live-stats` | `flag` | `False` | Habilita painel interativo de telemetria no terminal via biblioteca Rich (`S1LiveDashboard`). |
+| `--web-panel` | `flag` | `False` | Inicia o servidor HTTP/SSE de telemetria em tempo real (`http://localhost:8050`). |
+| `--port` | `int` | `8050` | Porta TCP do servidor web de telemetria. |
+| `--host` | `str` | `127.0.0.1` | Endereço IP / hostname de escuta do servidor web. |
+| `--fps` | `float` | `50.0` (web) / `0.0` | Cadência forçada em FPS no modo `run`. O padrão é 50 FPS com `--web-panel` para acompanhamento humano visual. Use `--fps 0` para velocidade máxima nativa sem pausas. |
+| `--no-wait` | `flag` | `False` | Não aguarda confirmação com `Ctrl+C` no terminal ao término da avaliação com `--web-panel` (ideal para automação de testes). |
+| `--no-browser` | `flag` | `False` | Não dispara a abertura automática do navegador padrão ao iniciar o `--web-panel` (ideal para servidores remotos, SSH e CI/CD). |
+
+---
+
+### Exemplos Práticos por Modo
+
+#### 1. Modo Benchmark
+Mede a latência por passo do método `act_fast()` em CPU pura:
+```bash
+python -m system1_engine.cli --mode benchmark --steps 1000
+```
+
+#### 2. Modo Train (Treinamento do Zero)
+Treina um agente no `CartPole-v1` com salvamento automático ao atingir a meta:
+```bash
+# Treino padrão silencioso
+python -m system1_engine.cli --mode train --env CartPole-v1 --steps 40000 --save s1_cartpole.pt --target-return 475.0
+
+# Treino com telemetria no terminal (Rich multi-panel)
+python -m system1_engine.cli --mode train --env CartPole-v1 --steps 40000 --live-stats
+
+# Treino com painel web ao vivo (abre navegador automaticamente em localhost:8050)
+python -m system1_engine.cli --mode train --env CartPole-v1 --steps 40000 --web-panel --port 8050
+```
+
+#### 3. Modo Train com Transfer Learning
+Transfere o tronco cognitivo pré-treinado em CartPole para Acrobot congelando o tronco:
+```bash
+python -m system1_engine.cli --mode train \
+  --env Acrobot-v1 \
+  --transfer-from s1_cartpole.pt \
+  --freeze-trunk \
+  --steps 10000 \
+  --save s1_acrobot_transfer.pt
+```
+
+#### 4. Modo Run (Avaliação de Checkpoint)
+Avalia um modelo salvo:
+```bash
+# Avaliação concisa padrão (saída UNIX)
+python -m system1_engine.cli --mode run --env CartPole-v1 --load s1_cartpole.pt --episodes 5
+
+# Avaliação com painel web interativo (abre navegador, cadência 50 FPS, congela gráficos até Ctrl+C)
+python -m system1_engine.cli --mode run --env CartPole-v1 --load s1_cartpole.pt --web-panel
+
+# Avaliação com painel web em velocidade nativa sem limitação de FPS
+python -m system1_engine.cli --mode run --env CartPole-v1 --load s1_cartpole.pt --web-panel --fps 0
+
+# Avaliação em ambiente remoto/servidor sem interface gráfica
+python -m system1_engine.cli --mode run --env CartPole-v1 --load s1_cartpole.pt --web-panel --no-browser --no-wait
+```
+
+---
+
+## 7. Diferenças entre Scripts de Demonstração e CLI Runner
+
+Ao utilizar o repositório, é comum observar que a saída de `examples/02_evaluate_cartpole.py` e de `python -m system1_engine.cli --mode run` possuem formatos distintos, embora ambos avaliem o mesmo checkpoint:
+
+### 1. `examples/02_evaluate_cartpole.py` (Script de Diagnóstico Educacional)
+* **Objetivo:** Inspeção detalhada, aprendizado e auditoria técnica minuciosa para o desenvolvedor.
+* **Saída Produzida:**
+  - Extrai e exibe os metadados internos do checkpoint (`s1_cartpole.pt`), como o retorno histórico e passos acumulados de treino.
+  - Exibe o tempo total em milissegundos gasto em cada episódio.
+  - Classifica a estabilidade de cada execução com ícones indicativos (`✅ ESTÁVEL`, `🏆 SUCESSO (MAX)`).
+  - Calcula analiticamente média amostral, desvio padrão ($\mu \pm \sigma$) e compara com o teto teórico do ambiente ($500.0$).
+  - Calcula a latência média por passo de inferência em microssegundos (µs).
+  - Emite avisos e recomendações diagnósticas caso o retorno médio esteja abaixo do limiar ótimo de convergência.
+
+### 2. `python -m system1_engine.cli --mode run` (CLI Runner de Produção)
+* **Objetivo:** Operação modular, composição de pipelines UNIX, scripts em lote e integração contínua (CI/CD).
+* **Saída Produzida:**
+  - Segue o princípio da concisão UNIX: `Episode X/N | Return: Y.0 | Steps: Z`.
+  - Não polui o `stdout`, facilitando o parsing por ferramentas como `grep`, `awk`, `sed` ou redirecionamento para arquivos de log.
+  - Quando a observabilidade humana é desejada, delega a telemetria visual rica para as flags `--live-stats` (painel Rich no terminal) ou `--web-panel` (painel gráfico web no navegador com SSE).
+
+---
+
+## 8. Resolução de Problemas e Boas Práticas
 
 ### 1. Vazamento de Estado entre Trajetórias
 * **Problema**: O desempenho cai abruptamente no início de um novo episódio.
@@ -1068,9 +1192,24 @@ with server:  # Context manager gerencia automaticamente start() e stop()
 ### 3. Orçamento de Latência em Ambientes Visuais
 * No modo visual com `ImpalaVisualFrontEnd`, a latência na CPU é de **~1.17 ms**, abaixo do teto de 5 ms. Caso queira diminuir ainda mais a latência para menos de 0.5 ms com visão, transfira os tensores para aceleração de hardware (ex.: MPS no macOS ou CUDA no Linux).
 
+### 4. Conflito de Porta TCP (`Address already in use`)
+* **Problema**: `OSError: [Errno 48] Address already in use` ao iniciar o servidor web.
+* **Causa**: Uma instância anterior do `TelemetryServer` ainda está ativa ou outro processo local ocupa a porta 8050.
+* **Solução**:
+  1. Especifique outra porta usando a flag `--port`, por exemplo `--port 8055`.
+  2. Ou libere a porta no terminal com: `lsof -ti:8050 | xargs kill -9`.
+
+### 5. Execução em Servidores Remotos ou Sem Interface Gráfica (Headless)
+* **Problema**: O comando tenta abrir o navegador ou trava esperando interação em um terminal não interativo.
+* **Solução**: Adicione `--no-browser` para evitar chamadas a navegadores gráficos e `--no-wait` para encerrar o processo imediatamente após a conclusão da tarefa.
+
+### 6. Teste de Avaliação Termina Rápido Demais para Inspeção Web
+* **Problema**: O teste de 5 episódios roda em poucos milissegundos e os gráficos passam sem dar tempo de visualizá-los.
+* **Solução**: Por padrão, o motor ativa `--fps 50` quando `--web-panel` está presente, sincronizando a cadência a 50 passos por segundo. Caso deseje desacelerar ainda mais, passe explicitamente `--fps 25` ou `--fps 30`. Ao final da execução, o servidor congela as métricas na tela e permanece vivo até que `Ctrl+C` seja pressionado no terminal.
+
 ---
 
-## 7. Referência dos Módulos
+## 9. Referência dos Módulos
 
 * [`system1_engine.core.agent`](file:///Users/juliocesarreisfilho/Projects/system_one/system1_engine/core/agent.py): Classe central `UniversalS1Agent` unificando percepção, tronco e cabeças.
 * [`system1_engine.core.trunk`](file:///Users/juliocesarreisfilho/Projects/system_one/system1_engine/core/trunk.py): Núcleo recorrente universal `System1Trunk` (GRU + 2x ResMLP).
@@ -1081,4 +1220,5 @@ with server:  # Context manager gerencia automaticamente start() e stop()
 * [`system1_engine.training.ppo`](file:///Users/juliocesarreisfilho/Projects/system_one/system1_engine/training/ppo.py): Algoritmo puro de Recurrent PPO com BPTT particionado.
 * [`system1_engine.transfer.manager`](file:///Users/juliocesarreisfilho/Projects/system_one/system1_engine/transfer/manager.py): Gestor de checkpoints e congelamento estrito de parâmetros.
 * [`system1_engine.telemetry`](file:///Users/juliocesarreisfilho/Projects/system_one/system1_engine/telemetry): Subsistema de telemetria assíncrona O(1) (`LiveStatsTracker`, `S1LiveDashboard`, `TelemetryServer`).
-* [`system1_engine.cli`](file:///Users/juliocesarreisfilho/Projects/system_one/system1_engine/cli.py): Utilitário de linha de comando (`benchmark`, `run`, `train`, `--web-panel`, `--port`).
+* [`system1_engine.cli`](file:///Users/juliocesarreisfilho/Projects/system_one/system1_engine/cli.py): Utilitário de linha de comando (`benchmark`, `run`, `train`, `--web-panel`, `--port`, `--fps`, `--no-browser`, `--no-wait`).
+

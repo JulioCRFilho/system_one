@@ -150,31 +150,31 @@ system_one/
 
 ## 💻 CLI Usage
 
-The CLI module provides a comprehensive command-line interface:
+The CLI module (`system1_engine.cli`) provides a unified, production-ready command-line interface:
 
 ### 1. Benchmark CPU Latency
 ```bash
 python -m system1_engine.cli --mode benchmark --steps 1000
 ```
 
-### 2. Train on CartPole-v1
+### 2. Train from Scratch or Transfer
 ```bash
-# Standard training
+# Standard training on CartPole-v1
 python -m system1_engine.cli --mode train --env CartPole-v1 --steps 40000 --save s1_cartpole.pt --target-return 475.0
 
-# With live terminal dashboard
+# With live terminal dashboard (Rich multi-panel)
 python -m system1_engine.cli --mode train --env CartPole-v1 --steps 40000 --live-stats
 
 # With real-time web panel on port 8050 (opens browser automatically)
 python -m system1_engine.cli --mode train --env CartPole-v1 --steps 40000 --web-panel --port 8050
 
-# Without auto-opening the browser (headless/remote)
-python -m system1_engine.cli --mode train --env CartPole-v1 --steps 40000 --web-panel --no-browser
+# Cross-scenario transfer learning (freeze recurrent trunk, adapt to Acrobot)
+python -m system1_engine.cli --mode train --env Acrobot-v1 --transfer-from s1_cartpole.pt --freeze-trunk --steps 10000
 ```
 
-### 3. Evaluate Pretrained Checkpoint
+### 3. Evaluate Pretrained Checkpoints
 ```bash
-# Standard evaluation
+# Standard evaluation (concise POSIX output)
 python -m system1_engine.cli --mode run --env CartPole-v1 --load s1_cartpole.pt --episodes 5
 
 # With live terminal telemetry
@@ -182,7 +182,43 @@ python -m system1_engine.cli --mode run --env CartPole-v1 --load s1_cartpole.pt 
 
 # With real-time web dashboard (opens browser automatically, paces at 50 FPS & stays alive until Ctrl+C)
 python -m system1_engine.cli --mode run --env CartPole-v1 --load s1_cartpole.pt --web-panel --port 8050
+
+# Uncapped native speed with web panel (no FPS limit)
+python -m system1_engine.cli --mode run --env CartPole-v1 --load s1_cartpole.pt --web-panel --fps 0
+
+# Headless / remote server execution (no browser pop-up, non-blocking termination)
+python -m system1_engine.cli --mode run --env CartPole-v1 --load s1_cartpole.pt --web-panel --no-browser --no-wait
 ```
+
+### 4. CLI Arguments Reference
+
+| Argument | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--mode` | `choice` | `benchmark` | Execution mode: `train`, `run`, or `benchmark`. |
+| `--env` | `str` | `CartPole-v1` | Gymnasium environment ID (`CartPole-v1`, `Pendulum-v1`, `Acrobot-v1`) or `vizdoom`. |
+| `--scenario` | `str` | `None` | Native scenario config file (e.g., `basic.cfg` for ViZDoom). |
+| `--steps` | `int` | `40000` | Max steps for training or latency benchmark iterations. |
+| `--episodes` | `int` | `5` | Number of evaluation episodes in `run` mode. |
+| `--load` | `str` | `None` | Checkpoint `.pt` file to load for evaluation. |
+| `--save` | `str` | `None` | Checkpoint destination path for training. |
+| `--transfer-from` | `str` | `None` | Source checkpoint to transfer transferable trunk weights from. |
+| `--freeze-trunk` | `flag` | `True` | Freeze recurrent trunk parameters (`requires_grad = False`). |
+| `--lr` | `float` | `7e-4` | Initial Adam optimizer learning rate. |
+| `--target-return` | `float` | `475.0` | Target moving average return for early stopping. |
+| `--rollout-steps` | `int` | `1024` | Rollout buffer capacity per PPO iteration. |
+| `--chunk-length` | `int` | `16` | BPTT chunk sequence length $T$. |
+| `--chunk-batch-size`| `int` | `16` | Number of sequence chunks per mini-batch. |
+| `--live-stats` | `flag` | `False` | Enable Rich multi-panel terminal live dashboard. |
+| `--web-panel` | `flag` | `False` | Start real-time HTTP/SSE web telemetry server (`http://localhost:8050`). |
+| `--port` | `int` | `8050` | TCP port for web telemetry server. |
+| `--host` | `str` | `127.0.0.1` | Host address for web telemetry server. |
+| `--fps` | `float` | `50.0` (web) / `0.0` | Cadence in FPS for `run` mode. Defaults to 50 FPS with `--web-panel` for human visualization. Set `--fps 0` for uncapped speed. |
+| `--no-wait` | `flag` | `False` | Do not wait for `Ctrl+C` after run completion with `--web-panel`. |
+| `--no-browser` | `flag` | `False` | Do not automatically open the default web browser when `--web-panel` starts. |
+
+> [!TIP]
+> **Example Scripts vs. CLI Runner**: Use `examples/02_evaluate_cartpole.py` for comprehensive educational and diagnostic auditing (detailed episode runtimes, theoretical score ceilings, stability indicators, and sample standard deviations). Use `python -m system1_engine.cli --mode run` for production automation and pipeline scripting.
+
 
 ---
 
