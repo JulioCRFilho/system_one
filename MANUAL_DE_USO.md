@@ -58,7 +58,7 @@ Diferente de sistemas deliberativos (**System 2**, como LLMs com Chain-of-Though
 | **Consumo de RAM** | < 15 MB | < 25 MB | $< 35\text{ MB}$ | ✅ Conforme |
 | **Latência CPU (`act_fast`)** | **0.150 ms** (150 µs) | **1.17 ms** | $\le 0.8\text{ ms}$ (vetor) / $\le 5.0\text{ ms}$ (visão) | ✅ Conforme |
 | **Overhead Confidence Gating** | **+1.3 µs** (0.0013 ms) | **+1.5 µs** | $\le 0.05\text{ ms}$ | ✅ Conforme |
-| **Testes Unitários** | 33/33 Aprovados | 33/33 Aprovados | 100% Cobertura | ✅ Conforme |
+| **Testes Unitários** | 37/37 Aprovados | 37/37 Aprovados | 100% Cobertura | ✅ Conforme |
 | **Convergência CartPole** | 491.90 / 500.0 | — | $\ge 475.0$ | ✅ Conforme |
 | **Ambientes Suportados** | Window + Memory + ViZDoom Real | Lock-Step Headless | 100% Compatível com UniversalS1Wrapper | ✅ Conforme |
 
@@ -151,6 +151,13 @@ system_one/
 │   │   ├── tracker.py              # LiveStatsTracker com ring buffers O(1)
 │   │   ├── dashboard.py            # S1LiveDashboard em terminal via Rich
 │   │   └── server.py               # TelemetryServer HTTP/SSE na porta 8050
+│   ├── hud/                        # Central de Operações & HUD Visual Interativo
+│   │   ├── __main__.py             # Ponto de entrada executável (python -m system1_engine.hud)
+│   │   ├── server.py               # HUDServer (HTTP, SSE, MJPEG e APIs REST)
+│   │   ├── runner.py               # HUDProcessRunner (gestão de subprocessos isolados)
+│   │   ├── worker.py               # Worker desacoplado de treino/inferência/benchmark
+│   │   ├── frame_buffer.py         # VideoFrameBuffer para streaming in-browser de frames
+│   │   └── dashboard.html          # Interface gráfica dark mode interativa e responsiva
 │   └── cli.py                      # Interface de linha de comando CLI (--mode train/run/benchmark)
 ├── examples/                       # Catálogo de 12 tasks práticas prontas para rodar
 │   ├── 01_benchmark_latency.py     # Task 1: Benchmark de latência CPU (<= 0.8 ms)
@@ -165,7 +172,7 @@ system_one/
 │   ├── 10_vizdoom_visual_transfer.py # Task 10: Teste de fogo visual no ViZDoom
 │   ├── 11_live_telemetry_dashboard.py # Task 11: Telemetria assíncrona e painel Rich
 │   └── 12_web_telemetry_streaming.py  # Task 12: Servidor web SSE e gráficos Chart.js
-├── tests/                          # Suíte de testes rigorosa com 33 testes unitários
+├── tests/                          # Suíte de testes rigorosa com 37 testes unitários
 │   ├── test_dimensions.py          # Verificação dimensional do barramento ℝ^337
 │   ├── test_wrapper.py             # Zeração temporal e integridade de deltas
 │   ├── test_latency.py             # Orçamento rígido de latência CPU (<= 0.8 ms)
@@ -174,7 +181,8 @@ system_one/
 │   ├── test_adapters.py            # Testes dos adaptadores Window, Memory e Native
 │   ├── test_confidence.py          # Confidence Gating discreto e contínuo (underflow free)
 │   ├── test_telemetry.py           # Ring buffers O(1) do tracker e layout do dashboard
-│   └── test_telemetry_server.py    # Ciclo de vida HTTP, endpoints REST e SSE
+│   ├── test_telemetry_server.py    # Ciclo de vida HTTP, endpoints REST e SSE
+│   └── test_hud.py                 # Validação do HUD, buffers MJPEG e subprocessos
 ├── MANUAL_DE_USO.md                # Manual operacional detalhado em português
 └── README.md                       # Documentação geral e guia rápido em inglês
 ```
@@ -836,7 +844,7 @@ Executa a suíte de testes rigorosa com 33 testes unitários cobrindo contratos 
 .venv/bin/pytest tests/ -v
 ```
 
-#### Testes Cobertos (33/33 Aprovados):
+#### Testes Cobertos (37/37 Aprovados):
 1. `test_confidence_gating_discrete`: Valida cálculo de incerteza e gatilho em espaço discreto.
 2. `test_confidence_gating_continuous`: Valida incerteza e gatilho em espaço contínuo Box.
 3. `test_confidence_gating_continuous_low_sigma`: Valida ausência de underflow e incerteza estritamente positiva para $\sigma < 0.242$ ($H < 0$).
@@ -870,6 +878,10 @@ Executa a suíte de testes rigorosa com 33 testes unitários cobrindo contratos 
 31. `test_wrapper_reset_robustness`: Zeração e integridade dos buffers temporais do wrapper.
 32. `test_wrapper_delta_computation`: Validação dos cálculos de $\Delta s$, $a_{t-1}$ e $r_{t-1}$.
 33. `test_build_environment_render_mode`: Validação da instanciação de ambientes com render_mode='human' e controle headless.
+34. `test_video_frame_buffer_placeholder_and_update`: Valida buffer MJPEG thread-safe, geração de placeholder e atualização de frames JPEG.
+35. `test_hud_server_lifecycle_and_endpoints`: Valida ciclo de vida do servidor HUD, rotas estáticas (`/`), APIs REST (`/api/state`, `/api/action`) e endpoints internos.
+36. `test_hud_process_runner_start_and_stop`: Valida controle de subprocessos isolados, captura não bloqueante de logs e interrupção graciosa.
+37. `test_hud_e2e_evaluation_and_in_browser_rendering`: Valida execução end-to-end com renderização in-browser MJPEG e telemetria concorrente.
 
 
 ---
@@ -1171,7 +1183,45 @@ python -m system1_engine.cli --mode run --env CartPole-v1 --load s1_cartpole.pt 
 
 ---
 
-## 7. Diferenças entre Scripts de Demonstração e CLI Runner
+## 7. Central de Operações & HUD Visual Interativo (`system1_engine.hud`)
+
+Para além da linha de comando, o System 1 Engine oferece um **HUD Operacional Completo** acessível via navegador web (`http://127.0.0.1:8050`). O HUD permite controlar 100% dos parâmetros e modos por interface visual gráfica, dispensando comandos manuais no terminal.
+
+### Como Iniciar o HUD
+```bash
+# Inicia o servidor e abre o navegador automaticamente na porta 8050
+python -m system1_engine.hud
+
+# Opções de inicialização disponíveis:
+python -m system1_engine.hud --host 127.0.0.1 --port 8055 --no-browser
+```
+
+### Funcionalidades do HUD Visual
+
+1. **Painel de Controle e Seleção de Flags**:
+   - **Modos de Operação**: Botões de um clique para alternar entre `Treino` (`train`), `Avaliar` (`run`) e `Bench` (`benchmark`).
+   - **Seleção de Ambiente**: Dropdown com suporte a `CartPole-v1`, `Acrobot-v1`, `Pendulum-v1`, `MountainCar-v0`, `ViZDoom` e opção customizada de qualquer ID do Gymnasium.
+   - **Gestor Dinâmico de Checkpoints**: Escaneamento automático de todos os modelos `.pt` disponíveis no repositório para carregar (`--load`), transferir tronco (`--transfer-from`) ou salvar (`--save`).
+   - **Congelamento de Tronco**: Toggle switch para ativar/desativar `--freeze-trunk` em transferências de conhecimento.
+   - **Ajuste de Hiperparâmetros**: Controles numéricos em tempo real para taxa de aprendizado (`--lr`), entropia PPO (`--entropy-coef`), retorno alvo (`--target-return`), passos máximos (`--steps`) e episódios (`--episodes`).
+   - **Botões de Ação**: `▶️ INICIAR EXECUÇÃO` e `⏹️ INTERROMPER TAREFA` (com cancelamento gracioso via sinais de SO em subprocesso isolado).
+
+2. **Renderização do Jogo In-Browser (Viewport MJPEG)**:
+   - Exibe a simulação visual contínua do ambiente diretamente dentro do navegador através do endpoint `/video_feed` (`multipart/x-mixed-replace`), codificado via PIL em JPEG a até 50 FPS sem janelas externas nem dependências complexas de WebRTC.
+   - Opções de alternância entre renderização in-browser, janela externa (Pygame/OS) ou modo headless (alta velocidade).
+
+3. **Telemetria Gráfica das 3 Fases do System 1**:
+   - **Fase 1 (Reflexo & Latência)**: Gráfico deslizante Chart.js comparando latências $P50$ e $P99$ em microssegundos ($\mu\text{s}$).
+   - **Fase 2 (Desempenho)**: Curva de retorno médio móvel dos últimos 20 episódios.
+   - **Fase 3 (Convergência PPO)**: Curvas de estabilidade com `Policy Loss` e `Value Loss`.
+   - **Diagnóstico de Gradientes**: Gráfico de barras com normas euclidianas $||\nabla||$ dos módulos FrontEnd, Trunk e PolicyHead.
+
+4. **Terminal Virtual de Logs em Tempo Real**:
+   - Janela de console dark mode integrada capturando e transmitindo todo o `stdout` e `stderr` gerado pelo subprocesso linha a linha, com auto-scroll e destaque sintático.
+
+---
+
+## 8. Diferenças entre Scripts de Demonstração e CLI Runner
 
 Ao utilizar o repositório, é comum observar que a saída de `examples/02_evaluate_cartpole.py` e de `python -m system1_engine.cli --mode run` possuem formatos distintos, embora ambos avaliem o mesmo checkpoint:
 
@@ -1194,7 +1244,7 @@ Ao utilizar o repositório, é comum observar que a saída de `examples/02_evalu
 
 ---
 
-## 8. Resolução de Problemas e Boas Práticas
+## 9. Resolução de Problemas e Boas Práticas
 
 ### 1. Vazamento de Estado entre Trajetórias
 * **Problema**: O desempenho cai abruptamente no início de um novo episódio.
@@ -1225,7 +1275,7 @@ Ao utilizar o repositório, é comum observar que a saída de `examples/02_evalu
 
 ---
 
-## 9. Referência dos Módulos
+## 10. Referência dos Módulos
 
 * [`system1_engine.core.agent`](file:///Users/juliocesarreisfilho/Projects/system_one/system1_engine/core/agent.py): Classe central `UniversalS1Agent` unificando percepção, tronco e cabeças.
 * [`system1_engine.core.trunk`](file:///Users/juliocesarreisfilho/Projects/system_one/system1_engine/core/trunk.py): Núcleo recorrente universal `System1Trunk` (GRU + 2x ResMLP).
@@ -1236,5 +1286,6 @@ Ao utilizar o repositório, é comum observar que a saída de `examples/02_evalu
 * [`system1_engine.training.ppo`](file:///Users/juliocesarreisfilho/Projects/system_one/system1_engine/training/ppo.py): Algoritmo puro de Recurrent PPO com BPTT particionado.
 * [`system1_engine.transfer.manager`](file:///Users/juliocesarreisfilho/Projects/system_one/system1_engine/transfer/manager.py): Gestor de checkpoints e congelamento estrito de parâmetros.
 * [`system1_engine.telemetry`](file:///Users/juliocesarreisfilho/Projects/system_one/system1_engine/telemetry): Subsistema de telemetria assíncrona O(1) (`LiveStatsTracker`, `S1LiveDashboard`, `TelemetryServer`).
-* [`system1_engine.cli`](file:///Users/juliocesarreisfilho/Projects/system_one/system1_engine/cli.py): Utilitário de linha de comando (`benchmark`, `run`, `train`, `--web-panel`, `--port`, `--fps`, `--no-browser`, `--no-wait`).
+* [`system1_engine.hud`](file:///Users/juliocesarreisfilho/Projects/system_one/system1_engine/hud): Central de Operações visual, streaming de vídeo in-browser via MJPEG e console de logs (`HUDServer`, `VideoFrameBuffer`, `HUDProcessRunner`).
+* [`system1_engine.cli`](file:///Users/juliocesarreisfilho/Projects/system_one/system1_engine/cli.py): Utilitário de linha de comando (`benchmark`, `run`, `train`, `--web-panel`, `--render`, `--port`, `--fps`, `--no-browser`, `--no-wait`).
 

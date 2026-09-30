@@ -33,7 +33,13 @@ Unlike deliberative "System 2" frameworks (LLMs with Chain-of-Thought, Monte Car
 7. **Real-Time Environment Visualization & Pacing (`--render`)**:
    - Interactive on-screen simulation rendering via Pygame (`render_mode='human'`) for standard environments (CartPole, Acrobot, Pendulum) and native ViZDoom window rendering.
    - Paced automatically at 50 FPS for smooth human inspection, with graceful socket and window cleanup.
-8. **Pure Implementation**:
+8. **Interactive Visual Control HUD (`python -m system1_engine.hud`)**:
+   - Full browser-based mission control deck on `http://localhost:8050`.
+   - Visual configuration of all flags: operating modes (train/run/benchmark), environment dropdown, live checkpoint scanning (`.pt`), transfer learning toggles (`--freeze-trunk`), and hyperparameter sliders.
+   - **In-Browser Game Video Viewport**: Continuous live MJPEG stream (`/video_feed`) directly in the browser at up to 50 FPS with zero extra client dependencies.
+   - **Integrated Terminal Console**: Real-time streaming of stdout/stderr logs with auto-scroll and syntax color.
+   - **Live 3-Phase Metrics**: Latency P50/P99 curves, episodic return, PPO losses, and gradient norms per module.
+9. **Pure Implementation**:
    - Zero high-level RL libraries (no Stable-Baselines3, no Ray/RLlib, no TRL). 100% pure PyTorch 2.2+, Gymnasium, and NumPy.
 
 ---
@@ -102,6 +108,13 @@ system_one/
 │   │   ├── tracker.py              # LiveStatsTracker with O(1) circular ring buffers
 │   │   ├── dashboard.py            # S1LiveDashboard (Rich terminal live layout)
 │   │   └── server.py               # TelemetryServer (HTTP/SSE live streaming on port 8050)
+│   ├── hud/                        # Visual Operational HUD & Control Center
+│   │   ├── __main__.py             # Entry point (python -m system1_engine.hud)
+│   │   ├── server.py               # HUDServer (HTTP, SSE, MJPEG, and REST endpoints)
+│   │   ├── runner.py               # HUDProcessRunner (isolated subprocess lifecycle)
+│   │   ├── worker.py               # Training/evaluation/benchmark worker
+│   │   ├── frame_buffer.py         # VideoFrameBuffer for in-browser MJPEG streaming
+│   │   └── dashboard.html          # Interactive dark-mode web control deck
 │   └── cli.py                      # Command-line interface (--mode train/run/benchmark)
 ├── examples/                       # Ready-to-run operational task scripts
 │   ├── 01_benchmark_latency.py     # Task 1: CPU latency benchmark (<= 0.8 ms)
@@ -116,7 +129,7 @@ system_one/
 │   ├── 10_vizdoom_visual_transfer.py # Task 10: Visual transfer test on ViZDoom
 │   ├── 11_live_telemetry_dashboard.py # Task 11: Real-time telemetry & Rich dashboard
 │   └── 12_web_telemetry_streaming.py  # Task 12: Web telemetry streaming (SSE + Chart.js)
-├── tests/                          # Automated test suite (33 unit tests)
+├── tests/                          # Automated test suite (37 unit tests)
 │   ├── test_dimensions.py          # Tensor contracts and ℝ^337 bus validation
 │   ├── test_wrapper.py             # Buffer resets and delta computation
 │   ├── test_latency.py             # Sub-millisecond CPU latency budget
@@ -125,7 +138,8 @@ system_one/
 │   ├── test_adapters.py            # Window, Memory, and Native/ViZDoom adapters
 │   ├── test_confidence.py          # Discrete and continuous Confidence Gating
 │   ├── test_telemetry.py           # O(1) tracker overhead and Rich dashboard
-│   └── test_telemetry_server.py    # HTTP lifecycle, REST API, and SSE stream
+│   ├── test_telemetry_server.py    # HTTP lifecycle, REST API, and SSE stream
+│   └── test_hud.py                 # HUD server, MJPEG streaming, and subprocess worker
 ├── MANUAL_DE_USO.md                # In-depth operational user manual (Portuguese)
 └── README.md                       # Main documentation & quickstart (English)
 ```
@@ -241,7 +255,7 @@ Run the full automated test suite:
 pytest tests/ -v
 ```
 
-**All 33 unit tests pass in ~21s**:
+**All 37 unit tests pass in ~23s**:
 1. `test_confidence_gating_discrete`: Uncertainty and gating in discrete space.
 2. `test_confidence_gating_continuous`: Uncertainty and gating in continuous Box space.
 3. `test_confidence_gating_continuous_low_sigma`: Numerical stability and strictly positive uncertainty for $\sigma < 0.242$ ($H < 0$).
@@ -275,6 +289,10 @@ pytest tests/ -v
 31. `test_wrapper_reset_robustness`: Temporal buffer flushing and cross-trajectory state isolation.
 32. `test_wrapper_delta_computation`: Causal computation of $\Delta s$, $a_{t-1}$, and $r_{t-1}$.
 33. `test_build_environment_render_mode`: Real-time visual render mode initialization across adapters.
+34. `test_video_frame_buffer_placeholder_and_update`: Thread-safe MJPEG buffer and standby placeholder generation.
+35. `test_hud_server_lifecycle_and_endpoints`: HUD web server lifecycle, static assets, and REST/SSE endpoints.
+36. `test_hud_process_runner_start_and_stop`: Non-blocking subprocess management, line-by-line log streaming, and clean termination.
+37. `test_hud_e2e_evaluation_and_in_browser_rendering`: End-to-end evaluation with in-browser MJPEG video frame streaming and live telemetry.
 
 ---
 
