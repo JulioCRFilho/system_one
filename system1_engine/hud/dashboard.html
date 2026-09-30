@@ -276,8 +276,8 @@
             </button>
           </div>
 
-          <!-- SALVAR CHECKPOINT (--save) -->
-          <div class="bg-[#0b101c] p-2 rounded border border-gray-800/80 flex flex-col gap-1.5">
+          <!-- SALVAR CHECKPOINT (--save) - Modo Treino -->
+          <div id="group-save" class="bg-[#0b101c] p-2 rounded border border-gray-800/80 flex flex-col gap-1.5">
             <div class="flex items-center justify-between">
               <label class="flex items-center gap-1.5 cursor-pointer text-[11px] text-cyan-400 font-semibold">
                 <input type="checkbox" id="chk-enable-save" checked onchange="toggleSaveInput()" class="w-3.5 h-3.5 rounded bg-gray-900 border-gray-700 text-cyan-500 focus:ring-0" />
@@ -723,7 +723,8 @@
       });
 
       // Visibilidade condicional de campos
-      document.getElementById('group-load').classList.toggle('hidden', mode !== 'run');
+      document.getElementById('group-save').classList.toggle('hidden', mode !== 'train');
+      document.getElementById('group-load').classList.toggle('hidden', mode !== 'run' && mode !== 'benchmark');
       document.getElementById('group-transfer').classList.toggle('hidden', mode !== 'train');
       document.getElementById('param-train-group').classList.toggle('hidden', mode !== 'train');
       document.getElementById('param-eval-group').classList.toggle('hidden', mode !== 'run');
@@ -1177,7 +1178,7 @@
         load: document.getElementById('cfg-load').value || null,
         transfer_from: document.getElementById('cfg-transfer').value || null,
         freeze_trunk: document.getElementById('cfg-freeze-trunk').checked,
-        save: saveEnabled && saveFile ? saveFile : null,
+        save: (activeMode === 'train' && saveEnabled && saveFile) ? saveFile : null,
         render_mode: document.getElementById('cfg-render-mode').value,
         fps: parseFloat(document.getElementById('cfg-fps').value) || 0.0,
         steps: parseInt(document.getElementById('cfg-steps').value) || 40000,
