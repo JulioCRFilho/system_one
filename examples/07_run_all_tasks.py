@@ -27,6 +27,7 @@ TASKS = [
     ("Task 9: Confidence Gating (Gatilho System 2)", "examples/09_confidence_gating.py"),
     ("Task 10: Teste de Fogo Visual (ViZDoom Transfer)", "examples/10_vizdoom_visual_transfer.py"),
     ("Task 11: Telemetria Assíncrona & Dashboard", "examples/11_live_telemetry_dashboard.py"),
+    ("Task 12: Web Telemetry Streaming (SSE + Web)", "examples/12_web_telemetry_streaming.py"),
 ]
 
 

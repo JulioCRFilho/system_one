@@ -21,8 +21,10 @@ Bem-vindo ao manual completo de operação do **Universal System 1 RL Agent Engi
    - [Task 7: Execução Sequencial de Todas as Tasks](#task-7-execução-sequencial-de-todas-as-tasks)
    - [Task 8: Adaptadores dos 3 Níveis de Integração (Window, Memory, Native)](#task-8-adaptadores-dos-3-níveis-de-integração-window-memory-native)
    - [Task 9: Mecanismo de Incerteza e Confidence Gating (`ReflexDecision`)](#task-9-mecanismo-de-incerteza-e-confidence-gating-reflexdecision)
-   - [Task 10: Teste de Fogo com Transferência Visual no ViZDoom](#task-10-teste-de-fogo-com-transferência-visual-no-vizdoom)
-   - [Task 11: Execução da Suíte de Testes Automatizada](#task-11-execução-da-suíte-de-testes-automatizada)
+    - [Task 10: Teste de Fogo com Transferência Visual no ViZDoom](#task-10-teste-de-fogo-com-transferência-visual-no-vizdoom)
+    - [Task 11: Telemetria Assíncrona e Painel Terminal ao Vivo (Rich)](#task-11-telemetria-assíncrona-e-painel-operacional-em-tempo-real-livestatstracker--s1livedashboard)
+    - [Task 12: Streaming Web de Telemetria com SSE e Dashboard Gráfico (`TelemetryServer`)](#task-12-streaming-web-de-telemetria-com-sse-e-dashboard-gráfico-telemetryserver)
+    - [Task 13: Execução da Suíte de Testes Automatizada](#task-13-execução-da-suíte-de-testes-automatizada)
 5. [Guia de API e Receitas de Código](#5-guia-de-api-e-receitas-de-código)
 6. [Resolução de Problemas e Boas Práticas](#6-resolução-de-problemas-e-boas-práticas)
 7. [Referência dos Módulos](#7-referência-dos-módulos)
@@ -46,7 +48,7 @@ Diferente de sistemas deliberativos (**System 2**, como LLMs com Chain-of-Though
 | **Consumo de RAM** | < 15 MB | < 25 MB | $< 35\text{ MB}$ | ✅ Conforme |
 | **Latência CPU (`act_fast`)** | **0.150 ms** (150 µs) | **1.17 ms** | $\le 0.8\text{ ms}$ (vetor) / $\le 5.0\text{ ms}$ (visão) | ✅ Conforme |
 | **Overhead Confidence Gating** | **+1.3 µs** (0.0013 ms) | **+1.5 µs** | $\le 0.05\text{ ms}$ | ✅ Conforme |
-| **Testes Unitários** | 18/18 Aprovados | 18/18 Aprovados | 100% Cobertura | ✅ Conforme |
+| **Testes Unitários** | 32/32 Aprovados | 32/32 Aprovados | 100% Cobertura | ✅ Conforme |
 | **Convergência CartPole** | 491.90 / 500.0 | — | $\ge 475.0$ | ✅ Conforme |
 | **Ambientes Suportados** | Window + Memory + ViZDoom Real | Lock-Step Headless | 100% Compatível com UniversalS1Wrapper | ✅ Conforme |
 
@@ -654,15 +656,91 @@ Demonstra o subsistema de observabilidade contínua do System 1 em alta frequên
 
 ---
 
-### Task 12: Execução da Suíte de Testes Automatizada
+---
 
-Executa a suíte de testes rigorosa com 28 testes unitários cobrindo contratos de dimensão, adaptadores dos 3 níveis (incluindo ViZDoom nativo real), gatilho de incerteza (Confidence Gating discreto e contínuo com proteção de underflow), subsistema de telemetria assíncrona O(1), reset de wrappers e convergência matemática.
+### Task 12: Streaming Web de Telemetria com SSE e Dashboard Gráfico (`TelemetryServer`)
+
+Disponibiliza um servidor HTTP assíncrono nativo (`http.server` + `socketserver.ThreadingMixIn`) com **Server-Sent Events (SSE)** transmitindo métricas contínuas a 15–30 Hz para um painel web moderno, escuro e responsivo (HTML5 + Tailwind CSS + Chart.js) em `http://localhost:8050`:
+
+* **Zero Frameworks Pesados**: Implementado exclusivamente com a biblioteca padrão Python (`http.server`, `socketserver`, `threading`, `json`), sem Flask, FastAPI ou dependências web externas.
+* **Execução Desacoplada e Não-Bloqueante**: O servidor roda em uma thread daemon separada; o loop de inferência sub-milissegundo (`act_fast` ~ 150 µs) e o treinamento PPO mantêm sua velocidade máxima sem qualquer interrupção.
+* **Streaming SSE Unidirecional (`/stream`)**: Envio contínuo de snapshots no formato `data: {JSON}\n\n`, atualizando dinamicamente gráficos deslizantes com janela de 30 pontos no navegador.
+* **Endpoints HTTP Nativos**:
+  - `GET /` ou `/index.html`: Dashboard gráfico completo com tema escuro (Tailwind), 4 gráficos Chart.js em tempo real e status de conexão com reconexão automática.
+  - `GET /stream`: Fluxo SSE persistente (`Content-Type: text/event-stream`).
+  - `GET /api/metrics`: Endpoint REST instantâneo (`Content-Type: application/json`) retornando o snapshot consolidado de todas as fases.
+* **Visualização das 3 Fases**:
+  1. **Fase 1 (Latência & Gating)**: Gráfico de linhas com Latência P50 e P99 em microssegundos (µs), Confiança e Incerteza Média.
+  2. **Fase 2 (Ambiente & Rollout)**: Gráfico de retorno acumulado (média móvel dos últimos 20 episódios), contagem de episódios e FPS físico.
+  3. **Fase 3 (Convergência PPO)**: Gráfico de evolução da Policy Loss e Value Loss.
+  4. **Estabilidade de Gradientes**: Gráfico de barras com as normas $||\nabla||$ por módulo (`FrontEnd`, `Trunk`, `PolicyHead`).
+
+#### Opção A: Executar via Script Pronto de Demonstração
+```bash
+# Executa 400 passos com streaming ativo na porta 8050
+.venv/bin/python examples/12_web_telemetry_streaming.py
+
+# Modo interativo (roda continuamente até Ctrl+C) em porta customizada
+.venv/bin/python examples/12_web_telemetry_streaming.py --port 8055 --interactive
+```
+
+#### Opção B: Treinamento PPO com Painel Web via CLI
+```bash
+.venv/bin/python -m system1_engine.cli --mode train --env CartPole-v1 --web-panel --port 8050
+```
+
+#### Opção C: Execução / Avaliação com Painel Web via CLI
+```bash
+# No CartPole
+.venv/bin/python -m system1_engine.cli --mode run --env CartPole-v1 --load s1_cartpole.pt --web-panel --port 8050
+
+# No ViZDoom nativo
+.venv/bin/python -m system1_engine.cli --mode run --env vizdoom --scenario basic.cfg --web-panel --port 8050
+```
+
+#### Saída Esperada no Terminal
+```text
+==============================================================================
+🌐 TASK 12: STREAMING WEB DE TELEMETRIA EM TEMPO REAL (SSE + CHART.JS)
+==============================================================================
+[✓] Painel Web em Tempo Real ativo em: http://127.0.0.1:8050
+
+🚀 Servidor de telemetria ativo em: http://127.0.0.1:8050
+  • Abra o navegador no endereço acima para acompanhar os gráficos ao vivo.
+  • Endpoints disponíveis:
+    - Dashboard HTML5 : http://127.0.0.1:8050/
+    - Stream SSE      : http://127.0.0.1:8050/stream
+    - REST Snapshot   : http://127.0.0.1:8050/api/metrics
+
+  • Checkpoint 's1_cartpole.pt' carregado.
+  • Iniciando loop operacional (400 passos)...
+
+  [Passo  100] FPS:  348.5 | Lat P50: 275.2 µs | Conf:  57.4% | Ret 20ep:   12.6
+  [Passo  200] FPS:  352.9 | Lat P50: 267.7 µs | Conf:  57.3% | Ret 20ep:   12.4
+  [Passo  300] FPS:  351.4 | Lat P50: 269.1 µs | Conf:  57.4% | Ret 20ep:   12.5
+  [Passo  400] FPS:  353.0 | Lat P50: 268.0 µs | Conf:  57.3% | Ret 20ep:   12.4
+
+🔍 Validando integridade do endpoint REST /api/metrics...
+  • Resposta recebida com sucesso (15 métricas no payload JSON).
+  • Latência P50 registrada : 268.0 µs
+  • Throughput registrado   : 353.0 steps/s
+------------------------------------------------------------------------------
+🏁 Sessão concluída: 400 passos em 1.52s (263.2 steps/s efetivos).
+✅ [STATUS: APROVADO] Servidor Web SSE e Dashboard encerrados com sucesso.
+==============================================================================
+```
+
+---
+
+### Task 13: Execução da Suíte de Testes Automatizada
+
+Executa a suíte de testes rigorosa com 32 testes unitários cobrindo contratos de dimensão, adaptadores dos 3 níveis (incluindo ViZDoom nativo real), gatilho de incerteza (Confidence Gating discreto e contínuo com proteção de underflow), subsistema de telemetria assíncrona O(1), servidor web SSE com endpoints REST, reset de wrappers e convergência matemática.
 
 ```bash
 .venv/bin/pytest tests/ -v
 ```
 
-#### Testes Cobertos (28/28 Aprovados):
+#### Testes Cobertos (32/32 Aprovados):
 1. `test_confidence_gating_discrete`: Valida cálculo de incerteza e gatilho em espaço discreto.
 2. `test_confidence_gating_continuous`: Valida incerteza e gatilho em espaço contínuo Box.
 3. `test_confidence_gating_continuous_low_sigma`: Valida ausência de underflow e incerteza estritamente positiva para $\sigma < 0.242$ ($H < 0$).
@@ -675,22 +753,26 @@ Executa a suíte de testes rigorosa com 28 testes unitários cobrindo contratos 
 10. `test_livestats_tracker_training_epoch_and_snapshot`: Valida agregação estatística com percentis P50/P99 e normas por bloco.
 11. `test_s1_live_dashboard_generate_view_and_render`: Valida árvore de layout Rich com as 3 fases integradas.
 12. `test_trainer_integration_with_telemetry`: Valida preenchimento automático de telemetria pelo `RecurrentPPOTrainer`.
-13. `test_window_capture_env_mock_and_agent_pipeline`: Valida Nível 1 com frame pacing, pré-processamento (C, 84, 84) e `act_fast()`.
-14. `test_memory_hook_env_vector_mode`: Valida Nível 2 com leitura vetorial de RAM, offsets de score e término por HP.
-15. `test_memory_hook_env_hybrid_mode`: Valida Nível 2 em modo híbrido (pixels visuais + controle de RAM).
-16. `test_native_engine_env_lock_step_and_speed`: Valida Nível 3 com lock-step de alta velocidade (> 5.000 FPS).
-17. `test_native_engine_vizdoom_real`: Valida conexão com binário nativo ViZDoom real em lock-step.
-18. `test_factory_make_game_env`: Valida fábrica `make_game_env` para os 3 adaptadores e validação de erros.
-19. `test_cartpole_convergence`: Garante que o treino PPO atinge retorno $\ge 475.0$ em $< 40,000$ passos.
-20. `test_vector_frontend_dimensions`: Validação rígida do barramento de $337$ dimensões.
-21. `test_visual_frontend_dimensions`: Validação do IMPALA e barramento de $337$ dimensões.
-22. `test_system1_trunk_dimensions_and_hx`: Continuidade e transição do estado oculto da GRU.
-23. `test_parameter_counts_and_memory`: Teto de memória $< 35\text{ MB}$ e contagem de parâmetros.
-24. `test_act_fast_latency_budget`: Limite de $0.8\text{ ms}$ em inferência CPU discreta.
-25. `test_act_fast_continuous_action`: Limite de $0.8\text{ ms}$ em inferência CPU contínua.
-26. `test_transfer_without_catastrophic_forgetting`: Congelamento estrito e imutabilidade dos pesos do tronco.
-27. `test_wrapper_reset_robustness`: Zeração e integridade dos buffers temporais do wrapper.
-28. `test_wrapper_delta_computation`: Validação dos cálculos de $\Delta s$, $a_{t-1}$ e $r_{t-1}$.
+13. `test_telemetry_server_lifecycle_and_http_get`: Valida ciclo de vida do `TelemetryServer` e requisição HTTP GET na raiz `/`.
+14. `test_telemetry_server_api_metrics_endpoint`: Valida endpoint REST `/api/metrics` retornando snapshot JSON com `grad_norms`.
+15. `test_telemetry_server_sse_stream`: Valida streaming SSE assíncrono em `/stream` com formato `data: {...}\n\n`.
+16. `test_telemetry_server_context_manager_and_idempotency`: Valida uso como context manager (`with server:`) e idempotência do `stop()`.
+17. `test_window_capture_env_mock_and_agent_pipeline`: Valida Nível 1 com frame pacing, pré-processamento (C, 84, 84) e `act_fast()`.
+18. `test_memory_hook_env_vector_mode`: Valida Nível 2 com leitura vetorial de RAM, offsets de score e término por HP.
+19. `test_memory_hook_env_hybrid_mode`: Valida Nível 2 em modo híbrido (pixels visuais + controle de RAM).
+20. `test_native_engine_env_lock_step_and_speed`: Valida Nível 3 com lock-step de alta velocidade (> 5.000 FPS).
+21. `test_native_engine_vizdoom_real`: Valida conexão com binário nativo ViZDoom real em lock-step.
+22. `test_factory_make_game_env`: Valida fábrica `make_game_env` para os 3 adaptadores e validação de erros.
+23. `test_cartpole_convergence`: Garante que o treino PPO atinge retorno $\ge 475.0$ em $< 40,000$ passos.
+24. `test_vector_frontend_dimensions`: Validação rígida do barramento de $337$ dimensões.
+25. `test_visual_frontend_dimensions`: Validação do IMPALA e barramento de $337$ dimensões.
+26. `test_system1_trunk_dimensions_and_hx`: Continuidade e transição do estado oculto da GRU.
+27. `test_parameter_counts_and_memory`: Teto de memória $< 35\text{ MB}$ e contagem de parâmetros.
+28. `test_act_fast_latency_budget`: Limite de $0.8\text{ ms}$ em inferência CPU discreta.
+29. `test_act_fast_continuous_action`: Limite de $0.8\text{ ms}$ em inferência CPU contínua.
+30. `test_transfer_without_catastrophic_forgetting`: Congelamento estrito e imutabilidade dos pesos do tronco.
+31. `test_wrapper_reset_robustness`: Zeração e integridade dos buffers temporais do wrapper.
+32. `test_wrapper_delta_computation`: Validação dos cálculos de $\Delta s$, $a_{t-1}$ e $r_{t-1}$.
 
 
 ---
@@ -836,4 +918,5 @@ agent = UniversalS1Agent(obs_space=env_n.observation_space, action_space=env_n.a
 * [`system1_engine.env.adapters`](file:///Users/juliocesarreisfilho/Projects/system_one/system1_engine/env/adapters): Adaptadores especializados dos 3 níveis de integração (`BaseGameAdapter`, `WindowCaptureEnv`, `MemoryHookEnv`, `NativeEngineEnv`, `make_game_env`).
 * [`system1_engine.training.ppo`](file:///Users/juliocesarreisfilho/Projects/system_one/system1_engine/training/ppo.py): Algoritmo puro de Recurrent PPO com BPTT particionado.
 * [`system1_engine.transfer.manager`](file:///Users/juliocesarreisfilho/Projects/system_one/system1_engine/transfer/manager.py): Gestor de checkpoints e congelamento estrito de parâmetros.
-* [`system1_engine.cli`](file:///Users/juliocesarreisfilho/Projects/system_one/system1_engine/cli.py): Utilitário de linha de comando (`benchmark`, `run`, `train`).
+* [`system1_engine.telemetry`](file:///Users/juliocesarreisfilho/Projects/system_one/system1_engine/telemetry): Subsistema de telemetria assíncrona O(1) (`LiveStatsTracker`, `S1LiveDashboard`, `TelemetryServer`).
+* [`system1_engine.cli`](file:///Users/juliocesarreisfilho/Projects/system_one/system1_engine/cli.py): Utilitário de linha de comando (`benchmark`, `run`, `train`, `--web-panel`, `--port`).

@@ -9,7 +9,7 @@ import torch
 from system1_engine.core.agent import UniversalS1Agent
 from system1_engine.env.adapters import make_game_env
 from system1_engine.env.wrapper import UniversalS1Wrapper
-from system1_engine.telemetry import LiveStatsTracker, S1LiveDashboard
+from system1_engine.telemetry import LiveStatsTracker, S1LiveDashboard, TelemetryServer
 from system1_engine.training.ppo import RecurrentPPOTrainer
 from system1_engine.transfer.manager import KnowledgeTransferManager
 
@@ -41,50 +41,63 @@ def train_mode(args: argparse.Namespace) -> None:
         )
         print(f"Loaded {len(loaded)} trunk parameters. Trunk frozen: {args.freeze_trunk}")
 
-    tracker = LiveStatsTracker() if args.live_stats else None
-    dashboard = S1LiveDashboard(tracker) if tracker else None
-
-    trainer = RecurrentPPOTrainer(
-        agent=agent,
-        env=env,
-        learning_rate=args.lr,
-        rollout_steps=args.rollout_steps,
-        chunk_length=args.chunk_length,
-        chunk_batch_size=args.chunk_batch_size,
-        tracker=tracker,
+    need_tracker = args.live_stats or args.web_panel
+    tracker = LiveStatsTracker() if need_tracker else None
+    dashboard = S1LiveDashboard(tracker) if args.live_stats else None
+    web_server = (
+        TelemetryServer(tracker, host=args.host, port=args.port) if args.web_panel and tracker else None
     )
 
-    def train_callback(steps: int, mean_ret: float) -> None:
-        if dashboard:
-            dashboard.update()
+    if web_server:
+        web_server.start()
 
-    if dashboard:
-        with dashboard:
+    try:
+        trainer = RecurrentPPOTrainer(
+            agent=agent,
+            env=env,
+            learning_rate=args.lr,
+            rollout_steps=args.rollout_steps,
+            chunk_length=args.chunk_length,
+            chunk_batch_size=args.chunk_batch_size,
+            tracker=tracker,
+        )
+
+        def train_callback(steps: int, mean_ret: float) -> None:
+            if dashboard:
+                dashboard.update()
+
+        if dashboard:
+            with dashboard:
+                final_return = trainer.train(
+                    max_steps=args.steps,
+                    target_return=args.target_return,
+                    callback=train_callback,
+                    verbose=False,
+                )
+            dashboard.render_once()
+        else:
             final_return = trainer.train(
                 max_steps=args.steps,
                 target_return=args.target_return,
                 callback=train_callback,
-                verbose=False,
+                verbose=True,
             )
-        dashboard.render_once()
-    else:
-        final_return = trainer.train(
-            max_steps=args.steps,
-            target_return=args.target_return,
-            verbose=True,
-        )
 
-    if args.save:
-        KnowledgeTransferManager.save_checkpoint(
-            agent=agent,
-            checkpoint_path=args.save,
-            extra_info={
-                "env_id": args.env,
-                "final_return": final_return,
-                "steps": trainer.total_steps,
-            },
-        )
-        print(f"Checkpoint successfully saved to: {args.save}")
+        if args.save:
+            KnowledgeTransferManager.save_checkpoint(
+                agent=agent,
+                checkpoint_path=args.save,
+                extra_info={
+                    "env_id": args.env,
+                    "final_return": final_return,
+                    "steps": trainer.total_steps,
+                },
+            )
+            print(f"Checkpoint successfully saved to: {args.save}")
+
+    finally:
+        if web_server:
+            web_server.stop()
 
 
 def run_mode(args: argparse.Namespace) -> None:
@@ -103,53 +116,65 @@ def run_mode(args: argparse.Namespace) -> None:
         print(f"Loaded weights from {args.load}")
 
     agent.eval()
-    tracker = LiveStatsTracker() if args.live_stats else None
-    dashboard = S1LiveDashboard(tracker) if tracker else None
+    need_tracker = args.live_stats or args.web_panel
+    tracker = LiveStatsTracker() if need_tracker else None
+    dashboard = S1LiveDashboard(tracker) if args.live_stats else None
+    web_server = (
+        TelemetryServer(tracker, host=args.host, port=args.port) if args.web_panel and tracker else None
+    )
 
-    def execute_eval_loop() -> None:
-        for ep in range(args.episodes):
-            obs_dict, _ = env.reset()
-            agent.reset_memory()
-            ep_reward = 0.0
-            steps = 0
-            done = False
+    if web_server:
+        web_server.start()
 
-            while not done:
-                if tracker is not None:
-                    t0 = time.perf_counter_ns()
-                    decision = agent.act_with_confidence(obs_dict)
-                    lat_us = (time.perf_counter_ns() - t0) / 1000.0
+    try:
+        def execute_eval_loop() -> None:
+            for ep in range(args.episodes):
+                obs_dict, _ = env.reset()
+                agent.reset_memory()
+                ep_reward = 0.0
+                steps = 0
+                done = False
 
-                    tracker.record_inference(
-                        latency_us=lat_us,
-                        uncertainty=decision.uncertainty,
-                        confidence=decision.confidence,
-                        entropy=decision.entropy,
-                    )
-                    action = decision.action
-                else:
-                    action = agent.act_fast(obs_dict)
+                while not done:
+                    if tracker is not None:
+                        t0 = time.perf_counter_ns()
+                        decision = agent.act_with_confidence(obs_dict)
+                        lat_us = (time.perf_counter_ns() - t0) / 1000.0
 
-                obs_dict, reward, terminated, truncated, _ = env.step(action)
-                done = terminated or truncated
+                        tracker.record_inference(
+                            latency_us=lat_us,
+                            uncertainty=decision.uncertainty,
+                            confidence=decision.confidence,
+                            entropy=decision.entropy,
+                        )
+                        action = decision.action
+                    else:
+                        action = agent.act_fast(obs_dict)
 
-                if tracker is not None:
-                    tracker.record_env_step(reward=reward, done=done)
-                    if dashboard:
-                        dashboard.update()
+                    obs_dict, reward, terminated, truncated, _ = env.step(action)
+                    done = terminated or truncated
 
-                ep_reward += reward
-                steps += 1
+                    if tracker is not None:
+                        tracker.record_env_step(reward=reward, done=done)
+                        if dashboard:
+                            dashboard.update()
 
-            if not args.live_stats:
-                print(f"Episode {ep + 1}/{args.episodes} | Return: {ep_reward:.1f} | Steps: {steps}")
+                    ep_reward += reward
+                    steps += 1
 
-    if dashboard:
-        with dashboard:
+                if not args.live_stats:
+                    print(f"Episode {ep + 1}/{args.episodes} | Return: {ep_reward:.1f} | Steps: {steps}")
+
+        if dashboard:
+            with dashboard:
+                execute_eval_loop()
+            dashboard.render_once()
+        else:
             execute_eval_loop()
-        dashboard.render_once()
-    else:
-        execute_eval_loop()
+
+    finally:
+        if web_server:
+            web_server.stop()
 
 
 def benchmark_mode(args: argparse.Namespace) -> None:
@@ -238,7 +263,25 @@ def main() -> None:
         "--live-stats",
         action="store_true",
         default=False,
-        help="Enable real-time Rich live telemetry dashboard",
+        help="Enable real-time Rich terminal live telemetry dashboard",
+    )
+    parser.add_argument(
+        "--web-panel",
+        action="store_true",
+        default=False,
+        help="Launch real-time web telemetry dashboard (HTTP/SSE on port 8050)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8050,
+        help="HTTP port for web telemetry server (default: 8050)",
+    )
+    parser.add_argument(
+        "--host",
+        type=str,
+        default="127.0.0.1",
+        help="Host address for web telemetry server (default: 127.0.0.1)",
     )
 
     args = parser.parse_args()
