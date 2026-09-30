@@ -373,7 +373,7 @@ class RecurrentPPOTrainer:
             )
             metrics = self.train_epoch()
 
-            if len(self.episode_returns) >= 20:
+            if len(self.episode_returns) > 0:
                 best_mean_return = max(best_mean_return, mean_return)
 
             if verbose and iteration % 2 == 0:
