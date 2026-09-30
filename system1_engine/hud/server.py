@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 
 from system1_engine.hud.frame_buffer import VideoFrameBuffer
 from system1_engine.hud.runner import HUDProcessRunner
+from system1_engine.transfer.manager import KnowledgeTransferManager
 
 
 class ThreadedTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
@@ -83,7 +84,7 @@ class HUDServer:
         return sorted(list(valid))
 
     def scan_checkpoints_detailed(self) -> List[Dict[str, Any]]:
-        """Retorna detalhes enriquecidos (tamanho em MB, data de modificação) de cada checkpoint."""
+        """Retorna detalhes enriquecidos (tamanho em MB, data, ambiente de origem e tensores) de cada checkpoint."""
         candidates = self.scan_checkpoints()
         results = []
         for path in candidates:
@@ -91,13 +92,20 @@ class HUDServer:
                 stat = os.stat(path)
                 size_mb = stat.st_size / (1024 * 1024)
                 mtime_str = time.strftime("%d/%m/%Y %H:%M:%S", time.localtime(stat.st_mtime))
+                meta = KnowledgeTransferManager.inspect_checkpoint(path)
                 results.append({
                     "path": path,
+                    "filename": os.path.basename(path),
                     "size_mb": round(size_mb, 2),
                     "mtime": mtime_str,
+                    "env_id": meta.get("env_id"),
+                    "obs_dim": meta.get("obs_dim"),
+                    "act_dim": meta.get("act_dim"),
+                    "final_return": meta.get("final_return"),
+                    "steps": meta.get("steps"),
                 })
             except Exception:
-                results.append({"path": path, "size_mb": 0.0, "mtime": "—"})
+                results.append({"path": path, "filename": os.path.basename(path), "size_mb": 0.0, "mtime": "—"})
         return results
 
     def update_telemetry(self, data: Dict[str, Any]) -> None:

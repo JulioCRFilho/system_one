@@ -75,3 +75,41 @@ def test_transfer_without_catastrophic_forgetting(tmp_path):
         assert not param.requires_grad, f"Trunk param {name} requires_grad became True after training"
         diff = torch.max(torch.abs(param - initial_trunk_weights[name])).item()
         assert diff == 0.0, f"Trunk param {name} changed numerically by {diff}!"
+
+
+def test_checkpoint_inspection_and_evaluation_compatibility(tmp_path):
+    """Ensure inspect_checkpoint reads metadata and validate_evaluation_compatibility detects dimension mismatches."""
+    # 1. Save an Acrobot checkpoint
+    acro_env = UniversalS1Wrapper(gym.make("Acrobot-v1"))
+    acro_agent = UniversalS1Agent(acro_env.env.observation_space, acro_env.action_space)
+    acro_path = str(tmp_path / "s1_acrobot.pt")
+    KnowledgeTransferManager.save_checkpoint(
+        acro_agent,
+        acro_path,
+        extra_info={"env_id": "Acrobot-v1", "final_return": -85.0, "steps": 5000},
+    )
+
+    # 2. Inspect checkpoint
+    meta = KnowledgeTransferManager.inspect_checkpoint(acro_path)
+    assert meta["env_id"] == "Acrobot-v1"
+    assert meta["obs_dim"] == 6
+    assert meta["act_dim"] == 3
+    assert meta["final_return"] == -85.0
+    assert meta["steps"] == 5000
+
+    # 3. Create a CartPole agent (obs=4, act=2)
+    cart_env = UniversalS1Wrapper(gym.make("CartPole-v1"))
+    cart_agent = UniversalS1Agent(cart_env.env.observation_space, cart_env.action_space)
+
+    # 4. Check compatibility: evaluating an Acrobot checkpoint on CartPole must return an informative error message
+    checkpoint = torch.load(acro_path, map_location="cpu", weights_only=False)
+    state_dict = checkpoint["state_dict"]
+    err = KnowledgeTransferManager.validate_evaluation_compatibility(cart_agent, state_dict, "CartPole-v1", acro_path)
+    assert err is not None
+    assert "ERRO DE COMPATIBILIDADE DE CHECKPOINT" in err
+    assert "front_end.state_encoder.net.0.weight" in err
+    assert "Acrobot-v1" in err
+
+    # 5. But evaluating it on an Acrobot agent must return None (compatible!)
+    err_compat = KnowledgeTransferManager.validate_evaluation_compatibility(acro_agent, state_dict, "Acrobot-v1", acro_path)
+    assert err_compat is None

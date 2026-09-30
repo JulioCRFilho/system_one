@@ -236,6 +236,12 @@ def run_worker_eval(config: Dict[str, Any], hud_client: HUDClient) -> None:
     if load_path:
         checkpoint = torch.load(load_path, map_location="cpu", weights_only=False)
         state_dict = checkpoint["state_dict"] if "state_dict" in checkpoint else checkpoint
+        
+        compat_err = KnowledgeTransferManager.validate_evaluation_compatibility(agent, state_dict, env_id, load_path)
+        if compat_err:
+            print(compat_err)
+            sys.exit(1)
+
         agent.load_state_dict(state_dict, strict=False)
         print(f"Pesos carregados com sucesso de: {load_path}")
     else:

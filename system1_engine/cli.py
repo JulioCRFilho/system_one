@@ -146,6 +146,12 @@ def run_mode(args: argparse.Namespace) -> None:
     if args.load:
         checkpoint = torch.load(args.load, map_location="cpu", weights_only=False)
         state_dict = checkpoint["state_dict"] if "state_dict" in checkpoint else checkpoint
+        
+        compat_err = KnowledgeTransferManager.validate_evaluation_compatibility(agent, state_dict, args.env, args.load)
+        if compat_err:
+            print(compat_err)
+            sys.exit(1)
+
         agent.load_state_dict(state_dict, strict=False)
         print(f"Loaded weights from {args.load}")
 

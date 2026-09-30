@@ -77,3 +77,98 @@ class KnowledgeTransferManager:
                 assert not param.requires_grad, f"Trunk parameter {name} was not frozen!"
 
         return loaded_keys
+
+    @staticmethod
+    def inspect_checkpoint(checkpoint_path: str) -> Dict[str, Any]:
+        """Inspects a checkpoint and extracts metadata including environment, observation and action dimensions."""
+        if not os.path.exists(checkpoint_path):
+            return {"error": f"Arquivo não encontrado: {checkpoint_path}", "path": checkpoint_path}
+
+        info: Dict[str, Any] = {
+            "path": checkpoint_path,
+            "filename": os.path.basename(checkpoint_path),
+            "env_id": None,
+            "obs_dim": None,
+            "act_dim": None,
+            "steps": None,
+            "final_return": None,
+            "is_visual": False,
+        }
+        try:
+            checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+            extra = checkpoint.get("extra_info", {}) if isinstance(checkpoint, dict) else {}
+            state_dict = checkpoint.get("state_dict", checkpoint) if isinstance(checkpoint, dict) else {}
+
+            info["env_id"] = extra.get("env_id")
+            info["final_return"] = extra.get("final_return")
+            info["steps"] = extra.get("steps")
+
+            # Extract observation dimension
+            if "front_end.state_encoder.net.0.weight" in state_dict:
+                info["obs_dim"] = int(state_dict["front_end.state_encoder.net.0.weight"].shape[1])
+                info["is_visual"] = False
+            elif any("visual_encoder" in k for k in state_dict.keys()):
+                info["obs_dim"] = "visual"
+                info["is_visual"] = True
+
+            # Extract action dimension
+            if "policy_head.linear.weight" in state_dict:
+                info["act_dim"] = int(state_dict["policy_head.linear.weight"].shape[0])
+
+            # Deduce env_id from filename if not in metadata
+            if not info["env_id"]:
+                fn = os.path.basename(checkpoint_path).lower()
+                if "cartpole" in fn:
+                    info["env_id"] = "CartPole-v1"
+                elif "acrobot" in fn:
+                    info["env_id"] = "Acrobot-v1"
+                elif "pendulum" in fn:
+                    info["env_id"] = "Pendulum-v1"
+                elif "mountaincar" in fn:
+                    info["env_id"] = "MountainCar-v0"
+                elif "vizdoom" in fn or "doom" in fn:
+                    info["env_id"] = "vizdoom"
+
+        except Exception as e:
+            info["error"] = str(e)
+
+        return info
+
+    @staticmethod
+    def validate_evaluation_compatibility(
+        agent: nn.Module,
+        state_dict: Dict[str, torch.Tensor],
+        env_id: str,
+        checkpoint_path: str,
+    ) -> Optional[str]:
+        """Verifies if a state_dict can be loaded for direct evaluation without shape mismatches.
+
+        Returns None if compatible, or an error string describing the mismatch.
+        """
+        mismatches: List[str] = []
+        agent_dict = agent.state_dict()
+        for k, v in state_dict.items():
+            if k in agent_dict and isinstance(v, torch.Tensor):
+                if agent_dict[k].shape != v.shape:
+                    mismatches.append(f"  • {k}: salvo={list(v.shape)}, esperado={list(agent_dict[k].shape)}")
+
+        if mismatches:
+            ckpt_info = KnowledgeTransferManager.inspect_checkpoint(checkpoint_path)
+            orig_env = ckpt_info.get("env_id") or "outro ambiente"
+            msg = (
+                f"\n{'='*72}\n"
+                f"❌ [ERRO DE COMPATIBILIDADE DE CHECKPOINT]\n"
+                f"O checkpoint '{checkpoint_path}' é incompatível com o ambiente '{env_id}' para AVALIAÇÃO direta!\n\n"
+                f"🔍 Tensores com divergência de formato (Size Mismatch):\n"
+                + "\n".join(mismatches[:5])
+                + (f"\n  ... (+ {len(mismatches) - 5} tensores)" if len(mismatches) > 5 else "")
+                + f"\n\n💡 DIAGNÓSTICO E COMO RESOLVER:\n"
+                f"  1. AVALIAÇÃO DIRETA: O modo 'Avaliar' requer pesos treinados no mesmo ambiente.\n"
+                f"     -> No menu 'Ambiente (--env)', selecione '{orig_env}'.\n"
+                f"  2. TRANSFERÊNCIA DE APRENDIZADO (Cross-Task):\n"
+                f"     -> Para aproveitar os 18 tensores do tronco de '{checkpoint_path}' em '{env_id}',\n"
+                f"        use o modo 'Treino' com 'Transferir Tronco (--transfer-from)' e 'Congelar Tronco'.\n"
+                f"{'='*72}\n"
+            )
+            return msg
+        return None

@@ -308,6 +308,7 @@
               <option value="">Nenhum (Pesos aleatórios inicializados)</option>
             </select>
             <div id="load-meta" class="text-[10px] text-gray-400 font-mono italic">Nenhum checkpoint selecionado.</div>
+            <div id="load-compat-warning" class="hidden"></div>
           </div>
 
           <!-- TRANSFERÊNCIA DE PESOS (--transfer-from & --freeze-trunk) - Modo Treino -->
@@ -728,6 +729,7 @@
       document.getElementById('param-eval-group').classList.toggle('hidden', mode !== 'run');
 
       suggestCheckpointName();
+      validateCheckpointCompatibility();
     }
 
     function onEnvChange() {
@@ -742,12 +744,14 @@
       else if (env === 'Pendulum-v1') setTargetReturn(-200.0);
 
       suggestCheckpointName();
+      validateCheckpointCompatibility();
     }
 
     function onCustomEnvInput() {
       const val = document.getElementById('cfg-custom-env').value || 'Custom';
       document.getElementById('overlay-env').innerText = val;
       suggestCheckpointName();
+      validateCheckpointCompatibility();
     }
 
     function onScenarioPresetChange() {
@@ -796,14 +800,87 @@
       const metaEl = document.getElementById('load-meta');
       if (!val) {
         metaEl.innerText = 'Nenhum checkpoint selecionado (pesos aleatórios).';
+        validateCheckpointCompatibility();
         return;
       }
       const item = availableCheckpointsDetailed.find(c => c.path === val);
       if (item) {
-        metaEl.innerText = `Tamanho: ${item.size_mb} MB • Modificado em: ${item.mtime}`;
+        const envInfo = item.env_id ? ` • Ambiente: ${item.env_id}` : '';
+        const dimInfo = (item.obs_dim && item.act_dim) ? ` (${item.obs_dim}D obs, ${item.act_dim} ações)` : '';
+        const retInfo = item.final_return !== null && item.final_return !== undefined ? ` • Retorno: ${item.final_return.toFixed(1)}` : '';
+        metaEl.innerText = `Tamanho: ${item.size_mb} MB${envInfo}${dimInfo}${retInfo} • Modificado em: ${item.mtime}`;
       } else {
         metaEl.innerText = `Arquivo selecionado: ${val}`;
       }
+      validateCheckpointCompatibility();
+    }
+
+    function validateCheckpointCompatibility() {
+      const loadVal = document.getElementById('cfg-load').value;
+      const warnEl = document.getElementById('load-compat-warning');
+      if (!warnEl) return;
+
+      if (!loadVal || activeMode !== 'run') {
+        warnEl.classList.add('hidden');
+        warnEl.innerHTML = '';
+        return;
+      }
+
+      const item = availableCheckpointsDetailed.find(c => c.path === loadVal);
+      if (!item || !item.env_id) {
+        warnEl.classList.add('hidden');
+        warnEl.innerHTML = '';
+        return;
+      }
+
+      const currentEnv = document.getElementById('cfg-env').value;
+      const actualEnv = currentEnv === 'custom' ? (document.getElementById('cfg-custom-env').value || '') : currentEnv;
+
+      if (actualEnv && item.env_id && item.env_id !== actualEnv) {
+        warnEl.classList.remove('hidden');
+        const dimInfo = (item.obs_dim && item.act_dim) ? ` (${item.obs_dim}D obs, ${item.act_dim} ações)` : '';
+        warnEl.innerHTML = `
+          <div class="p-2 rounded bg-amber-950/80 border border-amber-600/90 text-[10px] text-amber-200 flex flex-col gap-1.5 shadow-lg">
+            <div class="flex items-start gap-1.5">
+              <span class="text-sm">⚠️</span>
+              <div>
+                <strong>Incompatibilidade de Ambiente Detectada:</strong><br>
+                O checkpoint <code class="bg-black/50 px-1 py-0.5 rounded text-amber-300 font-mono">${item.filename || item.path}</code> foi treinado para <strong>${item.env_id}</strong>${dimInfo}, mas o ambiente selecionado é <strong>${actualEnv}</strong>.
+              </div>
+            </div>
+            <div class="flex flex-wrap items-center gap-1.5 pt-1 border-t border-amber-800/60">
+              <button type="button" onclick="syncEnvToCheckpoint('${item.env_id}')" class="badge-btn bg-amber-600 hover:bg-amber-500 text-white font-bold py-1 px-2">
+                🔄 Mudar Ambiente para ${item.env_id}
+              </button>
+              <button type="button" onclick="switchToTransfer('${item.path}')" class="badge-btn bg-purple-800 hover:bg-purple-700 text-purple-200 font-bold py-1 px-2">
+                🔀 Usar no Treino com Transferência
+              </button>
+            </div>
+          </div>
+        `;
+      } else {
+        warnEl.classList.add('hidden');
+        warnEl.innerHTML = '';
+      }
+    }
+
+    function syncEnvToCheckpoint(targetEnv) {
+      const envSel = document.getElementById('cfg-env');
+      if (Array.from(envSel.options).some(o => o.value === targetEnv)) {
+        envSel.value = targetEnv;
+        onEnvChange();
+      } else {
+        envSel.value = 'custom';
+        document.getElementById('cfg-custom-env').value = targetEnv;
+        onEnvChange();
+      }
+    }
+
+    function switchToTransfer(path) {
+      setMode('train');
+      document.getElementById('cfg-transfer').value = path;
+      document.getElementById('cfg-freeze-trunk').checked = true;
+      onFreezeTrunkChange();
     }
 
     function onFreezeTrunkChange() {
@@ -990,7 +1067,9 @@
       transSel.innerHTML = '<option value="">Nenhum (Treinar do zero)</option>';
 
       availableCheckpointsDetailed.forEach(ckpt => {
-        const optText = `${ckpt.path} (${ckpt.size_mb} MB)`;
+        const envTag = ckpt.env_id ? ` [${ckpt.env_id}]` : '';
+        const dimTag = (ckpt.obs_dim && ckpt.act_dim) ? ` (${ckpt.obs_dim}D→${ckpt.act_dim}A)` : '';
+        const optText = `${ckpt.path}${envTag}${dimTag} • ${ckpt.size_mb} MB`;
         loadSel.innerHTML += `<option value="${ckpt.path}">${optText}</option>`;
         transSel.innerHTML += `<option value="${ckpt.path}">${optText}</option>`;
       });
@@ -1015,10 +1094,22 @@
       availableCheckpointsDetailed.forEach(item => {
         const div = document.createElement('div');
         div.className = 'flex items-center justify-between p-1.5 rounded bg-gray-900/70 border border-gray-800 text-xs';
+        const envBadge = item.env_id ? `<span class="px-1 py-0.2 rounded bg-cyan-950 text-cyan-400 text-[9px] border border-cyan-800 font-bold">${item.env_id}</span>` : '';
+        const dimBadge = (item.obs_dim && item.act_dim) ? `<span class="text-[9px] text-gray-400 font-mono">${item.obs_dim}D obs • ${item.act_dim} ações</span>` : '';
+        const retBadge = item.final_return !== null && item.final_return !== undefined ? `<span class="text-[9px] text-emerald-400 font-bold">Retorno: ${item.final_return.toFixed(1)}</span>` : '';
         div.innerHTML = `
-          <div class="flex flex-col min-w-0 pr-2">
-            <span class="font-bold text-gray-200 truncate font-mono text-[11px]">${item.path}</span>
-            <span class="text-[9px] text-gray-500">${item.size_mb} MB • ${item.mtime}</span>
+          <div class="flex flex-col min-w-0 pr-2 gap-0.5">
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <span class="font-bold text-gray-200 truncate font-mono text-[11px]">${item.path}</span>
+              ${envBadge}
+            </div>
+            <div class="flex items-center gap-2 text-[9px] text-gray-500 flex-wrap">
+              <span>${item.size_mb} MB</span>
+              ${dimBadge ? `<span>•</span> ${dimBadge}` : ''}
+              ${retBadge ? `<span>•</span> ${retBadge}` : ''}
+              <span>•</span>
+              <span>${item.mtime}</span>
+            </div>
           </div>
           <div class="flex gap-1 flex-shrink-0">
             <button type="button" onclick="selectCheckpointForEval('${item.path}')" class="badge-btn">Avaliar</button>
@@ -1032,12 +1123,27 @@
     function selectCheckpointForEval(path) {
       setMode('run');
       document.getElementById('cfg-load').value = path;
+      
+      const item = availableCheckpointsDetailed.find(c => c.path === path);
+      if (item && item.env_id) {
+        const envSel = document.getElementById('cfg-env');
+        if (Array.from(envSel.options).some(o => o.value === item.env_id)) {
+          envSel.value = item.env_id;
+          onEnvChange();
+        } else {
+          envSel.value = 'custom';
+          document.getElementById('cfg-custom-env').value = item.env_id;
+          onEnvChange();
+        }
+      }
       onLoadCheckpointChange();
     }
 
     function selectCheckpointForTransfer(path) {
       setMode('train');
       document.getElementById('cfg-transfer').value = path;
+      document.getElementById('cfg-freeze-trunk').checked = true;
+      onFreezeTrunkChange();
     }
 
     // Carregamento de Estado Inicial
@@ -1084,6 +1190,23 @@
         episodes: parseInt(document.getElementById('cfg-episodes').value) || 5,
         inference_mode: document.getElementById('cfg-inference-mode').value
       };
+
+      if (activeMode === 'run' && payload.load) {
+        const ckpt = availableCheckpointsDetailed.find(c => c.path === payload.load);
+        if (ckpt && ckpt.env_id && ckpt.env_id !== actualEnv) {
+          const proceed = confirm(
+            `⚠️ Incompatibilidade de Ambiente Detectada!\n\n` +
+            `O checkpoint '${ckpt.path}' pertence ao ambiente '${ckpt.env_id}', mas o ambiente selecionado é '${actualEnv}'.\n\n` +
+            `Deseja ajustar o ambiente para '${ckpt.env_id}' automaticamente para realizar a avaliação?`
+          );
+          if (proceed) {
+            syncEnvToCheckpoint(ckpt.env_id);
+            payload.env = ckpt.env_id;
+          } else {
+            return;
+          }
+        }
+      }
 
       try {
         const res = await fetch('/api/action', {
