@@ -1,6 +1,7 @@
 import http.server
 import json
 import socketserver
+import sys
 import threading
 import time
 from typing import Optional
@@ -263,6 +264,18 @@ class ThreadedTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     allow_reuse_address = True
     daemon_threads = True
 
+    def handle_error(self, request, client_address) -> None:
+        """Suprime tracebacks de desconexões abruptas normais de clientes HTTP/SSE."""
+        exc_type, _, _ = sys.exc_info()
+        if exc_type in (
+            ConnectionResetError,
+            BrokenPipeError,
+            ConnectionAbortedError,
+            TimeoutError,
+        ):
+            return
+        super().handle_error(request, client_address)
+
 
 class TelemetryServer:
     """Servidor web de telemetria em tempo real com SSE (Server-Sent Events) sem dependências externas."""
@@ -296,6 +309,13 @@ class TelemetryServer:
 
         class TelemetryHandler(http.server.BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
+
+            def handle(self) -> None:
+                """Trata a requisição capturando exceções normais de desconexão do cliente."""
+                try:
+                    super().handle()
+                except (ConnectionResetError, BrokenPipeError, ConnectionAbortedError, TimeoutError, OSError):
+                    pass
 
             def do_GET(self) -> None:
                 if self.path in ("/", "/index.html"):
