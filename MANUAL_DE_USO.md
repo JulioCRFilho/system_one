@@ -278,11 +278,18 @@ Carrega os pesos consolidados em [`s1_cartpole.pt`](file:///Users/juliocesarreis
 #### Opção A: Executar via Script Pronto
 ```bash
 .venv/bin/python examples/02_evaluate_cartpole.py
+
+# Com visualização gráfica em tempo real na tela (Pygame)
+.venv/bin/python examples/02_evaluate_cartpole.py --render
 ```
 
 #### Opção B: Executar via CLI
 ```bash
+# Execução padrão (terminal)
 .venv/bin/python -m system1_engine.cli --mode run --env CartPole-v1 --load s1_cartpole.pt --episodes 5
+
+# Com visualização gráfica em tempo real na tela (Pygame)
+.venv/bin/python -m system1_engine.cli --mode run --env CartPole-v1 --load s1_cartpole.pt --episodes 5 --render
 ```
 
 #### Saída Esperada (Opção A - Script de Avaliação Detalhado)
@@ -823,13 +830,13 @@ Disponibiliza um servidor HTTP assíncrono nativo (`http.server` + `socketserver
 
 ### Task 13: Execução da Suíte de Testes Automatizada
 
-Executa a suíte de testes rigorosa com 32 testes unitários cobrindo contratos de dimensão, adaptadores dos 3 níveis (incluindo ViZDoom nativo real), gatilho de incerteza (Confidence Gating discreto e contínuo com proteção de underflow), subsistema de telemetria assíncrona O(1), servidor web SSE com endpoints REST, reset de wrappers e convergência matemática.
+Executa a suíte de testes rigorosa com 33 testes unitários cobrindo contratos de dimensão, adaptadores dos 3 níveis (incluindo ViZDoom nativo real e visualização render_mode='human'), gatilho de incerteza (Confidence Gating discreto e contínuo com proteção de underflow), subsistema de telemetria assíncrona O(1), servidor web SSE com endpoints REST, reset de wrappers e convergência matemática.
 
 ```bash
 .venv/bin/pytest tests/ -v
 ```
 
-#### Testes Cobertos (32/32 Aprovados):
+#### Testes Cobertos (33/33 Aprovados):
 1. `test_confidence_gating_discrete`: Valida cálculo de incerteza e gatilho em espaço discreto.
 2. `test_confidence_gating_continuous`: Valida incerteza e gatilho em espaço contínuo Box.
 3. `test_confidence_gating_continuous_low_sigma`: Valida ausência de underflow e incerteza estritamente positiva para $\sigma < 0.242$ ($H < 0$).
@@ -862,6 +869,7 @@ Executa a suíte de testes rigorosa com 32 testes unitários cobrindo contratos 
 30. `test_transfer_without_catastrophic_forgetting`: Congelamento estrito e imutabilidade dos pesos do tronco.
 31. `test_wrapper_reset_robustness`: Zeração e integridade dos buffers temporais do wrapper.
 32. `test_wrapper_delta_computation`: Validação dos cálculos de $\Delta s$, $a_{t-1}$ e $r_{t-1}$.
+33. `test_build_environment_render_mode`: Validação da instanciação de ambientes com render_mode='human' e controle headless.
 
 
 ---
@@ -1103,6 +1111,7 @@ O System 1 Engine inclui uma interface de linha de comando (CLI) completa e padr
 | `--fps` | `float` | `50.0` (web) / `0.0` | Cadência forçada em FPS no modo `run`. O padrão é 50 FPS com `--web-panel` para acompanhamento humano visual. Use `--fps 0` para velocidade máxima nativa sem pausas. |
 | `--no-wait` | `flag` | `False` | Não aguarda confirmação com `Ctrl+C` no terminal ao término da avaliação com `--web-panel` (ideal para automação de testes). |
 | `--no-browser` | `flag` | `False` | Não dispara a abertura automática do navegador padrão ao iniciar o `--web-panel` (ideal para servidores remotos, SSH e CI/CD). |
+| `--render` | `flag` | `False` | Abre janela gráfica em tempo real exibindo a simulação do ambiente (`render_mode='human'` no Gymnasium / janela do ViZDoom). |
 
 ---
 
@@ -1149,6 +1158,12 @@ python -m system1_engine.cli --mode run --env CartPole-v1 --load s1_cartpole.pt 
 
 # Avaliação com painel web em velocidade nativa sem limitação de FPS
 python -m system1_engine.cli --mode run --env CartPole-v1 --load s1_cartpole.pt --web-panel --fps 0
+
+# Avaliação com janela gráfica em tempo real na tela (Pygame)
+python -m system1_engine.cli --mode run --env CartPole-v1 --load s1_cartpole.pt --render
+
+# Avaliação combinando janela gráfica na tela + painel web de métricas no navegador
+python -m system1_engine.cli --mode run --env CartPole-v1 --load s1_cartpole.pt --render --web-panel
 
 # Avaliação em ambiente remoto/servidor sem interface gráfica
 python -m system1_engine.cli --mode run --env CartPole-v1 --load s1_cartpole.pt --web-panel --no-browser --no-wait

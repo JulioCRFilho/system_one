@@ -264,3 +264,21 @@ def test_factory_make_game_env():
     # Erro com tipo inválido
     with pytest.raises(ValueError):
         make_game_env("invalid_adapter", {})
+
+
+def test_build_environment_render_mode():
+    """Valida a instanciação de ambientes com flag de renderização em tempo real."""
+    from system1_engine.cli import build_environment
+
+    # Headless padrão
+    env_headless = build_environment("CartPole-v1", render=False)
+    assert env_headless.env.render_mode is None
+    env_headless.close()
+
+    # Com renderização ativa (render_mode='human')
+    env_render = build_environment("CartPole-v1", render=True)
+    assert env_render.env.render_mode == "human"
+    obs, _ = env_render.reset()
+    assert obs["obs"].shape == (4,)
+    env_render.close()
+

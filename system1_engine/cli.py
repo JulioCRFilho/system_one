@@ -14,18 +14,30 @@ from system1_engine.training.ppo import RecurrentPPOTrainer
 from system1_engine.transfer.manager import KnowledgeTransferManager
 
 
-def build_environment(env_id: str, scenario: Optional[str] = None) -> UniversalS1Wrapper:
+def build_environment(
+    env_id: str,
+    scenario: Optional[str] = None,
+    render: bool = False,
+) -> UniversalS1Wrapper:
     """Instancia o ambiente apropriado (Gymnasium padrão ou Adaptador Nativo ViZDoom)."""
     if env_id.lower() in ["vizdoom", "native"]:
         scenario_path = scenario or "basic.cfg"
-        return make_game_env("native", {"engine_type": "vizdoom", "scenario_path": scenario_path})
-    raw_env = gym.make(env_id)
+        return make_game_env(
+            "native",
+            {
+                "engine_type": "vizdoom",
+                "scenario_path": scenario_path,
+                "args": {"headless": not render},
+            },
+        )
+    render_mode = "human" if render else None
+    raw_env = gym.make(env_id, render_mode=render_mode)
     return UniversalS1Wrapper(raw_env)
 
 
 def train_mode(args: argparse.Namespace) -> None:
     print(f"=== Starting Training Mode on {args.env} ===")
-    env = build_environment(args.env, scenario=args.scenario)
+    env = build_environment(args.env, scenario=args.scenario, render=getattr(args, "render", False))
 
     agent = UniversalS1Agent(
         obs_space=env.env.observation_space,
@@ -119,11 +131,12 @@ def train_mode(args: argparse.Namespace) -> None:
     finally:
         if web_server:
             web_server.stop()
+        env.close()
 
 
 def run_mode(args: argparse.Namespace) -> None:
     print(f"=== Running Agent Evaluation on {args.env} ===")
-    env = build_environment(args.env, scenario=args.scenario)
+    env = build_environment(args.env, scenario=args.scenario, render=getattr(args, "render", False))
 
     agent = UniversalS1Agent(
         obs_space=env.env.observation_space,
@@ -152,7 +165,7 @@ def run_mode(args: argparse.Namespace) -> None:
 
     target_fps = args.fps
     if target_fps is None:
-        target_fps = 50.0 if args.web_panel else 0.0
+        target_fps = 50.0 if (args.web_panel or getattr(args, "render", False)) else 0.0
 
     dt_target = (1.0 / target_fps) if target_fps > 0 else 0.0
 
@@ -229,6 +242,7 @@ def run_mode(args: argparse.Namespace) -> None:
     finally:
         if web_server:
             web_server.stop()
+        env.close()
 
 
 def benchmark_mode(args: argparse.Namespace) -> None:
@@ -355,6 +369,12 @@ def main() -> None:
         action="store_true",
         default=False,
         help="Não abre o navegador automaticamente ao iniciar com --web-panel",
+    )
+    parser.add_argument(
+        "--render",
+        action="store_true",
+        default=False,
+        help="Habilita visualização gráfica do ambiente em tempo real na tela (render_mode='human')",
     )
 
     args = parser.parse_args()

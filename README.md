@@ -180,6 +180,12 @@ python -m system1_engine.cli --mode run --env CartPole-v1 --load s1_cartpole.pt 
 # With live terminal telemetry
 python -m system1_engine.cli --mode run --env CartPole-v1 --load s1_cartpole.pt --live-stats
 
+# With real-time graphic window visualization on screen (Pygame / ViZDoom window)
+python -m system1_engine.cli --mode run --env CartPole-v1 --load s1_cartpole.pt --render
+
+# With BOTH graphic simulation window and browser web dashboard
+python -m system1_engine.cli --mode run --env CartPole-v1 --load s1_cartpole.pt --render --web-panel
+
 # With real-time web dashboard (opens browser automatically, paces at 50 FPS & stays alive until Ctrl+C)
 python -m system1_engine.cli --mode run --env CartPole-v1 --load s1_cartpole.pt --web-panel --port 8050
 
@@ -213,9 +219,10 @@ python -m system1_engine.cli --mode run --env CartPole-v1 --load s1_cartpole.pt 
 | `--web-panel` | `flag` | `False` | Start real-time HTTP/SSE web telemetry server (`http://localhost:8050`). |
 | `--port` | `int` | `8050` | TCP port for web telemetry server. |
 | `--host` | `str` | `127.0.0.1` | Host address for web telemetry server. |
-| `--fps` | `float` | `50.0` (web) / `0.0` | Cadence in FPS for `run` mode. Defaults to 50 FPS with `--web-panel` for human visualization. Set `--fps 0` for uncapped speed. |
+| `--fps` | `float` | `50.0` (web/render) / `0.0` | Cadence in FPS for `run` mode. Defaults to 50 FPS with `--web-panel` or `--render` for human visualization. Set `--fps 0` for uncapped speed. |
 | `--no-wait` | `flag` | `False` | Do not wait for `Ctrl+C` after run completion with `--web-panel`. |
 | `--no-browser` | `flag` | `False` | Do not automatically open the default web browser when `--web-panel` starts. |
+| `--render` | `flag` | `False` | Open real-time simulation graphics window on screen (`render_mode='human'` in Gymnasium / ViZDoom window). |
 
 > [!TIP]
 > **Example Scripts vs. CLI Runner**: Use `examples/02_evaluate_cartpole.py` for comprehensive educational and diagnostic auditing (detailed episode runtimes, theoretical score ceilings, stability indicators, and sample standard deviations). Use `python -m system1_engine.cli --mode run` for production automation and pipeline scripting.
@@ -231,7 +238,7 @@ Run the full automated test suite:
 pytest tests/ -v
 ```
 
-**All 32 unit tests pass in ~24s**:
+**All 33 unit tests pass in ~21s**:
 1. `test_confidence_gating_discrete`: Uncertainty and gating in discrete space.
 2. `test_confidence_gating_continuous`: Uncertainty and gating in continuous Box space.
 3. `test_confidence_gating_continuous_low_sigma`: Numerical stability and strictly positive uncertainty for $\sigma < 0.242$ ($H < 0$).
@@ -264,6 +271,7 @@ pytest tests/ -v
 30. `test_transfer_without_catastrophic_forgetting`: Strict trunk freezing and parameter immutabilidade ($\Delta = 0.0000$).
 31. `test_wrapper_reset_robustness`: Temporal buffer flushing and cross-trajectory state isolation.
 32. `test_wrapper_delta_computation`: Causal computation of $\Delta s$, $a_{t-1}$, and $r_{t-1}$.
+33. `test_build_environment_render_mode`: Real-time visual render mode initialization across adapters.
 
 ---
 
