@@ -585,37 +585,112 @@ Throughput (Passos/seg)             | 130.1                | 135.7
 
 ---
 
-### Task 11: Execução da Suíte de Testes Automatizada
+### Task 11: Telemetria Assíncrona e Painel Operacional em Tempo Real (`LiveStatsTracker` & `S1LiveDashboard`)
 
-Executa a suíte de testes rigorosa com 22 testes unitários cobrindo contratos de dimensão, adaptadores dos 3 níveis (incluindo ViZDoom nativo real), gatilho de incerteza (Confidence Gating discreto e contínuo com proteção de underflow), reset de wrappers e convergência matemática.
+Demonstra o subsistema de observabilidade contínua do System 1 em alta frequência:
+- **Buffers Circulares (Ring Buffers)** em memória RAM com inserção em tempo constante $O(1)$.
+- **Overhead Mínimo Comprovado**: inserção por `record_inference()` em apenas **~0.10 µs** (96.9 ns), 20x mais rápido que o teto de 2.0 µs.
+- **Painel Terminal ao Vivo (Rich Live Dashboard)**: renderização simultânea das 3 fases operacionais:
+  - **Fase 1: Inferência & Ação**: Latência P50/P99 (µs), Confiança Média (%), Incerteza Média (%), Entropia Latente (nats).
+  - **Fase 2: Ambiente & Rollout**: Retorno Médio móvel (20 ep), Episódios Concluídos, Throughput Físico (passos/s).
+  - **Fase 3: Otimização PPO**: Policy Loss, Value Loss, Clip Fraction, Learning Rate, Normas de Gradientes por Bloco (`FrontEnd`, `Trunk`, `PolicyHead`).
+
+#### Opção A: Executar via Script Pronto
+```bash
+.venv/bin/python examples/11_live_telemetry_dashboard.py
+```
+
+#### Opção B: Treinamento com Streaming ao Vivo via CLI
+```bash
+.venv/bin/python -m system1_engine.cli --mode train --env CartPole-v1 --live-stats
+```
+
+#### Opção C: Execução / Avaliação com Streaming ao Vivo via CLI
+```bash
+# No CartPole
+.venv/bin/python -m system1_engine.cli --mode run --env CartPole-v1 --load s1_cartpole.pt --live-stats
+
+# No ViZDoom nativo
+.venv/bin/python -m system1_engine.cli --mode run --env vizdoom --scenario basic.cfg --live-stats
+```
+
+#### Saída Esperada
+```text
+==============================================================================
+📊 TASK 11: TELEMETRIA ASSÍNCRONA E PAINEL OPERACIONAL EM TEMPO REAL
+==============================================================================
+🔬 1. BENCHMARK DE OVERHEAD DO COLETOR (LiveStatsTracker):
+  • 10,000 inserções em ring buffer circular (deque O(1))
+  • Tempo por record_inference() : 0.0969 µs (96.9 ns)
+  • Limite Máximo Especificado   : < 2.0000 µs
+  ✅ [APROVADO] Overhead do coletor é 20.6x inferior ao teto de 2 µs!
+
+------------------------------------------------------------------------------
+🎮 2. LOOP DE INFERÊNCIA REFLEXIVA COM STREAMING AO VIVO:
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ ⚡ SYSTEM 1 ENGINE — PAINEL OPERACIONAL EM TEMPO REAL | Total Steps: 1,024 | │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Fase 1: Inferência (R─╮╭─ Fase 2: Ambiente & Rec─╮╭─ Fase 3: Otimização PPO─╮
+│ ┌──────────┬─────────┐ ││ ┌──────────┬──────────┐ ││ ┌──────────┬──────────┐ │
+│ │ Latência │   186.9 │ ││ │ Retorno  │   480.00 │ ││ │ Policy   │  +0.0494 │ │
+│ │ P50      │      µs │ ││ │ Média    │          │ ││ │ Loss     │          │ │
+│ │ Latência │   317.3 │ ││ │ (20 ep)  │          │ ││ │ Value    │   4.3205 │ │
+│ │ P99      │      µs │ ││ │ Episódi… │       48 │ ││ │ Loss     │          │ │
+│ │ Confian… │   60.3% │ ││ │ Concluí… │          │ ││ │ Clip     │    57.4% │ │
+│ │ Média    │         │ ││ │ Through… │   4155.6 │ ││ │ Fraction │          │ │
+│ │ Incerte… │   95.7% │ ││ │ Físico   │  steps/s │ ││ │ Learning │ 7.00e-04 │ │
+│ │ Média    │         │ ││ └──────────┴──────────┘ ││ │ Rate     │          │ │
+│ │ Entropia │   0.664 │ ││                         ││ │ Grad     │   0.4500 │ │
+│ │ Latente  │    nats │ ││                         ││ │ FrontEnd │          │ │
+│ └──────────┴─────────┘ ││                         ││ │ Grad     │   2.9482 │ │
+│                        ││                         ││ │ Trunk    │          │ │
+│                        ││                         ││ │ Grad     │   2.5266 │ │
+│                        ││                         ││ │ PolicyH… │          │ │
+│                        ││                         ││ └──────────┴──────────┘ │
+╰────────────────────────╯╰─────────────────────────╯╰─────────────────────────╯
+✅ [STATUS: APROVADO] Barramento de telemetria operacional com zero regressão!
+==============================================================================
+```
+
+---
+
+### Task 12: Execução da Suíte de Testes Automatizada
+
+Executa a suíte de testes rigorosa com 28 testes unitários cobrindo contratos de dimensão, adaptadores dos 3 níveis (incluindo ViZDoom nativo real), gatilho de incerteza (Confidence Gating discreto e contínuo com proteção de underflow), subsistema de telemetria assíncrona O(1), reset de wrappers e convergência matemática.
 
 ```bash
 .venv/bin/pytest tests/ -v
 ```
 
-#### Testes Cobertos (22/22 Aprovados):
+#### Testes Cobertos (28/28 Aprovados):
 1. `test_confidence_gating_discrete`: Valida cálculo de incerteza e gatilho em espaço discreto.
 2. `test_confidence_gating_continuous`: Valida incerteza e gatilho em espaço contínuo Box.
 3. `test_confidence_gating_continuous_low_sigma`: Valida ausência de underflow e incerteza estritamente positiva para $\sigma < 0.242$ ($H < 0$).
 4. `test_confidence_gating_continuous_extreme_small_sigma`: Valida estabilidade com $\sigma \approx 3 \times 10^{-7}$ ($\log\sigma = -15.0$).
 5. `test_confidence_gating_continuous_high_sigma`: Valida ativação do gatilho para alta dispersão ($\sigma = 2.0$).
 6. `test_act_fast_latency_with_confidence`: Garante que o cálculo de entropia não ultrapassa 0.8 ms.
-7. `test_window_capture_env_mock_and_agent_pipeline`: Valida Nível 1 com frame pacing, pré-processamento (C, 84, 84) e `act_fast()`.
-8. `test_memory_hook_env_vector_mode`: Valida Nível 2 com leitura vetorial de RAM, offsets de score e término por HP.
-9. `test_memory_hook_env_hybrid_mode`: Valida Nível 2 em modo híbrido (pixels visuais + controle de RAM).
-10. `test_native_engine_env_lock_step_and_speed`: Valida Nível 3 com lock-step de alta velocidade (> 5.000 FPS).
-11. `test_native_engine_vizdoom_real`: Valida conexão com binário nativo ViZDoom real em lock-step.
-12. `test_factory_make_game_env`: Valida fábrica `make_game_env` para os 3 adaptadores e validação de erros.
-13. `test_cartpole_convergence`: Garante que o treino PPO atinge retorno $\ge 475.0$ em $< 40,000$ passos.
-14. `test_vector_frontend_dimensions`: Validação rígida do barramento de $337$ dimensões.
-15. `test_visual_frontend_dimensions`: Validação do IMPALA e barramento de $337$ dimensões.
-16. `test_system1_trunk_dimensions_and_hx`: Continuidade e transição do estado oculto da GRU.
-17. `test_parameter_counts_and_memory`: Teto de memória $< 35\text{ MB}$ e contagem de parâmetros.
-18. `test_act_fast_latency_budget`: Limite de $0.8\text{ ms}$ em inferência CPU discreta.
-19. `test_act_fast_continuous_action`: Limite de $0.8\text{ ms}$ em inferência CPU contínua.
-20. `test_transfer_without_catastrophic_forgetting`: Congelamento estrito e imutabilidade dos pesos do tronco.
-21. `test_wrapper_reset_robustness`: Zeração e integridade dos buffers temporais do wrapper.
-22. `test_wrapper_delta_computation`: Validação dos cálculos de $\Delta s$, $a_{t-1}$ e $r_{t-1}$.
+7. `test_livestats_tracker_initialization_and_ring_buffers`: Garante buffers circulares de tamanho fixo com tempo $O(1)$.
+8. `test_livestats_tracker_record_inference_overhead`: Valida overhead $< 2.0\text{ µs}$ por registro de inferência.
+9. `test_livestats_tracker_env_step_and_fps`: Valida transição de episódios, acumulação de retorno e medição de FPS.
+10. `test_livestats_tracker_training_epoch_and_snapshot`: Valida agregação estatística com percentis P50/P99 e normas por bloco.
+11. `test_s1_live_dashboard_generate_view_and_render`: Valida árvore de layout Rich com as 3 fases integradas.
+12. `test_trainer_integration_with_telemetry`: Valida preenchimento automático de telemetria pelo `RecurrentPPOTrainer`.
+13. `test_window_capture_env_mock_and_agent_pipeline`: Valida Nível 1 com frame pacing, pré-processamento (C, 84, 84) e `act_fast()`.
+14. `test_memory_hook_env_vector_mode`: Valida Nível 2 com leitura vetorial de RAM, offsets de score e término por HP.
+15. `test_memory_hook_env_hybrid_mode`: Valida Nível 2 em modo híbrido (pixels visuais + controle de RAM).
+16. `test_native_engine_env_lock_step_and_speed`: Valida Nível 3 com lock-step de alta velocidade (> 5.000 FPS).
+17. `test_native_engine_vizdoom_real`: Valida conexão com binário nativo ViZDoom real em lock-step.
+18. `test_factory_make_game_env`: Valida fábrica `make_game_env` para os 3 adaptadores e validação de erros.
+19. `test_cartpole_convergence`: Garante que o treino PPO atinge retorno $\ge 475.0$ em $< 40,000$ passos.
+20. `test_vector_frontend_dimensions`: Validação rígida do barramento de $337$ dimensões.
+21. `test_visual_frontend_dimensions`: Validação do IMPALA e barramento de $337$ dimensões.
+22. `test_system1_trunk_dimensions_and_hx`: Continuidade e transição do estado oculto da GRU.
+23. `test_parameter_counts_and_memory`: Teto de memória $< 35\text{ MB}$ e contagem de parâmetros.
+24. `test_act_fast_latency_budget`: Limite de $0.8\text{ ms}$ em inferência CPU discreta.
+25. `test_act_fast_continuous_action`: Limite de $0.8\text{ ms}$ em inferência CPU contínua.
+26. `test_transfer_without_catastrophic_forgetting`: Congelamento estrito e imutabilidade dos pesos do tronco.
+27. `test_wrapper_reset_robustness`: Zeração e integridade dos buffers temporais do wrapper.
+28. `test_wrapper_delta_computation`: Validação dos cálculos de $\Delta s$, $a_{t-1}$ e $r_{t-1}$.
 
 
 ---

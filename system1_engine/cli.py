@@ -1,21 +1,31 @@
-from typing import Optional
 import argparse
 import sys
 import time
+from typing import Optional
 import gymnasium as gym
 import numpy as np
 import torch
 
 from system1_engine.core.agent import UniversalS1Agent
+from system1_engine.env.adapters import make_game_env
 from system1_engine.env.wrapper import UniversalS1Wrapper
+from system1_engine.telemetry import LiveStatsTracker, S1LiveDashboard
 from system1_engine.training.ppo import RecurrentPPOTrainer
 from system1_engine.transfer.manager import KnowledgeTransferManager
 
 
+def build_environment(env_id: str, scenario: Optional[str] = None) -> UniversalS1Wrapper:
+    """Instancia o ambiente apropriado (Gymnasium padrão ou Adaptador Nativo ViZDoom)."""
+    if env_id.lower() in ["vizdoom", "native"]:
+        scenario_path = scenario or "basic.cfg"
+        return make_game_env("native", {"engine_type": "vizdoom", "scenario_path": scenario_path})
+    raw_env = gym.make(env_id)
+    return UniversalS1Wrapper(raw_env)
+
+
 def train_mode(args: argparse.Namespace) -> None:
     print(f"=== Starting Training Mode on {args.env} ===")
-    raw_env = gym.make(args.env)
-    env = UniversalS1Wrapper(raw_env)
+    env = build_environment(args.env, scenario=args.scenario)
 
     agent = UniversalS1Agent(
         obs_space=env.env.observation_space,
@@ -31,6 +41,9 @@ def train_mode(args: argparse.Namespace) -> None:
         )
         print(f"Loaded {len(loaded)} trunk parameters. Trunk frozen: {args.freeze_trunk}")
 
+    tracker = LiveStatsTracker() if args.live_stats else None
+    dashboard = S1LiveDashboard(tracker) if tracker else None
+
     trainer = RecurrentPPOTrainer(
         agent=agent,
         env=env,
@@ -38,13 +51,28 @@ def train_mode(args: argparse.Namespace) -> None:
         rollout_steps=args.rollout_steps,
         chunk_length=args.chunk_length,
         chunk_batch_size=args.chunk_batch_size,
+        tracker=tracker,
     )
 
-    final_return = trainer.train(
-        max_steps=args.steps,
-        target_return=args.target_return,
-        verbose=True,
-    )
+    def train_callback(steps: int, mean_ret: float) -> None:
+        if dashboard:
+            dashboard.update()
+
+    if dashboard:
+        with dashboard:
+            final_return = trainer.train(
+                max_steps=args.steps,
+                target_return=args.target_return,
+                callback=train_callback,
+                verbose=False,
+            )
+        dashboard.render_once()
+    else:
+        final_return = trainer.train(
+            max_steps=args.steps,
+            target_return=args.target_return,
+            verbose=True,
+        )
 
     if args.save:
         KnowledgeTransferManager.save_checkpoint(
@@ -61,8 +89,7 @@ def train_mode(args: argparse.Namespace) -> None:
 
 def run_mode(args: argparse.Namespace) -> None:
     print(f"=== Running Agent Evaluation on {args.env} ===")
-    raw_env = gym.make(args.env)
-    env = UniversalS1Wrapper(raw_env)
+    env = build_environment(args.env, scenario=args.scenario)
 
     agent = UniversalS1Agent(
         obs_space=env.env.observation_space,
@@ -76,21 +103,53 @@ def run_mode(args: argparse.Namespace) -> None:
         print(f"Loaded weights from {args.load}")
 
     agent.eval()
-    for ep in range(args.episodes):
-        obs_dict, _ = env.reset()
-        agent.reset_memory()
-        ep_reward = 0.0
-        steps = 0
-        done = False
+    tracker = LiveStatsTracker() if args.live_stats else None
+    dashboard = S1LiveDashboard(tracker) if tracker else None
 
-        while not done:
-            action = agent.act_fast(obs_dict)
-            obs_dict, reward, terminated, truncated, _ = env.step(action)
-            ep_reward += reward
-            steps += 1
-            done = terminated or truncated
+    def execute_eval_loop() -> None:
+        for ep in range(args.episodes):
+            obs_dict, _ = env.reset()
+            agent.reset_memory()
+            ep_reward = 0.0
+            steps = 0
+            done = False
 
-        print(f"Episode {ep + 1}/{args.episodes} | Return: {ep_reward:.1f} | Steps: {steps}")
+            while not done:
+                if tracker is not None:
+                    t0 = time.perf_counter_ns()
+                    decision = agent.act_with_confidence(obs_dict)
+                    lat_us = (time.perf_counter_ns() - t0) / 1000.0
+
+                    tracker.record_inference(
+                        latency_us=lat_us,
+                        uncertainty=decision.uncertainty,
+                        confidence=decision.confidence,
+                        entropy=decision.entropy,
+                    )
+                    action = decision.action
+                else:
+                    action = agent.act_fast(obs_dict)
+
+                obs_dict, reward, terminated, truncated, _ = env.step(action)
+                done = terminated or truncated
+
+                if tracker is not None:
+                    tracker.record_env_step(reward=reward, done=done)
+                    if dashboard:
+                        dashboard.update()
+
+                ep_reward += reward
+                steps += 1
+
+            if not args.live_stats:
+                print(f"Episode {ep + 1}/{args.episodes} | Return: {ep_reward:.1f} | Steps: {steps}")
+
+    if dashboard:
+        with dashboard:
+            execute_eval_loop()
+        dashboard.render_once()
+    else:
+        execute_eval_loop()
 
 
 def benchmark_mode(args: argparse.Namespace) -> None:
@@ -147,7 +206,8 @@ def main() -> None:
         default="benchmark",
         help="Operating mode: train, run, or benchmark",
     )
-    parser.add_argument("--env", type=str, default="CartPole-v1", help="Gymnasium environment ID")
+    parser.add_argument("--env", type=str, default="CartPole-v1", help="Gymnasium environment ID or 'vizdoom'")
+    parser.add_argument("--scenario", type=str, default=None, help="Scenario file for vizdoom/native environment")
     parser.add_argument("--steps", type=int, default=40000, help="Training steps or benchmark steps")
     parser.add_argument("--save", type=str, default="s1_cartpole.pt", help="Path to save checkpoint")
     parser.add_argument("--load", type=str, default=None, help="Path to load checkpoint for run mode")
@@ -174,6 +234,12 @@ def main() -> None:
     parser.add_argument("--rollout-steps", type=int, default=1024, help="Rollout steps per PPO iteration")
     parser.add_argument("--chunk-length", type=int, default=16, help="Chunk sequence length for BPTT")
     parser.add_argument("--chunk-batch-size", type=int, default=16, help="Chunk batch size")
+    parser.add_argument(
+        "--live-stats",
+        action="store_true",
+        default=False,
+        help="Enable real-time Rich live telemetry dashboard",
+    )
 
     args = parser.parse_args()
 

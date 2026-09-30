@@ -1,4 +1,5 @@
 from collections import deque
+import time
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import gymnasium as gym
 import numpy as np
@@ -8,6 +9,7 @@ import torch.optim as optim
 
 from system1_engine.core.agent import UniversalS1Agent
 from system1_engine.env.wrapper import UniversalS1Wrapper
+from system1_engine.telemetry.tracker import LiveStatsTracker
 from system1_engine.training.buffer import RecurrentRolloutBuffer
 
 
@@ -30,6 +32,7 @@ class RecurrentPPOTrainer:
         chunk_length: int = 16,
         chunk_batch_size: int = 16,
         device: Union[str, torch.device] = "cpu",
+        tracker: Optional[LiveStatsTracker] = None,
     ) -> None:
         self.agent = agent.to(device)
         self.env = env
@@ -45,6 +48,7 @@ class RecurrentPPOTrainer:
         self.chunk_length = chunk_length
         self.chunk_batch_size = chunk_batch_size
         self.device = torch.device(device)
+        self.tracker = tracker
 
         # Optimize only parameters that require grad (respects frozen trunk)
         trainable_params = [p for p in self.agent.parameters() if p.requires_grad]
@@ -120,19 +124,49 @@ class RecurrentPPOTrainer:
                     )
                     input_dict["delta_obs"] = delta_t
 
-                # Step agent
-                action, log_prob, value, next_hx = self.agent.get_action(
-                    input_dict, hx=current_hx, deterministic=False
-                )
-
-                # Environment step
+                # Step agent with latency tracking
+                t0 = time.perf_counter_ns()
+                dist, value, next_hx = self.agent.forward(input_dict, hx=current_hx, dones=None)
                 if self.agent.is_discrete:
+                    action = dist.sample()
+                    log_prob = dist.log_prob(action)
                     env_action = int(action.item())
                 else:
+                    action = dist.sample()
+                    log_prob = dist.log_prob(action).sum(dim=-1)
                     env_action = action.squeeze(0).squeeze(0).cpu().numpy()
+                lat_us = (time.perf_counter_ns() - t0) / 1000.0
 
+                if self.tracker is not None:
+                    if self.agent.is_discrete:
+                        probs = dist.probs.squeeze(0).squeeze(0)
+                        n_acts = probs.shape[-1]
+                        top_probs, _ = torch.topk(probs, k=min(2, n_acts))
+                        conf = float(top_probs[0].item())
+                        ent = float(-torch.sum(probs * torch.log(probs + 1e-8)).item())
+                        max_ent = float(np.log(n_acts)) if n_acts > 1 else 1.0
+                        unc = float(np.clip(ent / max_ent, 0.0, 1.0))
+                    else:
+                        std = dist.scale.squeeze(0).squeeze(0).cpu().numpy()
+                        std = np.clip(std, a_min=1e-6, a_max=100.0)
+                        ent = float(0.5 * np.sum(1.0 + np.log(2.0 * np.pi * (std ** 2))))
+                        var = float(np.mean(std ** 2))
+                        unc = float(np.clip(2.0 / (1.0 + np.exp(-var / 0.5)) - 1.0, 0.0, 1.0))
+                        conf = float(np.clip(1.0 - unc, 0.0, 1.0))
+
+                    self.tracker.record_inference(
+                        latency_us=lat_us,
+                        uncertainty=unc,
+                        confidence=conf,
+                        entropy=ent,
+                    )
+
+                # Environment step
                 next_obs_dict, reward, terminated, truncated, _ = self.env.step(env_action)
                 done = terminated or truncated
+
+                if self.tracker is not None:
+                    self.tracker.record_env_step(reward=reward, done=done)
 
                 self.curr_ep_return += reward
                 self.total_steps += 1
@@ -268,8 +302,31 @@ class RecurrentPPOTrainer:
 
                 self.optimizer.zero_grad()
                 loss.backward()
+
+                # Telemetry: calculate per-block gradient norms
+                fe_grads = [p.grad for p in self.agent.front_end.parameters() if p.grad is not None]
+                trunk_grads = [p.grad for p in self.agent.trunk.parameters() if p.grad is not None]
+                head_grads = [p.grad for p in self.agent.policy_head.parameters() if p.grad is not None]
+
+                grad_norms = {
+                    "FrontEnd": float(torch.norm(torch.stack([torch.norm(g) for g in fe_grads])).item()) if fe_grads else 0.0,
+                    "Trunk": float(torch.norm(torch.stack([torch.norm(g) for g in trunk_grads])).item()) if trunk_grads else 0.0,
+                    "PolicyHead": float(torch.norm(torch.stack([torch.norm(g) for g in head_grads])).item()) if head_grads else 0.0,
+                }
+
                 nn.utils.clip_grad_norm_(self.agent.parameters(), self.max_grad_norm)
                 self.optimizer.step()
+
+                clip_frac = float(((ratio - 1.0).abs() > self.clip_range).float().mean().item())
+                if self.tracker is not None:
+                    current_lr = float(self.optimizer.param_groups[0]["lr"])
+                    self.tracker.record_training_epoch(
+                        policy_loss=policy_loss.item(),
+                        value_loss=val_loss.item(),
+                        clip_fraction=clip_frac,
+                        grad_norms=grad_norms,
+                        lr=current_lr,
+                    )
 
                 total_policy_loss += policy_loss.item()
                 total_val_loss += val_loss.item()
