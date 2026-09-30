@@ -30,7 +30,10 @@ Unlike deliberative "System 2" frameworks (LLMs with Chain-of-Thought, Monte Car
    - `LiveStatsTracker`: RAM-based circular ring buffers ($O(1)$ deque) with **~96 ns** insertion overhead (20x faster than the 2 µs ceiling).
    - **Rich Terminal Dashboard (`S1LiveDashboard`)**: Live 3-phase multi-panel operational view in the terminal.
    - **Web Streaming Dashboard (`TelemetryServer`)**: Pure Python standard library HTTP/SSE streaming server serving a dark, responsive dashboard on `http://localhost:8050` with Chart.js sliding charts.
-7. **Pure Implementation**:
+7. **Real-Time Environment Visualization & Pacing (`--render`)**:
+   - Interactive on-screen simulation rendering via Pygame (`render_mode='human'`) for standard environments (CartPole, Acrobot, Pendulum) and native ViZDoom window rendering.
+   - Paced automatically at 50 FPS for smooth human inspection, with graceful socket and window cleanup.
+8. **Pure Implementation**:
    - Zero high-level RL libraries (no Stable-Baselines3, no Ray/RLlib, no TRL). 100% pure PyTorch 2.2+, Gymnasium, and NumPy.
 
 ---
@@ -113,7 +116,7 @@ system_one/
 │   ├── 10_vizdoom_visual_transfer.py # Task 10: Visual transfer test on ViZDoom
 │   ├── 11_live_telemetry_dashboard.py # Task 11: Real-time telemetry & Rich dashboard
 │   └── 12_web_telemetry_streaming.py  # Task 12: Web telemetry streaming (SSE + Chart.js)
-├── tests/                          # Automated test suite (32 unit tests)
+├── tests/                          # Automated test suite (33 unit tests)
 │   ├── test_dimensions.py          # Tensor contracts and ℝ^337 bus validation
 │   ├── test_wrapper.py             # Buffer resets and delta computation
 │   ├── test_latency.py             # Sub-millisecond CPU latency budget

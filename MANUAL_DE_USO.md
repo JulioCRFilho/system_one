@@ -58,7 +58,7 @@ Diferente de sistemas deliberativos (**System 2**, como LLMs com Chain-of-Though
 | **Consumo de RAM** | < 15 MB | < 25 MB | $< 35\text{ MB}$ | ✅ Conforme |
 | **Latência CPU (`act_fast`)** | **0.150 ms** (150 µs) | **1.17 ms** | $\le 0.8\text{ ms}$ (vetor) / $\le 5.0\text{ ms}$ (visão) | ✅ Conforme |
 | **Overhead Confidence Gating** | **+1.3 µs** (0.0013 ms) | **+1.5 µs** | $\le 0.05\text{ ms}$ | ✅ Conforme |
-| **Testes Unitários** | 32/32 Aprovados | 32/32 Aprovados | 100% Cobertura | ✅ Conforme |
+| **Testes Unitários** | 33/33 Aprovados | 33/33 Aprovados | 100% Cobertura | ✅ Conforme |
 | **Convergência CartPole** | 491.90 / 500.0 | — | $\ge 475.0$ | ✅ Conforme |
 | **Ambientes Suportados** | Window + Memory + ViZDoom Real | Lock-Step Headless | 100% Compatível com UniversalS1Wrapper | ✅ Conforme |
 
@@ -165,7 +165,7 @@ system_one/
 │   ├── 10_vizdoom_visual_transfer.py # Task 10: Teste de fogo visual no ViZDoom
 │   ├── 11_live_telemetry_dashboard.py # Task 11: Telemetria assíncrona e painel Rich
 │   └── 12_web_telemetry_streaming.py  # Task 12: Servidor web SSE e gráficos Chart.js
-├── tests/                          # Suíte de testes rigorosa com 32 testes unitários
+├── tests/                          # Suíte de testes rigorosa com 33 testes unitários
 │   ├── test_dimensions.py          # Verificação dimensional do barramento ℝ^337
 │   ├── test_wrapper.py             # Zeração temporal e integridade de deltas
 │   ├── test_latency.py             # Orçamento rígido de latência CPU (<= 0.8 ms)
