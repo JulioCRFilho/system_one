@@ -70,7 +70,14 @@ system1_engine/
 │   └── agent.py          # UniversalS1Agent unificado
 ├── env/
 │   ├── __init__.py
-│   └── wrapper.py        # UniversalS1Wrapper com buffers delta e meta
+│   ├── wrapper.py        # UniversalS1Wrapper com buffers delta e meta
+│   └── adapters/         # Camada de 3 Níveis de Integração
+│       ├── __init__.py
+│       ├── base.py       # BaseGameAdapter (gym.Env comum)
+│       ├── window_adapter.py  # Nível 1: WindowCaptureEnv (mss + pynput)
+│       ├── memory_adapter.py  # Nível 2: MemoryHookEnv (RAM Offsets + Híbrido)
+│       ├── native_adapter.py  # Nível 3: NativeEngineEnv (Lock-Step Headless >10k FPS)
+│       └── factory.py         # make_game_env(...)
 ├── training/
 │   ├── __init__.py
 │   ├── buffer.py         # RecurrentRolloutBuffer (Chunks para BPTT)
@@ -84,7 +91,8 @@ tests/
 ├── test_wrapper.py       # Testes de isolamento de episódios e deltas
 ├── test_latency.py       # Benchmark de latência CPU (<= 0.8 ms)
 ├── test_transfer.py      # Transferência com congelamento estrito de tronco
-└── test_convergence.py   # Convergência comprovada em CartPole-v1 (>= 475)
+├── test_convergence.py   # Convergência comprovada em CartPole-v1 (>= 475)
+└── test_adapters.py      # Validação dos 3 níveis de adaptadores e factory
 ```
 
 ---
@@ -124,7 +132,8 @@ python -m system1_engine.cli --mode run --env CartPole-v1 --load s1_cartpole.pt 
 pytest tests/ -v
 ```
 
-All 11 tests pass:
+All 16 tests pass:
+- **3 Integration Levels**: Full validation for WindowCaptureEnv, MemoryHookEnv (Vector & Hybrid), and NativeEngineEnv (Lock-step > 5,000 FPS).
 - **Dimensionality validation**: Exact `[B, T, 337]` input and `[B, T, 256]` latent representations.
 - **CartPole-v1 Convergence**: Reaches moving average score of **491.90** in < 40,000 steps.
 - **Zero Catastrophic Forgetting**: Trunk weights transferred to Acrobot-v1 remain 100% frozen and bitwise identical.

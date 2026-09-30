@@ -1,19 +1,16 @@
-from system1_engine.env.adapters import (
-    BaseGameAdapter,
+from system1_engine.env.adapters.base import BaseGameAdapter
+from system1_engine.env.adapters.factory import make_game_env
+from system1_engine.env.adapters.memory_adapter import (
     BufferMemoryBackend,
     MemoryField,
     MemoryHookEnv,
     MemoryReaderBackend,
-    NativeEngineEnv,
     ProcessMemoryBackend,
-    WindowCaptureEnv,
-    make_game_env,
 )
-from system1_engine.env.wrapper import S1Observation, UniversalS1Wrapper
+from system1_engine.env.adapters.native_adapter import NativeEngineEnv
+from system1_engine.env.adapters.window_adapter import WindowCaptureEnv
 
 __all__ = [
-    "UniversalS1Wrapper",
-    "S1Observation",
     "BaseGameAdapter",
     "WindowCaptureEnv",
     "MemoryHookEnv",

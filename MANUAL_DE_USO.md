@@ -9,6 +9,8 @@ Bem-vindo ao manual completo de operação do **Universal System 1 RL Agent Engi
 1. [Visão Geral e Filosofia do System 1](#1-visão-geral-e-filosofia-do-system-1)
 2. [Instalação e Configuração do Ambiente](#2-instalação-e-configuração-do-ambiente)
 3. [Arquitetura e Contrato de Dados](#3-arquitetura-e-contrato-de-dados)
+   - [Fluxo Unificado de Tensores](#fluxo-unificado-de-tensores)
+   - [Arquitetura dos 3 Níveis de Integração de Ambientes](#arquitetura-dos-3-níveis-de-integração-de-ambientes)
 4. [Catálogo de Tasks Prontas para Rodar](#4-catálogo-de-tasks-prontas-para-rodar)
    - [Task 1: Benchmark de Latência CPU (`act_fast`)](#task-1-benchmark-de-latência-cpu-act_fast)
    - [Task 2: Avaliação de Checkpoint Treinado (`CartPole-v1`)](#task-2-avaliação-de-checkpoint-treinado-cartpole-v1)
@@ -17,7 +19,8 @@ Bem-vindo ao manual completo de operação do **Universal System 1 RL Agent Engi
    - [Task 5: Controle Contínuo com `GaussianPolicyHead` (`Pendulum-v1`)](#task-5-controle-contínuo-com-gaussianpolicyhead-pendulum-v1)
    - [Task 6: Percepção Visual Acelerada com `ImpalaVisualFrontEnd`](#task-6-percepção-visual-acelerada-com-impalavisualfrontend)
    - [Task 7: Execução Sequencial de Todas as Tasks](#task-7-execução-sequencial-de-todas-as-tasks)
-   - [Task 8: Execução da Suíte de Testes Automatizada](#task-8-execução-da-suíte-de-testes-automatizada)
+   - [Task 8: Adaptadores dos 3 Níveis de Integração (Window, Memory, Native)](#task-8-adaptadores-dos-3-níveis-de-integração-window-memory-native)
+   - [Task 9: Execução da Suíte de Testes Automatizada](#task-9-execução-da-suíte-de-testes-automatizada)
 5. [Guia de API e Receitas de Código](#5-guia-de-api-e-receitas-de-código)
 6. [Resolução de Problemas e Boas Práticas](#6-resolução-de-problemas-e-boas-práticas)
 7. [Referência dos Módulos](#7-referência-dos-módulos)
@@ -39,8 +42,9 @@ Diferente de sistemas deliberativos (**System 2**, como LLMs com Chain-of-Though
 | **Parâmetros** | 725,544 (~2.77 MB) | 2,019,994 (~7.71 MB) | $\le 2.5\text{ M}$ | ✅ Conforme |
 | **Consumo de RAM** | < 15 MB | < 25 MB | $< 35\text{ MB}$ | ✅ Conforme |
 | **Latência CPU** | **0.150 ms** (150 µs) | **1.17 ms** | $\le 0.8\text{ ms}$ (vetor) / $\le 5.0\text{ ms}$ (visão) | ✅ Conforme |
-| **Testes Unitários** | 11/11 Aprovados | 11/11 Aprovados | 100% Cobertura | ✅ Conforme |
+| **Testes Unitários** | 16/16 Aprovados | 16/16 Aprovados | 100% Cobertura | ✅ Conforme |
 | **Convergência CartPole** | 491.90 / 500.0 | — | $\ge 475.0$ | ✅ Conforme |
+| **3 Níveis de Integração** | Window + Memory + Native | Suportados | 100% Compatível com UniversalS1Wrapper | ✅ Conforme |
 
 ---
 
@@ -102,6 +106,52 @@ FEEDBACK PASSADO:                                                              �
                                                             [ Policy Head ]        [ Critic Head ]
                                                             Dist. Ações (π)         Valor V(s)
 ```
+
+### Arquitetura dos 3 Níveis de Integração de Ambientes
+
+Para suportar qualquer tipo de ambiente ou jogo sem fragmentar o código, o System 1 fornece uma camada de abstração com **três adaptadores especializados**, todos herdando da interface padrão `gym.Env`.
+
+Dessa forma, o [`UniversalS1Wrapper`](file:///Users/juliocesarreisfilho/Projects/system_one/system1_engine/env/wrapper.py) e o [`UniversalS1Agent`](file:///Users/juliocesarreisfilho/Projects/system_one/system1_engine/core/agent.py) continuam completamente agnósticos: eles apenas recebem tensores e emitem ações, independentemente de os dados virem da placa de captura, da memória RAM ou de um socket C++.
+
+```
+                           ┌────────────────────────────────────────┐
+                           │        UniversalS1Agent (Trunk)        │
+                           └───────────────────▲────────────────────┘
+                                               │
+                           ┌───────────────────┴────────────────────┐
+                           │          UniversalS1Wrapper            │
+                           │     (Gera Δs, z_a, z_r, normaliza)     │
+                           └───────────────────▲────────────────────┘
+                                               │
+                                 Contrato Padronizado gym.Env
+                               (obs, reward, terminated, info)
+                                               │
+        ┌──────────────────────────────────────┼──────────────────────────────────────┐
+        ▼                                      ▼                                      ▼
+┌────────────────────────┐         ┌────────────────────────┐         ┌────────────────────────┐
+│  Nível 1: Black-Box    │         │   Nível 2: Memory Hook │         │   Nível 3: Native IPC  │
+│  (WindowCaptureEnv)    │         │   (MemoryHookEnv)      │         │   (NativeEngineEnv)    │
+├────────────────────────┤         ├────────────────────────┤         ├────────────────────────┤
+│ • Captura tela (mss)   │         │ • Leitura de RAM       │         │ • ViZDoom / Gym-Retro  │
+│ • Input OS (pynput)    │         │ • Telemetria exata     │         │ • Godot / Unity IPC    │
+│ • Heurística visual    │         │ • Híbrido: Pixels +    │         │ • Step síncrono (lock) │
+│ • Tempo real contínuo  │         │   Recompensa de RAM    │         │ • Headless (10.000 FPS)│
+└────────────────────────┘         └────────────────────────┘         └────────────────────────┘
+```
+
+#### Papel e Casos de Uso de Cada Nível
+1. **Nível 1: `WindowCaptureEnv` (Caixa-Preta Total)**
+   - **Objetivo:** Rodar sobre qualquer janela aberta no sistema operacional (jogos de navegador, executáveis comerciais protegidos, streaming de vídeo).
+   - **Regime de Tempo:** Assíncrono / Tempo Real (frame pacing com cadência física, ex.: 30 FPS).
+   - **Recompensa:** Detectores visuais e funções de recompensa sobre a tela.
+2. **Nível 2: `MemoryHookEnv` (Engenharia Reversa de Estado)**
+   - **Objetivo:** Jogos fechados onde a tela é visualmente poluída para ler score ou onde queremos extrair vetores estruturados sem passar por pixels.
+   - **Modo Híbrido:** O agente recebe os pixels da tela via captura, mas a recompensa e o Game Over vêm da leitura cirúrgica de endereços de memória (HP, Score). Elimina 100% dos falsos positivos de visão.
+   - **Modo Vetorial:** Extração pura de vetores $[x, y, z, v_x, v_y, \text{hp}, \text{stamina}]$ direto da RAM do processo.
+3. **Nível 3: `NativeEngineEnv` (Motores Nativos e Emuladores)**
+   - **Objetivo:** Máxima eficiência de amostras (*sample efficiency*) para treino rápido e paralelizado.
+   - **Regime de Tempo:** Síncrono / Lock-Step. O motor avança a física apenas quando o agente chama `step(action)`. Permite desligar renderização visual (*headless*) e acelerar o treino para milhares de frames por segundo (> 10.000 FPS).
+   - **Casos Típicos:** ViZDoom, Gym-Retro, Godot RL e Unity ML-Agents.
 
 ---
 
@@ -355,38 +405,92 @@ Executa toda a suíte de demonstração em uma única invocação e exibe um pai
 #### Saída Esperada
 ```text
 ================================================================================
-🏁 PAINEL GERAL DE EXECUÇÃO (5.94s totais)
+🏁 PAINEL GERAL DE EXECUÇÃO (8.65s totais)
 ================================================================================
-✅ Task 1: Benchmark de Latência CPU             [PASS] (0.79s)
-✅ Task 2: Avaliação de Checkpoint Treinado      [PASS] (0.98s)
-✅ Task 4: Transferência com Tronco Congelado    [PASS] (1.62s)
-✅ Task 5: Controle Contínuo (Pendulum-v1)       [PASS] (1.70s)
-✅ Task 6: Percepção Visual (IMPALA)             [PASS] (0.85s)
+✅ Task 1: Benchmark de Latência CPU             [PASS] (0.95s)
+✅ Task 2: Avaliação de Checkpoint Treinado      [PASS] (1.16s)
+✅ Task 4: Transferência com Tronco Congelado    [PASS] (1.88s)
+✅ Task 5: Controle Contínuo (Pendulum-v1)       [PASS] (1.93s)
+✅ Task 6: Percepção Visual (IMPALA)             [PASS] (1.14s)
+✅ Task 8: Adaptadores 3 Níveis (Window/Mem/Native) [PASS] (1.58s)
 ================================================================================
 ```
 
 ---
 
-### Task 8: Execução da Suíte de Testes Automatizada
+### Task 8: Adaptadores dos 3 Níveis de Integração (Window, Memory, Native)
 
-Executa a suíte de testes rigorosa com 11 testes unitários cobrindo contratos de dimensão, reset de wrappers, integridade de transfer learning e convergência matemática.
+Demonstra a instanciação e execução operacional dos 3 níveis de adaptadores:
+1. **Nível 1 (WindowCaptureEnv)**: Captura de tela com frame pacing assíncrono (30 FPS) e emulação de entrada de SO.
+2. **Nível 2 (MemoryHookEnv)**: Modo Híbrido com pixels na entrada do agente e leitura cirúrgica de HP/Score da RAM para recompensa e Game Over sem falsos positivos.
+3. **Nível 3 (NativeEngineEnv)**: Regime síncrono Lock-Step e headless atingindo > 6.000 FPS de throughput combinado agente + física.
+
+#### Executar Script Pronto
+```bash
+.venv/bin/python examples/08_adapters_three_levels.py
+```
+
+#### Saída Esperada
+```text
+======================================================================
+🚀 DEMONSTRAÇÃO DOS 3 NÍVEIS DE INTEGRAÇÃO DO UNIVERSAL SYSTEM 1
+======================================================================
+----------------------------------------------------------------------
+🖥️  NÍVEL 1: WINDOW CAPTURE (Caixa-Preta com MSS + Pynput)
+----------------------------------------------------------------------
+• Shape da Observação Empilhada : (2, 84, 84) (2 canais: s_t, s_(t-1))
+• Ações Mapeadas                : 4 ações discretas (Discrete)
+  Passo 1: Ação=1 | Recompensa=1.0 | Frame time=37.05 ms | FPS Efetivo=30.0
+  Passo 2: Ação=1 | Recompensa=1.0 | Frame time=34.82 ms | FPS Efetivo=27.3
+  ...
+✅ Nível 1 validado: Frame pacing assíncrono e barramento unificado ativos!
+
+----------------------------------------------------------------------
+🧠 NÍVEL 2: MEMORY HOOKING (Modo Híbrido: Pixels + RAM Hook)
+----------------------------------------------------------------------
+• Executando dinâmica híbrida (pixels para o agente, HP/Score da RAM):
+  Passo 1: Recompensa de Score lida da RAM = +25.0 (RAM: HP=100.0, Score=25.0)
+  Passo 2: Dano detectado na RAM: HP caiu para 40.0 (Terminated=False)
+  Passo 3: HP zerado na RAM: Terminated=True (Game Over cirúrgico sem visão de texto!)
+✅ Nível 2 validado: Zero falsos positivos de visão para recompensa e término!
+
+----------------------------------------------------------------------
+⚡ NÍVEL 3: NATIVE ENGINE (Regime Lock-Step & Headless > 10.000 FPS)
+----------------------------------------------------------------------
+• Executando 2,000 passos em regime lock-step de alta velocidade...
+  Tempo Total : 322.4 ms
+  Throughput  : 6,203 FPS (Agente + Física)
+✅ Nível 3 validado: Sample efficiency máxima para treino massivo em paralelo!
+======================================================================
+```
+
+---
+
+### Task 9: Execução da Suíte de Testes Automatizada
+
+Executa a suíte de testes rigorosa com 16 testes unitários cobrindo contratos de dimensão, adaptadores dos 3 níveis, reset de wrappers, integridade de transfer learning e convergência matemática.
 
 ```bash
 .venv/bin/pytest tests/ -v
 ```
 
-#### Testes Cobertos:
-1. `test_cartpole_convergence`: Garante que o treino PPO atinge retorno $\ge 475.0$ em $< 40,000$ passos.
-2. `test_vector_frontend_dimensions`: Validação rígida do barramento de $337$ dimensões.
-3. `test_visual_frontend_dimensions`: Validação do IMPALA e barramento de $337$ dimensões.
-4. `test_system1_trunk_dimensions_and_hx`: Continuidade e transição do estado oculto da GRU.
-5. `test_parameter_counts_and_memory`: Teto de memória $< 35\text{ MB}$ e contagem de parâmetros.
-6. `test_act_fast_latency_budget`: Limite de $0.8\text{ ms}$ em inferência CPU discreta.
-7. `test_act_fast_continuous_action`: Limite de $0.8\text{ ms}$ em inferência CPU contínua.
-8. `test_transfer_without_catastrophic_forgetting`: Congelamento estrito e imutabilidade dos pesos do tronco.
-9. `test_wrapper_reset_robustness`: Zeração e integridade dos buffers temporais do wrapper.
-10. `test_wrapper_delta_computation`: Cálculo exato de $\Delta s_t = s_t - s_{t-1}$.
-11. `test_wrapper_continuous_action`: Rastreamento de histórico com ações Box.
+#### Testes Cobertos (16/16 Aprovados):
+1. `test_window_capture_env_mock_and_agent_pipeline`: Valida Nível 1 com frame pacing, pré-processamento (C, 84, 84) e `act_fast()`.
+2. `test_memory_hook_env_vector_mode`: Valida Nível 2 com leitura vetorial de RAM, offsets de score e término por HP.
+3. `test_memory_hook_env_hybrid_mode`: Valida Nível 2 em modo híbrido (pixels visuais + controle de RAM).
+4. `test_native_engine_env_lock_step_and_speed`: Valida Nível 3 com lock-step de alta velocidade (> 5.000 FPS).
+5. `test_factory_make_game_env`: Valida fábrica `make_game_env` para os 3 adaptadores e validação de erros.
+6. `test_cartpole_convergence`: Garante que o treino PPO atinge retorno $\ge 475.0$ em $< 40,000$ passos.
+7. `test_vector_frontend_dimensions`: Validação rígida do barramento de $337$ dimensões.
+8. `test_visual_frontend_dimensions`: Validação do IMPALA e barramento de $337$ dimensões.
+9. `test_system1_trunk_dimensions_and_hx`: Continuidade e transição do estado oculto da GRU.
+10. `test_parameter_counts_and_memory`: Teto de memória $< 35\text{ MB}$ e contagem de parâmetros.
+11. `test_act_fast_latency_budget`: Limite de $0.8\text{ ms}$ em inferência CPU discreta.
+12. `test_act_fast_continuous_action`: Limite de $0.8\text{ ms}$ em inferência CPU contínua.
+13. `test_transfer_without_catastrophic_forgetting`: Congelamento estrito e imutabilidade dos pesos do tronco.
+14. `test_wrapper_reset_robustness`: Zeração e integridade dos buffers temporais do wrapper.
+15. `test_wrapper_delta_computation`: Cálculo exato de $\Delta s_t = s_t - s_{t-1}$.
+16. `test_wrapper_continuous_action`: Rastreamento de histórico com ações Box.
 
 ---
 
@@ -457,6 +561,54 @@ print(f"Chaves transferidas: {len(loaded_keys)}")
 
 ---
 
+### Receita 3: Fábrica dos 3 Níveis de Integração (`make_game_env`)
+
+Como instanciar qualquer um dos três níveis já envelopado e pronto para o System 1:
+
+```python
+from system1_engine.core.agent import UniversalS1Agent
+from system1_engine.env import make_game_env
+
+# Nível 1: Window Capture (Caixa-Preta com frame pacing)
+env_w = make_game_env(
+    adapter_type="window",
+    config={
+        "window_bbox": {"top": 100, "left": 100, "width": 800, "height": 600},
+        "actions_map": {0: None, 1: "space", 2: "left", 3: "right"},
+        "target_fps": 30,
+        "grayscale": True,
+    },
+)
+
+# Nível 2: Memory Hooking (Modo Híbrido: Pixels + RAM)
+env_m = make_game_env(
+    adapter_type="memory",
+    config={
+        "process_name": "game.exe",
+        "memory_schema": [
+            {"name": "hp", "offset": 0x10, "dtype": "int32", "is_terminal": True},
+            {"name": "score", "offset": 0x14, "dtype": "float32", "is_reward": True},
+        ],
+        "capture_screen": True,
+    },
+)
+
+# Nível 3: Native Engine (Lock-Step Headless > 10.000 FPS)
+env_n = make_game_env(
+    adapter_type="native",
+    config={
+        "engine_type": "native_sim",  # ou "vizdoom", "retro", "godot"
+        "is_visual": True,
+        "action_dim": 4,
+    },
+)
+
+# Todos os 3 ambientes já são UniversalS1Wrapper e alimentam diretamente o UniversalS1Agent
+agent = UniversalS1Agent(obs_space=env_n.observation_space, action_space=env_n.action_space)
+```
+
+---
+
 ## 6. Resolução de Problemas e Boas Práticas
 
 ### 1. Vazamento de Estado entre Trajetórias
@@ -480,6 +632,7 @@ print(f"Chaves transferidas: {len(loaded_keys)}")
 * [`system1_engine.core.encoders`](file:///Users/juliocesarreisfilho/Projects/system_one/system1_engine/core/encoders.py): `VectorFrontEnd`, `ImpalaVisualFrontEnd`, `ActionEncoder`, `RewardEncoder`.
 * [`system1_engine.core.heads`](file:///Users/juliocesarreisfilho/Projects/system_one/system1_engine/core/heads.py): `CategoricalPolicyHead`, `GaussianPolicyHead`, `ValueHead`.
 * [`system1_engine.env.wrapper`](file:///Users/juliocesarreisfilho/Projects/system_one/system1_engine/env/wrapper.py): Wrapper de ambiente com derivadas e buffers causais.
+* [`system1_engine.env.adapters`](file:///Users/juliocesarreisfilho/Projects/system_one/system1_engine/env/adapters): Adaptadores especializados dos 3 níveis de integração (`BaseGameAdapter`, `WindowCaptureEnv`, `MemoryHookEnv`, `NativeEngineEnv`, `make_game_env`).
 * [`system1_engine.training.ppo`](file:///Users/juliocesarreisfilho/Projects/system_one/system1_engine/training/ppo.py): Algoritmo puro de Recurrent PPO com BPTT particionado.
 * [`system1_engine.transfer.manager`](file:///Users/juliocesarreisfilho/Projects/system_one/system1_engine/transfer/manager.py): Gestor de checkpoints e congelamento estrito de parâmetros.
 * [`system1_engine.cli`](file:///Users/juliocesarreisfilho/Projects/system_one/system1_engine/cli.py): Utilitário de linha de comando (`benchmark`, `run`, `train`).

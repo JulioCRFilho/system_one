@@ -23,6 +23,7 @@ TASKS = [
     ("Task 4: Transferência com Tronco Congelado", "examples/04_transfer_learning_acrobot.py"),
     ("Task 5: Controle Contínuo (Pendulum-v1)", "examples/05_continuous_action_pendulum.py"),
     ("Task 6: Percepção Visual (IMPALA)", "examples/06_visual_observation_impala.py"),
+    ("Task 8: Adaptadores 3 Níveis (Window/Mem/Native)", "examples/08_adapters_three_levels.py"),
 ]
 
 
