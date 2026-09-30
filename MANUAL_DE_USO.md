@@ -1198,12 +1198,25 @@ python -m system1_engine.hud --host 127.0.0.1 --port 8055 --no-browser
 
 ### Funcionalidades do HUD Visual
 
-1. **Painel de Controle e Seleção de Flags**:
+1. **Painel de Controle e Seleção Integral de Flags**:
    - **Modos de Operação**: Botões de um clique para alternar entre `Treino` (`train`), `Avaliar` (`run`) e `Bench` (`benchmark`).
-   - **Seleção de Ambiente**: Dropdown com suporte a `CartPole-v1`, `Acrobot-v1`, `Pendulum-v1`, `MountainCar-v0`, `ViZDoom` e opção customizada de qualquer ID do Gymnasium.
-   - **Gestor Dinâmico de Checkpoints**: Escaneamento automático de todos os modelos `.pt` disponíveis no repositório para carregar (`--load`), transferir tronco (`--transfer-from`) ou salvar (`--save`).
-   - **Congelamento de Tronco**: Toggle switch para ativar/desativar `--freeze-trunk` em transferências de conhecimento.
-   - **Ajuste de Hiperparâmetros**: Controles numéricos em tempo real para taxa de aprendizado (`--lr`), entropia PPO (`--entropy-coef`), retorno alvo (`--target-return`), passos máximos (`--steps`) e episódios (`--episodes`).
+   - **Seleção de Ambiente e Cenários**: Dropdown integrado (`CartPole-v1`, `Acrobot-v1`, `Pendulum-v1`, `MountainCar-v0`, `ViZDoom` com presets de cenários como `basic.cfg`, `defend_the_center.cfg`, `deadly_corridor.cfg`, `my_way_home.cfg`, além de IDs customizados do Gymnasium).
+   - **Gestão Completa de Checkpoints**:
+     - **Salvar Checkpoint (`--save`)**: Checkbox para ativar/desativar salvamento, input para o nome do arquivo `.pt`, botão `🪄 Sugerir Nome` inteligente (baseado no ambiente e timestamp) e detecção visual de conflito/sobrescrita de arquivos existentes. Disponível tanto em treino quanto em avaliação.
+     - **Carregar Checkpoint (`--load`)**: Dropdown dinâmico com todos os `.pt` do projeto, botão `🔄 Atualizar` em tempo real e exibição de metadados enriquecidos (tamanho em MB e timestamp da última modificação).
+     - **Transferência de Tronco (`--transfer-from`)**: Dropdown de modelo de origem e switch de congelamento de parâmetros (`--freeze-trunk` para proteção contra esquecimento catastrófico vs `--no-freeze-trunk` para fine-tuning total).
+   - **Hiperparâmetros Avançados PPO & BPTT**:
+     - `--steps`: Total de passos com atalhos de clique rápido (`10k`, `40k`, `100k`).
+     - `--target-return`: Meta de retorno médio para parada antecipada (`475.0`, `-100.0`, etc.).
+     - `--lr`: Taxa de aprendizado Adam (`3e-4`, `7e-4`, `1e-3`).
+     - `--entropy-coef`: Coeficiente de entropia / exploração estocástica no PPO.
+     - `--rollout-steps`: Tamanho do buffer de coleta por iteração do PPO (padrão: 1024).
+     - `--chunk-length`: Comprimento temporal $T$ na BPTT recorrente (padrão: 16).
+     - `--chunk-batch-size`: Chunks por mini-batch durante a otimização (padrão: 16).
+   - **Parâmetros de Avaliação (`run`)**:
+     - `--episodes`: Quantidade de episódios a executar (`1`, `5`, `20`).
+     - `--inference-mode`: Alternância entre `act_with_confidence` (Gating de Incerteza e telemetria) e `act_fast` (Modo Reflexo Puro de ~150 µs).
+     - `--fps`: Controle de cadência com slider e atalhos rápidos `⚡ 0 FPS (Máxima)` e `👁️ 50 FPS (Suave)`.
    - **Botões de Ação**: `▶️ INICIAR EXECUÇÃO` e `⏹️ INTERROMPER TAREFA` (com cancelamento gracioso via sinais de SO em subprocesso isolado).
 
 2. **Renderização do Jogo In-Browser (Viewport MJPEG)**:

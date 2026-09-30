@@ -218,11 +218,14 @@ def run_worker_eval(config: Dict[str, Any], hud_client: HUDClient) -> None:
     render_mode = config.get("render_mode", "in_browser")
     episodes = int(config.get("episodes", 5))
     load_path = config.get("load")
+    save_path = config.get("save")
+    use_fast = config.get("inference_mode") == "fast"
     fps_target = float(config.get("fps", 50.0))
     dt_target = (1.0 / fps_target) if fps_target > 0 else 0.0
 
+    mode_desc = "act_fast() [Reflexo Puro]" if use_fast else "act_with_confidence() [Gating]"
     print(f"=== [HUD Worker] Modo de Avaliação Iniciado no Ambiente: {env_id} ===")
-    print(f"Episódios: {episodes} | FPS Alvo: {fps_target} | Renderização: {render_mode}")
+    print(f"Episódios: {episodes} | Decisão: {mode_desc} | FPS Alvo: {fps_target} | Renderização: {render_mode}")
 
     env = build_hud_env(env_id, scenario=config.get("scenario"), render_mode=render_mode)
     agent = UniversalS1Agent(
@@ -254,17 +257,27 @@ def run_worker_eval(config: Dict[str, Any], hud_client: HUDClient) -> None:
                 t_step_start = time.perf_counter()
 
                 t0 = time.perf_counter_ns()
-                decision = agent.act_with_confidence(obs_dict)
-                lat_us = (time.perf_counter_ns() - t0) / 1000.0
+                if use_fast:
+                    action = agent.act_fast(obs_dict)
+                    lat_us = (time.perf_counter_ns() - t0) / 1000.0
+                    tracker.record_inference(
+                        latency_us=lat_us,
+                        uncertainty=0.0,
+                        confidence=1.0,
+                        entropy=0.0,
+                    )
+                else:
+                    decision = agent.act_with_confidence(obs_dict)
+                    lat_us = (time.perf_counter_ns() - t0) / 1000.0
+                    action = decision.action
+                    tracker.record_inference(
+                        latency_us=lat_us,
+                        uncertainty=decision.uncertainty,
+                        confidence=decision.confidence,
+                        entropy=decision.entropy,
+                    )
 
-                tracker.record_inference(
-                    latency_us=lat_us,
-                    uncertainty=decision.uncertainty,
-                    confidence=decision.confidence,
-                    entropy=decision.entropy,
-                )
-
-                obs_dict, reward, terminated, truncated, _ = env.step(decision.action)
+                obs_dict, reward, terminated, truncated, _ = env.step(action)
                 done = terminated or truncated
                 ep_reward += reward
                 steps += 1
@@ -294,6 +307,14 @@ def run_worker_eval(config: Dict[str, Any], hud_client: HUDClient) -> None:
                         time.sleep(sleep_time)
 
             print(f"Episódio {ep + 1}/{episodes} finalizado | Retorno: {ep_reward:.1f} | Passos: {steps}")
+
+        if save_path:
+            KnowledgeTransferManager.save_checkpoint(
+                agent=agent,
+                checkpoint_path=save_path,
+                extra_info={"env_id": env_id, "evaluated_episodes": episodes},
+            )
+            print(f"Checkpoint salvo com sucesso em: {save_path}")
 
         tracker.set_completed(True)
         hud_client.send_telemetry(tracker.snapshot())

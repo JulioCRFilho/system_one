@@ -82,6 +82,24 @@ class HUDServer:
             valid.add(p)
         return sorted(list(valid))
 
+    def scan_checkpoints_detailed(self) -> List[Dict[str, Any]]:
+        """Retorna detalhes enriquecidos (tamanho em MB, data de modificação) de cada checkpoint."""
+        candidates = self.scan_checkpoints()
+        results = []
+        for path in candidates:
+            try:
+                stat = os.stat(path)
+                size_mb = stat.st_size / (1024 * 1024)
+                mtime_str = time.strftime("%d/%m/%Y %H:%M:%S", time.localtime(stat.st_mtime))
+                results.append({
+                    "path": path,
+                    "size_mb": round(size_mb, 2),
+                    "mtime": mtime_str,
+                })
+            except Exception:
+                results.append({"path": path, "size_mb": 0.0, "mtime": "—"})
+        return results
+
     def update_telemetry(self, data: Dict[str, Any]) -> None:
         with self._lock:
             self.latest_telemetry.update(data)
@@ -173,7 +191,21 @@ class HUDServer:
                     resp = {
                         "runner": runner.get_state(),
                         "checkpoints": server_instance.scan_checkpoints(),
+                        "checkpoints_detailed": server_instance.scan_checkpoints_detailed(),
                         "telemetry": server_instance.get_telemetry_snapshot(),
+                    }
+                    encoded_resp = json.dumps(resp).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(encoded_resp)))
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.end_headers()
+                    self.wfile.write(encoded_resp)
+
+                elif self.path == "/api/checkpoints":
+                    resp = {
+                        "checkpoints": server_instance.scan_checkpoints(),
+                        "checkpoints_detailed": server_instance.scan_checkpoints_detailed(),
                     }
                     encoded_resp = json.dumps(resp).encode("utf-8")
                     self.send_response(200)

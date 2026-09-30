@@ -47,8 +47,18 @@ def test_hud_server_lifecycle_and_endpoints():
         state = json.loads(res.read().decode("utf-8"))
         assert "runner" in state
         assert "checkpoints" in state
+        assert "checkpoints_detailed" in state
         assert "telemetry" in state
         assert state["runner"]["status"] == "IDLE"
+
+        # 2.1 Test GET /api/checkpoints
+        conn.request("GET", "/api/checkpoints")
+        res = conn.getresponse()
+        assert res.status == 200
+        ckpt_resp = json.loads(res.read().decode("utf-8"))
+        assert "checkpoints" in ckpt_resp
+        assert "checkpoints_detailed" in ckpt_resp
+        assert isinstance(ckpt_resp["checkpoints_detailed"], list)
 
         # 3. Test POST /api/internal/telemetry
         telemetry_payload = json.dumps({"fps": 60.5, "total_steps": 1234}).encode("utf-8")
@@ -115,7 +125,8 @@ def test_hud_process_runner_start_and_stop():
     assert runner.get_state()["status"] in ["STOPPED", "COMPLETED"]
 
 
-def test_hud_e2e_evaluation_and_in_browser_rendering():
+def test_hud_e2e_evaluation_and_in_browser_rendering(tmp_path):
+    save_ckpt = str(tmp_path / "test_saved_agent.pt")
     server = HUDServer(host="127.0.0.1", port=8996, open_browser=False)
     with server:
         config = {
@@ -124,6 +135,8 @@ def test_hud_e2e_evaluation_and_in_browser_rendering():
             "episodes": 1,
             "fps": 0.0,
             "render_mode": "in_browser",
+            "inference_mode": "confidence",
+            "save": save_ckpt,
         }
         success, msg = server.runner.start(config, "http://127.0.0.1:8996")
         assert success is True
@@ -145,8 +158,14 @@ def test_hud_e2e_evaluation_and_in_browser_rendering():
         snap = server.get_telemetry_snapshot()
         assert snap["total_steps"] > 0
 
-        # Verifica logs gerados
+        # Verifica logs gerados e mensagem de salvamento
         logs, count = server.runner.get_logs(0)
         assert count > 0
         assert any("Episódio 1/1 finalizado" in line for line in logs)
+        assert any("Checkpoint salvo com sucesso em:" in line for line in logs)
+
+        # Verifica se o arquivo de checkpoint realmente foi salvo no disco
+        import os
+        assert os.path.exists(save_ckpt)
+        assert os.path.getsize(save_ckpt) > 1000
 
