@@ -10,6 +10,7 @@ Bem-vindo ao manual completo de operação do **Universal System 1 RL Agent Engi
 2. [Instalação e Configuração do Ambiente](#2-instalação-e-configuração-do-ambiente)
 3. [Arquitetura e Contrato de Dados](#3-arquitetura-e-contrato-de-dados)
    - [Fluxo Unificado de Tensores](#fluxo-unificado-de-tensores)
+   - [Estrutura Completa de Diretórios](#estrutura-completa-de-diretórios)
    - [Arquitetura dos 3 Níveis de Integração de Ambientes](#arquitetura-dos-3-níveis-de-integração-de-ambientes)
 4. [Catálogo de Tasks Prontas para Rodar](#4-catálogo-de-tasks-prontas-para-rodar)
    - [Task 1: Benchmark de Latência CPU (`act_fast`)](#task-1-benchmark-de-latência-cpu-act_fast)
@@ -21,11 +22,16 @@ Bem-vindo ao manual completo de operação do **Universal System 1 RL Agent Engi
    - [Task 7: Execução Sequencial de Todas as Tasks](#task-7-execução-sequencial-de-todas-as-tasks)
    - [Task 8: Adaptadores dos 3 Níveis de Integração (Window, Memory, Native)](#task-8-adaptadores-dos-3-níveis-de-integração-window-memory-native)
    - [Task 9: Mecanismo de Incerteza e Confidence Gating (`ReflexDecision`)](#task-9-mecanismo-de-incerteza-e-confidence-gating-reflexdecision)
-    - [Task 10: Teste de Fogo com Transferência Visual no ViZDoom](#task-10-teste-de-fogo-com-transferência-visual-no-vizdoom)
-    - [Task 11: Telemetria Assíncrona e Painel Terminal ao Vivo (Rich)](#task-11-telemetria-assíncrona-e-painel-operacional-em-tempo-real-livestatstracker--s1livedashboard)
-    - [Task 12: Streaming Web de Telemetria com SSE e Dashboard Gráfico (`TelemetryServer`)](#task-12-streaming-web-de-telemetria-com-sse-e-dashboard-gráfico-telemetryserver)
-    - [Task 13: Execução da Suíte de Testes Automatizada](#task-13-execução-da-suíte-de-testes-automatizada)
+   - [Task 10: Teste de Fogo com Transferência Visual no ViZDoom](#task-10-teste-de-fogo-com-transferência-visual-no-vizdoom)
+   - [Task 11: Telemetria Assíncrona e Painel Terminal ao Vivo (Rich)](#task-11-telemetria-assíncrona-e-painel-operacional-em-tempo-real-livestatstracker--s1livedashboard)
+   - [Task 12: Streaming Web de Telemetria com SSE e Dashboard Gráfico (`TelemetryServer`)](#task-12-streaming-web-de-telemetria-com-sse-e-dashboard-gráfico-telemetryserver)
+   - [Task 13: Execução da Suíte de Testes Automatizada](#task-13-execução-da-suíte-de-testes-automatizada)
 5. [Guia de API e Receitas de Código](#5-guia-de-api-e-receitas-de-código)
+   - [Receita 1: Loop de Produção Ultrarrápido (`act_fast`)](#receita-1-loop-de-produção-ultrarrápido-act_fast)
+   - [Receita 2: Transfer Learning Programático](#receita-2-transfer-learning-programático)
+   - [Receita 3: Fábrica dos 3 Níveis de Integração (`make_game_env`)](#receita-3-fábrica-dos-3-níveis-de-integração-make_game_env)
+   - [Receita 4: Arbitragem System 1 → System 2 com `act_with_confidence`](#receita-4-arbitragem-system-1--system-2-com-act_with_confidence)
+   - [Receita 5: Servidor Web de Telemetria e Streaming SSE Programático](#receita-5-servidor-web-de-telemetria-e-streaming-sse-programático)
 6. [Resolução de Problemas e Boas Práticas](#6-resolução-de-problemas-e-boas-práticas)
 7. [Referência dos Módulos](#7-referência-dos-módulos)
 
@@ -111,6 +117,62 @@ FEEDBACK PASSADO:                                                              �
                                                                     ▼                     ▼
                                                             [ Policy Head ]        [ Critic Head ]
                                                             Dist. Ações (π)         Valor V(s)
+```
+
+### Estrutura Completa de Diretórios
+
+```
+system_one/
+├── system1_engine/                 # Pacote central do motor System 1
+│   ├── __init__.py
+│   ├── core/                       # Núcleo de representação e reflexo amortizado
+│   │   ├── encoders.py             # VectorFrontEnd, ImpalaVisualFrontEnd, Action/Reward Adapters
+│   │   ├── trunk.py                # System1Trunk (nn.GRU 337->256 + 2x ResMLP 256)
+│   │   ├── heads.py                # CategoricalPolicyHead, GaussianPolicyHead, ValueHead
+│   │   └── agent.py                # UniversalS1Agent unificado (act_fast, act_with_confidence)
+│   ├── env/                        # Ingestão de estados e adaptadores de ambientes
+│   │   ├── wrapper.py              # UniversalS1Wrapper com cálculo de Δs e buffers causais
+│   │   └── adapters/               # Camada de 3 Níveis de Integração (gym.Env comum)
+│   │       ├── base.py             # BaseGameAdapter (classe base abstrata)
+│   │       ├── window_adapter.py   # Nível 1: WindowCaptureEnv (mss + pynput)
+│   │       ├── memory_adapter.py   # Nível 2: MemoryHookEnv (RAM offsets + modo híbrido)
+│   │       ├── native_adapter.py   # Nível 3: NativeEngineEnv (Lock-Step Headless >10k FPS)
+│   │       └── factory.py          # make_game_env(...)
+│   ├── training/                   # Algoritmo de aprendizado por reforço recorrente
+│   │   ├── buffer.py               # RecurrentRolloutBuffer (particionamento em chunks BPTT)
+│   │   └── ppo.py                  # RecurrentPPOTrainer com GAE e mascaramento temporal
+│   ├── transfer/                   # Desacoplamento e transferência sem esquecimento
+│   │   └── manager.py              # KnowledgeTransferManager (congelamento estrito do tronco)
+│   ├── telemetry/                  # Observabilidade em tempo real e alta frequência
+│   │   ├── tracker.py              # LiveStatsTracker com ring buffers O(1)
+│   │   ├── dashboard.py            # S1LiveDashboard em terminal via Rich
+│   │   └── server.py               # TelemetryServer HTTP/SSE na porta 8050
+│   └── cli.py                      # Interface de linha de comando CLI (--mode train/run/benchmark)
+├── examples/                       # Catálogo de 12 tasks práticas prontas para rodar
+│   ├── 01_benchmark_latency.py     # Task 1: Benchmark de latência CPU (<= 0.8 ms)
+│   ├── 02_evaluate_cartpole.py     # Task 2: Avaliação de checkpoint pré-treinado
+│   ├── 03_train_cartpole.py        # Task 3: Treinamento do zero com Recurrent PPO
+│   ├── 04_transfer_learning_acrobot.py # Task 4: Transferência com tronco congelado
+│   ├── 05_continuous_action_pendulum.py # Task 5: Controle contínuo (GaussianPolicyHead)
+│   ├── 06_visual_observation_impala.py # Task 6: Percepção visual IMPALA
+│   ├── 07_run_all_tasks.py         # Task 7: Execução em lote de todas as tasks
+│   ├── 08_adapters_three_levels.py # Task 8: Demonstração dos 3 adaptadores de ambiente
+│   ├── 09_confidence_gating.py     # Task 9: Mecanismo de incerteza e gatilho System 2
+│   ├── 10_vizdoom_visual_transfer.py # Task 10: Teste de fogo visual no ViZDoom
+│   ├── 11_live_telemetry_dashboard.py # Task 11: Telemetria assíncrona e painel Rich
+│   └── 12_web_telemetry_streaming.py  # Task 12: Servidor web SSE e gráficos Chart.js
+├── tests/                          # Suíte de testes rigorosa com 32 testes unitários
+│   ├── test_dimensions.py          # Verificação dimensional do barramento ℝ^337
+│   ├── test_wrapper.py             # Zeração temporal e integridade de deltas
+│   ├── test_latency.py             # Orçamento rígido de latência CPU (<= 0.8 ms)
+│   ├── test_transfer.py            # Invariância bitwise com freeze_trunk=True
+│   ├── test_convergence.py         # Convergência comprovada no CartPole-v1 (>= 475.0)
+│   ├── test_adapters.py            # Testes dos adaptadores Window, Memory e Native
+│   ├── test_confidence.py          # Confidence Gating discreto e contínuo (underflow free)
+│   ├── test_telemetry.py           # Ring buffers O(1) do tracker e layout do dashboard
+│   └── test_telemetry_server.py    # Ciclo de vida HTTP, endpoints REST e SSE
+├── MANUAL_DE_USO.md                # Manual operacional detalhado em português
+└── README.md                       # Documentação geral e guia rápido em inglês
 ```
 
 ### Arquitetura dos 3 Níveis de Integração de Ambientes
@@ -411,14 +473,18 @@ Executa toda a suíte de demonstração em uma única invocação e exibe um pai
 #### Saída Esperada
 ```text
 ================================================================================
-🏁 PAINEL GERAL DE EXECUÇÃO (8.65s totais)
+🏁 PAINEL GERAL DE EXECUÇÃO (41.02s totais)
 ================================================================================
-✅ Task 1: Benchmark de Latência CPU             [PASS] (0.95s)
-✅ Task 2: Avaliação de Checkpoint Treinado      [PASS] (1.16s)
-✅ Task 4: Transferência com Tronco Congelado    [PASS] (1.88s)
-✅ Task 5: Controle Contínuo (Pendulum-v1)       [PASS] (1.93s)
+✅ Task 1: Benchmark de Latência CPU             [PASS] (1.24s)
+✅ Task 2: Avaliação de Checkpoint Treinado      [PASS] (0.92s)
+✅ Task 4: Transferência com Tronco Congelado    [PASS] (2.30s)
+✅ Task 5: Controle Contínuo (Pendulum-v1)       [PASS] (2.03s)
 ✅ Task 6: Percepção Visual (IMPALA)             [PASS] (1.14s)
-✅ Task 8: Adaptadores 3 Níveis (Window/Mem/Native) [PASS] (1.58s)
+✅ Task 8: Adaptadores 3 Níveis (Window/Mem/Native) [PASS] (1.62s)
+✅ Task 9: Confidence Gating (Gatilho System 2)  [PASS] (1.52s)
+✅ Task 10: Teste de Fogo Visual (ViZDoom Transfer) [PASS] (25.14s)
+✅ Task 11: Telemetria Assíncrona & Dashboard    [PASS] (2.20s)
+✅ Task 12: Web Telemetry Streaming (SSE + Web)  [PASS] (2.93s)
 ================================================================================
 ```
 
@@ -888,6 +954,98 @@ env_n = make_game_env(
 
 # Todos os 3 ambientes já são UniversalS1Wrapper e alimentam diretamente o UniversalS1Agent
 agent = UniversalS1Agent(obs_space=env_n.observation_space, action_space=env_n.action_space)
+```
+
+---
+
+### Receita 4: Arbitragem System 1 → System 2 com `act_with_confidence`
+
+Como integrar o agente de reflexo rápido com um sistema deliberativo de alta capacidade (ex.: LLM ou busca em árvore) ativado apenas sob incerteza:
+
+```python
+import gymnasium as gym
+import torch
+from system1_engine.core.agent import UniversalS1Agent
+from system1_engine.env.wrapper import UniversalS1Wrapper
+
+env = UniversalS1Wrapper(gym.make("CartPole-v1"))
+agent = UniversalS1Agent(obs_space=env.observation_space, action_space=env.action_space)
+
+if Path("s1_cartpole.pt").exists():
+    checkpoint = torch.load("s1_cartpole.pt", map_location="cpu")
+    agent.load_state_dict(checkpoint["state_dict"])
+agent.eval()
+
+obs_dict, _ = env.reset()
+agent.reset_memory()
+done = False
+
+while not done:
+    # act_with_confidence executa em ~0.17 ms e calcula incerteza em +1.3 µs
+    decision = agent.act_with_confidence(
+        obs_dict,
+        uncertainty_threshold=0.85,  # Aciona se incerteza normalizada >= 85%
+        confidence_threshold=0.50,   # Ou se probabilidade da ação Top-1 < 50%
+    )
+
+    if decision.is_uncertain:
+        # 🚨 GATILHO SYSTEM 2 ATIVADO: Incerteza alta, invocar planejador deliberativo / LLM
+        print(f"Incerteza detectada ({decision.uncertainty*100:.1f}%)! Delegando para System 2...")
+        # action = system2_deliberate(obs_dict)
+        action = decision.action  # Fallback reflexivo seguro
+    else:
+        # ⚡ SYSTEM 1 PURO: Executa reflexo instantâneo amortizado
+        action = decision.action
+
+    obs_dict, reward, term, trunc, _ = env.step(action)
+    done = term or trunc
+```
+
+---
+
+### Receita 5: Servidor Web de Telemetria e Streaming SSE Programático
+
+Como instanciar programaticamente o coletor assíncrono `LiveStatsTracker` e o servidor web `TelemetryServer` (`http://localhost:8050`) em qualquer loop de controle ou treinamento:
+
+```python
+import time
+from pathlib import Path
+import gymnasium as gym
+import torch
+from system1_engine.core.agent import UniversalS1Agent
+from system1_engine.env.wrapper import UniversalS1Wrapper
+from system1_engine.telemetry import LiveStatsTracker, TelemetryServer
+
+env = UniversalS1Wrapper(gym.make("CartPole-v1"))
+agent = UniversalS1Agent(obs_space=env.observation_space, action_space=env.action_space)
+
+tracker = LiveStatsTracker()
+# Inicia servidor web com streaming SSE a 15 Hz na porta 8050
+server = TelemetryServer(tracker=tracker, host="127.0.0.1", port=8050, refresh_hz=15.0)
+
+with server:  # Context manager gerencia automaticamente start() e stop()
+    print("🚀 Dashboard Web ativo em: http://127.0.0.1:8050")
+    for episode in range(5):
+        obs_dict, _ = env.reset()
+        agent.reset_memory()
+        done = False
+
+        while not done:
+            t0 = time.perf_counter_ns()
+            decision = agent.act_with_confidence(obs_dict)
+            lat_us = (time.perf_counter_ns() - t0) / 1000.0
+
+            # Registra inferência em ring buffer O(1) (~96 ns)
+            tracker.record_inference(
+                latency_us=lat_us,
+                uncertainty=decision.uncertainty,
+                confidence=decision.confidence,
+                entropy=decision.entropy,
+            )
+
+            obs_dict, reward, term, trunc, _ = env.step(decision.action)
+            done = term or trunc
+            tracker.record_env_step(reward=reward, done=done)
 ```
 
 ---
