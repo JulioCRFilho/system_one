@@ -472,11 +472,18 @@ Demonstra a instanciação e execução operacional dos 3 níveis de adaptadores
 
 ### Task 9: Mecanismo de Incerteza e Confidence Gating (`ReflexDecision`)
 
-Demonstra como o System 1 afere sua própria convicção em tempo real de forma amortizada:
-- Cálculo da Entropia de Shannon normalizada $U \in [0.0, 1.0]$.
-- Confiança da ação mais provável $C \in [0.0, 1.0]$ e Margem $M = p_{(1)} - p_{(2)}$.
-- Emissão do flag binário `is_uncertain` (gatilho exato para invocar o System 2).
-- Sobrecarga de cálculo de apenas **+1.3 µs** (mantendo latência total em ~0.18 ms, muito abaixo de 0.8 ms).
+Demonstra como o System 1 afere sua própria convicção em tempo real de forma amortizada em espaços discretos e contínuos:
+- **Espaço Discreto (`CategoricalPolicyHead`)**:
+  - Entropia de Shannon normalizada: $U = \frac{-\sum p_i \ln p_i}{\ln(|A|)} \in [0.0, 1.0]$
+  - Confiança da ação mais provável $C = \max_i p_i \in [0.0, 1.0]$ e Margem $M = p_{(1)} - p_{(2)}$.
+- **Espaço Contínuo (`GaussianPolicyHead`)**:
+  - Entropia diferencial: $H = \frac{1}{2} \sum_{i=1}^d [1 + \ln(2\pi \sigma_i^2)]$. Para $\sigma < \frac{1}{\sqrt{2\pi e}} \approx 0.24197$, $H$ assume valores negativos legítimos sem causar distorção.
+  - Normalização estrita para $[0.0, 1.0]$ via sigmoide na variância: $U = 2 \cdot \operatorname{sigmoid}\left(\frac{\text{Var}}{\tau}\right) - 1 = \frac{2}{1 + e^{-\text{Var} / 0.5}} - 1$, com $\text{Var} = \frac{1}{d} \sum \sigma_i^2$.
+  - Confiança complementar $C = 1.0 - U \in [0.0, 1.0]$.
+  - Clamping defensivo $\sigma \in [10^{-6}, 100.0]$ e $\log \sigma \in [-20.0, 2.0]$ garantindo imunidade total a underflow numérico e singularidades.
+- **Gatilho Unificado de Invocação do System 2**:
+  - `is_uncertain = (uncertainty >= uncertainty_threshold) or (confidence < confidence_threshold)`
+- **Orçamento de Latência**: Sobrecarga de cálculo de apenas **+8 a +12 µs** (mantendo latência total em ~0.17 ms, muito abaixo do teto de 0.8 ms).
 
 #### Executar Script Pronto
 ```bash
@@ -488,9 +495,14 @@ Demonstra como o System 1 afere sua própria convicção em tempo real de forma 
 ===========================================================================
 🧠 TASK 9: MECANISMO DE INCERTEZA E CONFIDENCE GATING (SYSTEM 1 -> 2)
 ===========================================================================
+• Checkpoint 's1_cartpole.pt' carregado para o Agente Treinado.
+---------------------------------------------------------------------------
+📊 COMPARAÇÃO DE CALIBRAÇÃO DE CONFIANÇA (Mesmo Estado Inicial):
+
 [Agente Tabula Rasa / Sem Treino]:
-  - Confiança (Top 1)  : 62.6%
-  - Incerteza (Entropia: 95.4% (Shannon: 0.6609)
+  - Confiança (Top 1)  : 52.4%
+  - Incerteza (Entropia: 99.8% (Shannon: 0.6920)
+  - Margem Top1 - Top2 : 4.9%
   - 🚨 Gatilho System 2: ATIVADO (is_uncertain = True)
 
 [Agente Treinado / Reflexo Consolidado]:
@@ -499,11 +511,24 @@ Demonstra como o System 1 afere sua própria convicção em tempo real de forma 
   - Margem Top1 - Top2 : 44.8%
   - Valor Estimado V(s): 94.413
 
+---------------------------------------------------------------------------
 ⚡ BENCHMARK DE SOBRECARGA (OVERHEAD) DO GATILHO:
-  - act_fast() Puro            : 186.8 µs (0.1868 ms)
-  - act_with_confidence()      : 188.1 µs (0.1881 ms)
-  - Sobrecarga de Cálculo      : +1.3 µs (0.0013 ms)
+  - act_fast() Puro            : 166.0 µs (0.1660 ms)
+  - act_with_confidence()      : 174.1 µs (0.1741 ms)
+  - Sobrecarga de Cálculo      : +8.1 µs (0.0081 ms)
   ✅ [APROVADO] Latência com telemetria completa mantida abaixo de 0.8 ms!
+
+---------------------------------------------------------------------------
+🎯 CALIBRAÇÃO EM ESPAÇO CONTÍNUO (GaussianPolicyHead / Pendulum-v1)
+---------------------------------------------------------------------------
+🔬 TESTE DE REGIMES DE DISPERSÃO GAUSSIANA (SIGMA):
+  • Exploração Padrão (Tabula Rasa) : σ= 1.00000 | H=  1.419 | Uncert=76.16% | Conf=23.84% | Gatilho: 🚨 ATIVADO
+  • Dispersão Crítica (H ~ 0)       : σ= 0.24197 | H= -0.000 | Uncert= 5.85% | Conf=94.15% | Gatilho: 🟢 DESATIVADO
+  • Política Consolidada (H < 0)    : σ= 0.05000 | H= -1.577 | Uncert= 0.25% | Conf=99.75% | Gatilho: 🟢 DESATIVADO
+  • Limite Inferior Numérico        : σ= 0.00000 | H=-12.397 | Uncert= 0.00% | Conf=100.00% | Gatilho: 🟢 DESATIVADO
+  • Alta Incerteza / Caos           : σ= 2.00000 | H=  2.112 | Uncert=99.93% | Conf= 0.07% | Gatilho: 🚨 ATIVADO
+
+✅ Ausência total de underflow: Para σ < 0.242, entropia é negativa mas incerteza permanece em [0, 1]!
 ===========================================================================
 ```
 
@@ -562,31 +587,36 @@ Throughput (Passos/seg)             | 130.1                | 135.7
 
 ### Task 11: Execução da Suíte de Testes Automatizada
 
-Executa a suíte de testes rigorosa com 18 testes unitários cobrindo contratos de dimensão, adaptadores dos 3 níveis (incluindo ViZDoom nativo real), gatilho de incerteza (Confidence Gating), reset de wrappers e convergência matemática.
+Executa a suíte de testes rigorosa com 22 testes unitários cobrindo contratos de dimensão, adaptadores dos 3 níveis (incluindo ViZDoom nativo real), gatilho de incerteza (Confidence Gating discreto e contínuo com proteção de underflow), reset de wrappers e convergência matemática.
 
 ```bash
 .venv/bin/pytest tests/ -v
 ```
 
-#### Testes Cobertos (18/18 Aprovados):
+#### Testes Cobertos (22/22 Aprovados):
 1. `test_confidence_gating_discrete`: Valida cálculo de incerteza e gatilho em espaço discreto.
 2. `test_confidence_gating_continuous`: Valida incerteza e gatilho em espaço contínuo Box.
-3. `test_act_fast_latency_with_confidence`: Garante que o cálculo de entropia não ultrapassa 0.8 ms.
-4. `test_window_capture_env_mock_and_agent_pipeline`: Valida Nível 1 com frame pacing, pré-processamento (C, 84, 84) e `act_fast()`.
-5. `test_memory_hook_env_vector_mode`: Valida Nível 2 com leitura vetorial de RAM, offsets de score e término por HP.
-6. `test_memory_hook_env_hybrid_mode`: Valida Nível 2 em modo híbrido (pixels visuais + controle de RAM).
-7. `test_native_engine_env_lock_step_and_speed`: Valida Nível 3 com lock-step de alta velocidade (> 5.000 FPS).
-8. `test_native_engine_vizdoom_real`: Valida conexão com binário nativo ViZDoom real em lock-step.
-9. `test_factory_make_game_env`: Valida fábrica `make_game_env` para os 3 adaptadores e validação de erros.
-10. `test_cartpole_convergence`: Garante que o treino PPO atinge retorno $\ge 475.0$ em $< 40,000$ passos.
-11. `test_vector_frontend_dimensions`: Validação rígida do barramento de $337$ dimensões.
-12. `test_visual_frontend_dimensions`: Validação do IMPALA e barramento de $337$ dimensões.
-13. `test_system1_trunk_dimensions_and_hx`: Continuidade e transição do estado oculto da GRU.
-14. `test_parameter_counts_and_memory`: Teto de memória $< 35\text{ MB}$ e contagem de parâmetros.
-15. `test_act_fast_latency_budget`: Limite de $0.8\text{ ms}$ em inferência CPU discreta.
-16. `test_act_fast_continuous_action`: Limite de $0.8\text{ ms}$ em inferência CPU contínua.
-17. `test_transfer_without_catastrophic_forgetting`: Congelamento estrito e imutabilidade dos pesos do tronco.
-18. `test_wrapper_reset_robustness`: Zeração e integridade dos buffers temporais do wrapper.
+3. `test_confidence_gating_continuous_low_sigma`: Valida ausência de underflow e incerteza estritamente positiva para $\sigma < 0.242$ ($H < 0$).
+4. `test_confidence_gating_continuous_extreme_small_sigma`: Valida estabilidade com $\sigma \approx 3 \times 10^{-7}$ ($\log\sigma = -15.0$).
+5. `test_confidence_gating_continuous_high_sigma`: Valida ativação do gatilho para alta dispersão ($\sigma = 2.0$).
+6. `test_act_fast_latency_with_confidence`: Garante que o cálculo de entropia não ultrapassa 0.8 ms.
+7. `test_window_capture_env_mock_and_agent_pipeline`: Valida Nível 1 com frame pacing, pré-processamento (C, 84, 84) e `act_fast()`.
+8. `test_memory_hook_env_vector_mode`: Valida Nível 2 com leitura vetorial de RAM, offsets de score e término por HP.
+9. `test_memory_hook_env_hybrid_mode`: Valida Nível 2 em modo híbrido (pixels visuais + controle de RAM).
+10. `test_native_engine_env_lock_step_and_speed`: Valida Nível 3 com lock-step de alta velocidade (> 5.000 FPS).
+11. `test_native_engine_vizdoom_real`: Valida conexão com binário nativo ViZDoom real em lock-step.
+12. `test_factory_make_game_env`: Valida fábrica `make_game_env` para os 3 adaptadores e validação de erros.
+13. `test_cartpole_convergence`: Garante que o treino PPO atinge retorno $\ge 475.0$ em $< 40,000$ passos.
+14. `test_vector_frontend_dimensions`: Validação rígida do barramento de $337$ dimensões.
+15. `test_visual_frontend_dimensions`: Validação do IMPALA e barramento de $337$ dimensões.
+16. `test_system1_trunk_dimensions_and_hx`: Continuidade e transição do estado oculto da GRU.
+17. `test_parameter_counts_and_memory`: Teto de memória $< 35\text{ MB}$ e contagem de parâmetros.
+18. `test_act_fast_latency_budget`: Limite de $0.8\text{ ms}$ em inferência CPU discreta.
+19. `test_act_fast_continuous_action`: Limite de $0.8\text{ ms}$ em inferência CPU contínua.
+20. `test_transfer_without_catastrophic_forgetting`: Congelamento estrito e imutabilidade dos pesos do tronco.
+21. `test_wrapper_reset_robustness`: Zeração e integridade dos buffers temporais do wrapper.
+22. `test_wrapper_delta_computation`: Validação dos cálculos de $\Delta s$, $a_{t-1}$ e $r_{t-1}$.
+
 
 ---
 

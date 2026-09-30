@@ -303,12 +303,30 @@ class UniversalS1Agent(nn.Module):
             if not return_decision:
                 return action_np
 
-            std = torch.exp(self.policy_head.log_std).cpu().numpy()
-            mean_std = float(np.mean(std))
-            confidence = float(1.0 / (1.0 + mean_std))
+            # Clamping defensivo de log_std / std para evitar underflow numérico e instabilidade
+            log_std_clamped = torch.clamp(self.policy_head.log_std, min=-20.0, max=2.0)
+            std = torch.exp(log_std_clamped).cpu().numpy()
+            std = np.clip(std, a_min=1e-6, a_max=100.0)
+
+            # Entropia diferencial contínua H = 0.5 * sum(1 + ln(2*pi*sigma^2))
+            # Nota: para sigma < 1 / sqrt(2*pi*e) (~0.24197), H assume valores negativos legítimos
             entropy = float(0.5 * np.sum(1.0 + np.log(2.0 * np.pi * (std ** 2))))
-            uncertainty = float(np.clip(mean_std / 2.0, 0.0, 1.0))
-            is_uncertain = uncertainty >= uncertainty_threshold
+
+            # Variância média das ações contínuas
+            var = float(np.mean(std ** 2))
+
+            # Normalização estrita para [0.0, 1.0] via sigmoide na variância
+            # f(var) = 2.0 / (1.0 + exp(-var / var_scale)) - 1.0
+            # Garante ausência de underflow para sigma < 0.242 e gatilho calibrado:
+            # - sigma -> 0: uncertainty -> 0.0, confidence -> 1.0 (sem underflow negativo)
+            # - sigma = 0.05: uncertainty = 0.25%, confidence = 99.75%
+            # - sigma = 0.242 (fronteira H=0): uncertainty = 5.85%, confidence = 94.15%
+            # - sigma = 1.0 (exploração inicial padrão): uncertainty = 76.16%, confidence = 23.84% (Gatilho Ativado)
+            var_scale = 0.5
+            uncertainty = float(np.clip(2.0 / (1.0 + np.exp(-var / var_scale)) - 1.0, 0.0, 1.0))
+            confidence = float(np.clip(1.0 - uncertainty, 0.0, 1.0))
+
+            is_uncertain = (uncertainty >= uncertainty_threshold) or (confidence < confidence_threshold)
             latent_val = float(self.value_head(h).squeeze().item()) if return_value else None
 
             return ReflexDecision(

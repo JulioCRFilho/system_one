@@ -137,6 +137,39 @@ def run_confidence_gating_demo():
             break
 
     print(f"\n• Resumo do Episódio: Decisões System 1: {s1_count} ({s1_count/(s1_count+s2_count)*100:.0f}%) | Invocação System 2: {s2_count}")
+
+    # 4. Calibração e Proteção de Underflow em Ações Contínuas (Pendulum-v1)
+    print("\n" + "=" * 75)
+    print("🎯 CALIBRAÇÃO EM ESPAÇO CONTÍNUO (GaussianPolicyHead / Pendulum-v1)")
+    print("=" * 75)
+
+    raw_cont_env = gym.make("Pendulum-v1")
+    cont_env = UniversalS1Wrapper(raw_cont_env)
+    agent_cont = UniversalS1Agent(obs_space=cont_env.observation_space, action_space=cont_env.action_space)
+    agent_cont.eval()
+
+    obs_cont, _ = cont_env.reset(seed=42)
+
+    print("🔬 TESTE DE REGIMES DE DISPERSÃO GAUSSIANA (SIGMA):")
+
+    regimes = [
+        ("Exploração Padrão (Tabula Rasa)", 1.0),
+        ("Dispersão Crítica (H ~ 0)", 0.24197),
+        ("Política Consolidada (H < 0)", 0.05),
+        ("Limite Inferior Numérico", 1e-6),
+        ("Alta Incerteza / Caos", 2.0),
+    ]
+
+    for label, sigma_val in regimes:
+        with torch.no_grad():
+            agent_cont.policy_head.log_std.fill_(float(np.log(sigma_val)))
+
+        dec = agent_cont.act_with_confidence(obs_cont, uncertainty_threshold=0.70, confidence_threshold=0.50)
+        status = "🚨 ATIVADO" if dec.is_uncertain else "🟢 DESATIVADO"
+        print(f"  • {label:32s}: σ={sigma_val:8.5f} | H={dec.entropy:7.3f} | "
+              f"Uncert={dec.uncertainty*100:5.2f}% | Conf={dec.confidence*100:5.2f}% | Gatilho: {status}")
+
+    print("\n✅ Ausência total de underflow: Para σ < 0.242, entropia é negativa mas incerteza permanece em [0, 1]!")
     print("=" * 75)
 
 
