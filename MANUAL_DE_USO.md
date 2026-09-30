@@ -728,7 +728,10 @@ Demonstra o subsistema de observabilidade contínua do System 1 em alta frequên
 
 Disponibiliza um servidor HTTP assíncrono nativo (`http.server` + `socketserver.ThreadingMixIn`) com **Server-Sent Events (SSE)** transmitindo métricas contínuas a 15–30 Hz para um painel web moderno, escuro e responsivo (HTML5 + Tailwind CSS + Chart.js) em `http://localhost:8050`:
 
-* **Zero Frameworks Pesados**: Implementado exclusivamente com a biblioteca padrão Python (`http.server`, `socketserver`, `threading`, `json`), sem Flask, FastAPI ou dependências web externas.
+* **Abertura Automática do Navegador**: Ao iniciar com a flag `--web-panel`, o motor abre automaticamente o navegador padrão do sistema operacional na URL do dashboard (`http://localhost:8050`), sem necessidade de digitação manual (pode ser desativado com `--no-browser`).
+* **Cadência Humana Automática (`--fps 50`)**: No modo `run`, a execução é automaticamente sincronizada a 50 FPS para visualização em tempo real (5 episódios = 50 segundos de telemetria contínua).
+* **Persistência Pós-Execução (Keep-Alive)**: O servidor permanece ativo com gráficos congelados para inspeção detalhada até que você pressione `Ctrl+C` no terminal.
+* **Zero Frameworks Pesados**: Implementado exclusivamente com a biblioteca padrão Python (`http.server`, `socketserver`, `threading`, `json`, `webbrowser`), sem Flask, FastAPI ou dependências web externas.
 * **Execução Desacoplada e Não-Bloqueante**: O servidor roda em uma thread daemon separada; o loop de inferência sub-milissegundo (`act_fast` ~ 150 µs) e o treinamento PPO mantêm sua velocidade máxima sem qualquer interrupção.
 * **Streaming SSE Unidirecional (`/stream`)**: Envio contínuo de snapshots no formato `data: {JSON}\n\n`, atualizando dinamicamente gráficos deslizantes com janela de 30 pontos no navegador.
 * **Endpoints HTTP Nativos**:
@@ -746,22 +749,23 @@ Disponibiliza um servidor HTTP assíncrono nativo (`http.server` + `socketserver
 # Executa 400 passos com streaming ativo na porta 8050
 .venv/bin/python examples/12_web_telemetry_streaming.py
 
-# Modo interativo (roda continuamente até Ctrl+C) em porta customizada
-.venv/bin/python examples/12_web_telemetry_streaming.py --port 8055 --interactive
+# Modo interativo (roda continuamente até Ctrl+C) em porta customizada e abre navegador
+.venv/bin/python examples/12_web_telemetry_streaming.py --port 8055 --interactive --open-browser
 ```
 
 #### Opção B: Treinamento PPO com Painel Web via CLI
 ```bash
+# Abre o navegador automaticamente em http://localhost:8050
 .venv/bin/python -m system1_engine.cli --mode train --env CartPole-v1 --web-panel --port 8050
 ```
 
 #### Opção C: Execução / Avaliação com Painel Web via CLI
 ```bash
-# No CartPole
+# No CartPole (abre navegador automaticamente a 50 FPS)
 .venv/bin/python -m system1_engine.cli --mode run --env CartPole-v1 --load s1_cartpole.pt --web-panel --port 8050
 
-# No ViZDoom nativo
-.venv/bin/python -m system1_engine.cli --mode run --env vizdoom --scenario basic.cfg --web-panel --port 8050
+# Sem abrir o navegador automaticamente
+.venv/bin/python -m system1_engine.cli --mode run --env CartPole-v1 --load s1_cartpole.pt --web-panel --no-browser
 ```
 
 #### Saída Esperada no Terminal

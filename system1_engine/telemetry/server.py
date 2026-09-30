@@ -273,11 +273,13 @@ class TelemetryServer:
         host: str = "127.0.0.1",
         port: int = 8050,
         refresh_hz: float = 15.0,
+        open_browser: bool = False,
     ) -> None:
         self.tracker = tracker
         self.host = host
         self.port = port
         self.refresh_interval = 1.0 / max(1.0, refresh_hz)
+        self.open_browser = open_browser
         self.server: Optional[ThreadedTCPServer] = None
         self.thread: Optional[threading.Thread] = None
         self._running = False
@@ -345,7 +347,19 @@ class TelemetryServer:
         self._running = True
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
-        print(f"[✓] Painel Web em Tempo Real ativo em: http://{self.host}:{self.port}")
+        dashboard_url = f"http://{self.host}:{self.port}"
+        print(f"[✓] Painel Web em Tempo Real ativo em: {dashboard_url}")
+
+        if self.open_browser:
+            def _open() -> None:
+                time.sleep(0.15)
+                try:
+                    import webbrowser
+                    webbrowser.open(dashboard_url)
+                except Exception:
+                    pass
+
+            threading.Thread(target=_open, daemon=True).start()
 
     def stop(self) -> None:
         """Encerra o servidor HTTP e libera a porta associada."""

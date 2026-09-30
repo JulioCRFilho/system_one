@@ -44,8 +44,11 @@ def train_mode(args: argparse.Namespace) -> None:
     need_tracker = args.live_stats or args.web_panel
     tracker = LiveStatsTracker() if need_tracker else None
     dashboard = S1LiveDashboard(tracker) if args.live_stats else None
+    should_open_browser = args.web_panel and not getattr(args, "no_browser", False) and sys.stdin.isatty()
     web_server = (
-        TelemetryServer(tracker, host=args.host, port=args.port) if args.web_panel and tracker else None
+        TelemetryServer(tracker, host=args.host, port=args.port, open_browser=should_open_browser)
+        if args.web_panel and tracker
+        else None
     )
 
     if web_server:
@@ -136,8 +139,11 @@ def run_mode(args: argparse.Namespace) -> None:
     need_tracker = args.live_stats or args.web_panel
     tracker = LiveStatsTracker() if need_tracker else None
     dashboard = S1LiveDashboard(tracker) if args.live_stats else None
+    should_open_browser = args.web_panel and not getattr(args, "no_browser", False) and sys.stdin.isatty()
     web_server = (
-        TelemetryServer(tracker, host=args.host, port=args.port) if args.web_panel and tracker else None
+        TelemetryServer(tracker, host=args.host, port=args.port, open_browser=should_open_browser)
+        if args.web_panel and tracker
+        else None
     )
 
     if web_server:
@@ -341,6 +347,12 @@ def main() -> None:
         action="store_true",
         default=False,
         help="Não aguarda confirmação com Ctrl+C ao término da execução com --web-panel",
+    )
+    parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        default=False,
+        help="Não abre o navegador automaticamente ao iniciar com --web-panel",
     )
 
     args = parser.parse_args()

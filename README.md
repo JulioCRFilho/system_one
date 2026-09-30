@@ -165,8 +165,11 @@ python -m system1_engine.cli --mode train --env CartPole-v1 --steps 40000 --save
 # With live terminal dashboard
 python -m system1_engine.cli --mode train --env CartPole-v1 --steps 40000 --live-stats
 
-# With real-time web panel on port 8050
+# With real-time web panel on port 8050 (opens browser automatically)
 python -m system1_engine.cli --mode train --env CartPole-v1 --steps 40000 --web-panel --port 8050
+
+# Without auto-opening the browser (headless/remote)
+python -m system1_engine.cli --mode train --env CartPole-v1 --steps 40000 --web-panel --no-browser
 ```
 
 ### 3. Evaluate Pretrained Checkpoint
@@ -177,7 +180,7 @@ python -m system1_engine.cli --mode run --env CartPole-v1 --load s1_cartpole.pt 
 # With live terminal telemetry
 python -m system1_engine.cli --mode run --env CartPole-v1 --load s1_cartpole.pt --live-stats
 
-# With real-time web dashboard
+# With real-time web dashboard (opens browser automatically, paces at 50 FPS & stays alive until Ctrl+C)
 python -m system1_engine.cli --mode run --env CartPole-v1 --load s1_cartpole.pt --web-panel --port 8050
 ```
 
