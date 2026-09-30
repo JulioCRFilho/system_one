@@ -100,13 +100,23 @@ class NativeEngineEnv(BaseGameAdapter):
         elif self.engine_type == "vizdoom":
             # Tenta carregar vizdoom se instalado
             try:
+                import os
                 import vizdoom as vzd
                 game = vzd.DoomGame()
-                if self.scenario_path:
-                    game.load_config(self.scenario_path)
+                scen = self.scenario_path or "basic.cfg"
+                if not os.path.isabs(scen) and not os.path.exists(scen):
+                    scen = os.path.join(vzd.scenarios_path, scen)
+                game.load_config(scen)
                 game.set_window_visible(not self.args.get("headless", True))
+                if self.channels == 1:
+                    game.set_screen_format(vzd.ScreenFormat.GRAY8)
+                else:
+                    game.set_screen_format(vzd.ScreenFormat.RGB24)
                 game.init()
                 self._engine_instance = game
+                self.available_buttons_count = game.get_available_buttons_size()
+                if isinstance(self.action_space, gym.spaces.Discrete):
+                    self.action_space = gym.spaces.Discrete(max(1, self.available_buttons_count))
             except ImportError:
                 # Usa motor nativo simulado se pacote não estiver compilado no host
                 self._engine_instance = None
@@ -121,7 +131,19 @@ class NativeEngineEnv(BaseGameAdapter):
 
     def _format_visual_frame(self, raw_frame: np.ndarray) -> np.ndarray:
         """Padroniza frames nativos para (C, 84, 84) normalizado [0.0, 1.0]."""
-        pil_img = Image.fromarray(raw_frame)
+        # Suporta entradas (C, H, W) e (H, W, C) e (H, W)
+        frame = raw_frame
+        if frame.ndim == 3:
+            if frame.shape[0] in (1, 3) and frame.shape[2] not in (1, 3):
+                # Formato CHW (ex.: ViZDoom buffer) -> Transpõe para HWC para PIL
+                if frame.shape[0] == 3:
+                    frame = np.transpose(frame, (1, 2, 0))
+                else:
+                    frame = frame.squeeze(0)
+            elif frame.shape[2] == 1:
+                frame = frame.squeeze(-1)
+
+        pil_img = Image.fromarray(frame)
         if self.channels == 1:
             pil_img = pil_img.convert("L").resize((84, 84), Image.Resampling.BILINEAR)
             arr = np.asarray(pil_img, dtype=np.float32) / 255.0
@@ -182,7 +204,30 @@ class NativeEngineEnv(BaseGameAdapter):
                 pass
 
         if self._engine_instance is not None:
-            if hasattr(self._engine_instance, "step"):
+            if hasattr(self._engine_instance, "make_action"):
+                # ViZDoom nativo com avanço por botões e frame_skip
+                n_buttons = getattr(self, "available_buttons_count", 3)
+                act_vector = [0] * n_buttons
+                act_idx = int(action) if np.isscalar(action) else 0
+                if 0 <= act_idx < n_buttons:
+                    act_vector[act_idx] = 1
+
+                frame_skip = int(self.args.get("frame_skip", 4))
+                reward = float(self._engine_instance.make_action(act_vector, frame_skip))
+                terminated = self._engine_instance.is_episode_finished()
+
+                if not terminated:
+                    state = self._engine_instance.get_state()
+                    raw_obs = state.screen_buffer if state else np.zeros((84, 84), dtype=np.uint8)
+                else:
+                    raw_obs = np.zeros((84, 84), dtype=np.uint8)
+
+                obs = self._format_visual_frame(raw_obs)
+                truncated = False
+                info = {"engine": "vizdoom", "action_vector": act_vector}
+                return obs, reward, terminated, truncated, info
+
+            elif hasattr(self._engine_instance, "step"):
                 obs_raw, reward, term, trunc, info = self._engine_instance.step(action)
                 obs = self._format_visual_frame(obs_raw) if self.is_visual else obs_raw
                 return obs, float(reward), bool(term), bool(trunc), info

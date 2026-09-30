@@ -24,6 +24,8 @@ TASKS = [
     ("Task 5: Controle Contínuo (Pendulum-v1)", "examples/05_continuous_action_pendulum.py"),
     ("Task 6: Percepção Visual (IMPALA)", "examples/06_visual_observation_impala.py"),
     ("Task 8: Adaptadores 3 Níveis (Window/Mem/Native)", "examples/08_adapters_three_levels.py"),
+    ("Task 9: Confidence Gating (Gatilho System 2)", "examples/09_confidence_gating.py"),
+    ("Task 10: Teste de Fogo Visual (ViZDoom Transfer)", "examples/10_vizdoom_visual_transfer.py"),
 ]
 
 

@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple, Union
 import gymnasium as gym
 import numpy as np
@@ -8,6 +9,19 @@ from torch.distributions import Distribution
 from system1_engine.core.encoders import ImpalaVisualFrontEnd, VectorFrontEnd
 from system1_engine.core.heads import CategoricalPolicyHead, GaussianPolicyHead, ValueHead
 from system1_engine.core.trunk import System1Trunk
+
+
+@dataclass(frozen=True)
+class ReflexDecision:
+    """Resultado estruturado e amortizado da decisão do System 1 com telemetria de incerteza."""
+
+    action: Union[int, np.ndarray]
+    confidence: float          # [0.0, 1.0] - Probabilidade da ação escolhida
+    uncertainty: float         # [0.0, 1.0] - Entropia normalizada
+    margin: float              # [0.0, 1.0] - Diferença entre as duas maiores probabilidades
+    is_uncertain: bool         # Gatilho de invocação para o System 2
+    entropy: float             # Entropia bruta de Shannon
+    latent_value: Optional[float] = None  # Valor estimado V(s) se solicitado
 
 
 class UniversalS1Agent(nn.Module):
@@ -158,10 +172,15 @@ class UniversalS1Agent(nn.Module):
     def act_fast(
         self,
         obs_dict: Dict[str, Any],
-    ) -> Union[int, np.ndarray]:
+        return_decision: bool = False,
+        uncertainty_threshold: float = 0.70,
+        confidence_threshold: float = 0.50,
+        return_value: bool = False,
+    ) -> Union[int, np.ndarray, ReflexDecision]:
         """Ultra-fast deterministic single-forward reflex inference.
 
         Optimized for zero autograd overhead, minimal allocation, and <= 0.8ms latency on CPU.
+        If return_decision=True, returns ReflexDecision with uncertainty gating signals.
         """
         raw_obs = obs_dict["obs"]
         raw_action = obs_dict["prev_action"]
@@ -244,9 +263,79 @@ class UniversalS1Agent(nn.Module):
         # Policy decision
         if self.is_discrete:
             logits = self.policy_head.linear(h)
-            action = int(torch.argmax(logits, dim=-1).item())
-            return action
+            if not return_decision:
+                action = int(torch.argmax(logits, dim=-1).item())
+                return action
+
+            # Cálculo de incerteza e gatilho do System 2
+            probs = torch.softmax(logits.squeeze(0).squeeze(0), dim=-1)
+            action = int(torch.argmax(probs, dim=-1).item())
+            n_acts = probs.shape[0]
+
+            if n_acts > 1:
+                top_probs, _ = torch.topk(probs, k=min(2, n_acts))
+                confidence = float(top_probs[0].item())
+                margin = float((top_probs[0] - top_probs[1]).item())
+                entropy = float(-torch.sum(probs * torch.log(probs + 1e-8)).item())
+                max_entropy = float(np.log(n_acts))
+                uncertainty = float(np.clip(entropy / max_entropy, 0.0, 1.0))
+            else:
+                confidence = 1.0
+                margin = 1.0
+                entropy = 0.0
+                uncertainty = 0.0
+
+            is_uncertain = (uncertainty >= uncertainty_threshold) or (confidence < confidence_threshold)
+            latent_val = float(self.value_head(h).squeeze().item()) if return_value else None
+
+            return ReflexDecision(
+                action=action,
+                confidence=confidence,
+                uncertainty=uncertainty,
+                margin=margin,
+                is_uncertain=is_uncertain,
+                entropy=entropy,
+                latent_value=latent_val,
+            )
         else:
             mu = self.policy_head.mu_net(h)
             action_np = mu.squeeze(0).squeeze(0).cpu().numpy()
-            return action_np
+            if not return_decision:
+                return action_np
+
+            std = torch.exp(self.policy_head.log_std).cpu().numpy()
+            mean_std = float(np.mean(std))
+            confidence = float(1.0 / (1.0 + mean_std))
+            entropy = float(0.5 * np.sum(1.0 + np.log(2.0 * np.pi * (std ** 2))))
+            uncertainty = float(np.clip(mean_std / 2.0, 0.0, 1.0))
+            is_uncertain = uncertainty >= uncertainty_threshold
+            latent_val = float(self.value_head(h).squeeze().item()) if return_value else None
+
+            return ReflexDecision(
+                action=action_np,
+                confidence=confidence,
+                uncertainty=uncertainty,
+                margin=0.0,
+                is_uncertain=is_uncertain,
+                entropy=entropy,
+                latent_value=latent_val,
+            )
+
+    @torch.no_grad()
+    def act_with_confidence(
+        self,
+        obs_dict: Dict[str, Any],
+        uncertainty_threshold: float = 0.70,
+        confidence_threshold: float = 0.50,
+        return_value: bool = False,
+    ) -> ReflexDecision:
+        """Executa a decisão reflexiva retornando a estrutura ReflexDecision com o sinal de gatilho."""
+        decision = self.act_fast(
+            obs_dict=obs_dict,
+            return_decision=True,
+            uncertainty_threshold=uncertainty_threshold,
+            confidence_threshold=confidence_threshold,
+            return_value=return_value,
+        )
+        assert isinstance(decision, ReflexDecision)
+        return decision

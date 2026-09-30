@@ -13,7 +13,7 @@ from system1_engine.core.heads import (
     ValueHead,
 )
 from system1_engine.core.trunk import ResMLPBlock, System1Trunk
-from system1_engine.core.agent import UniversalS1Agent
+from system1_engine.core.agent import ReflexDecision, UniversalS1Agent
 
 __all__ = [
     "StateEncoder",
@@ -29,4 +29,5 @@ __all__ = [
     "GaussianPolicyHead",
     "ValueHead",
     "UniversalS1Agent",
+    "ReflexDecision",
 ]

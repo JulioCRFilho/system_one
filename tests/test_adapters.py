@@ -242,6 +242,25 @@ def test_factory_make_game_env():
     assert n_obs["obs"].shape == (2, 84, 84)
     n_env.close()
 
+    # Nível 3: Native ViZDoom Real
+    vzd_env = make_game_env(
+        "native",
+        {
+            "engine_type": "vizdoom",
+            "scenario_path": "basic.cfg",
+            "args": {"headless": True, "frame_skip": 4},
+            "is_visual": True,
+            "channels": 1,
+        },
+    )
+    assert isinstance(vzd_env, UniversalS1Wrapper)
+    assert vzd_env.is_visual
+    v_obs, _ = vzd_env.reset()
+    assert v_obs["obs"].shape == (2, 84, 84)
+    next_obs, rew, term, trunc, _ = vzd_env.step(0)
+    assert next_obs["obs"].shape == (2, 84, 84)
+    vzd_env.close()
+
     # Erro com tipo inválido
     with pytest.raises(ValueError):
         make_game_env("invalid_adapter", {})
