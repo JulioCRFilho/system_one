@@ -95,6 +95,23 @@ def train_mode(args: argparse.Namespace) -> None:
             )
             print(f"Checkpoint successfully saved to: {args.save}")
 
+        if tracker:
+            tracker.set_completed(True)
+
+        if web_server:
+            dashboard_url = f"http://{args.host}:{args.port}"
+            print("\n" + "=" * 70)
+            print("🏁 Treinamento concluído com sucesso!")
+            print(f"🌐 Painel Web mantido ativo para inspeção em: {dashboard_url}")
+            print("⌨️  Pressione Ctrl+C no terminal para encerrar o servidor...")
+            print("=" * 70)
+            if not getattr(args, "no_wait", False) and sys.stdin.isatty():
+                try:
+                    while True:
+                        time.sleep(1.0)
+                except KeyboardInterrupt:
+                    print("\nEncerrando servidor web...")
+
     finally:
         if web_server:
             web_server.stop()
@@ -126,6 +143,12 @@ def run_mode(args: argparse.Namespace) -> None:
     if web_server:
         web_server.start()
 
+    target_fps = args.fps
+    if target_fps is None:
+        target_fps = 50.0 if args.web_panel else 0.0
+
+    dt_target = (1.0 / target_fps) if target_fps > 0 else 0.0
+
     try:
         def execute_eval_loop() -> None:
             for ep in range(args.episodes):
@@ -136,6 +159,7 @@ def run_mode(args: argparse.Namespace) -> None:
                 done = False
 
                 while not done:
+                    t_step_start = time.perf_counter()
                     if tracker is not None:
                         t0 = time.perf_counter_ns()
                         decision = agent.act_with_confidence(obs_dict)
@@ -162,6 +186,12 @@ def run_mode(args: argparse.Namespace) -> None:
                     ep_reward += reward
                     steps += 1
 
+                    if dt_target > 0:
+                        elapsed = time.perf_counter() - t_step_start
+                        sleep_time = dt_target - elapsed
+                        if sleep_time > 0:
+                            time.sleep(sleep_time)
+
                 if not args.live_stats:
                     print(f"Episode {ep + 1}/{args.episodes} | Return: {ep_reward:.1f} | Steps: {steps}")
 
@@ -171,6 +201,23 @@ def run_mode(args: argparse.Namespace) -> None:
             dashboard.render_once()
         else:
             execute_eval_loop()
+
+        if tracker:
+            tracker.set_completed(True)
+
+        if web_server:
+            dashboard_url = f"http://{args.host}:{args.port}"
+            print("\n" + "=" * 70)
+            print(f"🏁 Avaliação concluída com sucesso! ({args.episodes} episódios)")
+            print(f"🌐 Painel Web mantido ativo para inspeção em: {dashboard_url}")
+            print("⌨️  Pressione Ctrl+C no terminal para encerrar o servidor...")
+            print("=" * 70)
+            if not getattr(args, "no_wait", False) and sys.stdin.isatty():
+                try:
+                    while True:
+                        time.sleep(1.0)
+                except KeyboardInterrupt:
+                    print("\nEncerrando servidor web...")
 
     finally:
         if web_server:
@@ -282,6 +329,18 @@ def main() -> None:
         type=str,
         default="127.0.0.1",
         help="Host address for web telemetry server (default: 127.0.0.1)",
+    )
+    parser.add_argument(
+        "--fps",
+        type=float,
+        default=None,
+        help="Cadência em FPS para o modo run (padrão: 50.0 quando --web-panel está ativo, ou 0 para velocidade máxima desimpedida)",
+    )
+    parser.add_argument(
+        "--no-wait",
+        action="store_true",
+        default=False,
+        help="Não aguarda confirmação com Ctrl+C ao término da execução com --web-panel",
     )
 
     args = parser.parse_args()

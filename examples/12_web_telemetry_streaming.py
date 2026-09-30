@@ -31,8 +31,9 @@ from system1_engine.telemetry import LiveStatsTracker, TelemetryServer
 def run_web_streaming(
     host: str = "127.0.0.1",
     port: int = 8050,
-    steps: int = 600,
+    steps: int = 400,
     interactive: bool = False,
+    keep_alive: bool = False,
     refresh_hz: float = 15.0,
 ) -> None:
     print("=" * 78)
@@ -132,6 +133,8 @@ def run_web_streaming(
     except KeyboardInterrupt:
         print("\n  ⚠️ Interrupção manual solicitada (Ctrl+C).")
 
+    tracker.set_completed(True)
+
     # 4. Verificação de integridade da API REST
     print("\n🔍 Validando integridade do endpoint REST /api/metrics...")
     try:
@@ -142,6 +145,17 @@ def run_web_streaming(
         print(f"  • Throughput registrado   : {data.get('fps', 0.0):.1f} steps/s")
     except Exception as e:
         print(f"  ⚠️ Não foi possível validar endpoint REST: {e}")
+
+    if keep_alive and sys.stdin.isatty():
+        print("\n" + "=" * 78)
+        print(f"🌐 Servidor mantido ativo para inspeção em: {dashboard_url}")
+        print("⌨️  Pressione Ctrl+C para encerrar o servidor...")
+        print("=" * 78)
+        try:
+            while True:
+                time.sleep(1.0)
+        except KeyboardInterrupt:
+            print("\nEncerrando servidor...")
 
     # 5. Encerramento gracioso do servidor
     server.stop()
@@ -160,6 +174,7 @@ def main():
     parser.add_argument("--port", type=int, default=8050, help="Porta do servidor HTTP (padrão: 8050)")
     parser.add_argument("--steps", type=int, default=400, help="Passos de execução em modo automático (padrão: 400)")
     parser.add_argument("--interactive", action="store_true", help="Executa indefinidamente até Ctrl+C")
+    parser.add_argument("--keep-alive", action="store_true", help="Mantém o servidor web ativo após o término dos passos até Ctrl+C")
     parser.add_argument("--hz", type=float, default=15.0, help="Frequência de streaming SSE em Hz (padrão: 15.0)")
 
     args = parser.parse_args()
@@ -168,6 +183,7 @@ def main():
         port=args.port,
         steps=args.steps,
         interactive=args.interactive,
+        keep_alive=args.keep_alive,
         refresh_hz=args.hz,
     )
 

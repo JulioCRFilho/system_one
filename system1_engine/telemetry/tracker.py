@@ -30,6 +30,9 @@ class PhaseMetrics:
     clip_fractions: deque = field(default_factory=lambda: deque(maxlen=100))
     learning_rate: float = 0.0
 
+    # Estado de Execução
+    is_completed: bool = False
+
 
 class LiveStatsTracker:
     """Coletor centralizado de telemetria de alta frequência com overhead < 2 µs."""
@@ -112,7 +115,13 @@ class LiveStatsTracker:
             "clip_frac": m.clip_fractions[-1] if m.clip_fractions else 0.0,
             "lr": m.learning_rate,
             "grad_norms": dict(m.grad_norms),
+            # Estado do Ciclo de Vida
+            "is_completed": m.is_completed,
         }
+
+    def set_completed(self, completed: bool = True) -> None:
+        """Marca o ciclo de vida como concluído para estabilização dos gráficos no painel."""
+        self.metrics.is_completed = completed
 
     def reset(self) -> None:
         """Zera as métricas acumuladas."""

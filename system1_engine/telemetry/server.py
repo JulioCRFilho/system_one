@@ -210,9 +210,20 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         document.getElementById('stat-ploss').innerText = (data.policy_loss >= 0 ? '+' : '') + data.policy_loss.toFixed(4);
         document.getElementById('stat-vloss').innerText = data.value_loss.toFixed(4);
 
+        if (data.is_completed) {
+          document.getElementById('stat-status').innerText = 'CONCLUÍDO';
+          document.getElementById('stat-status').className = 'px-2 py-0.5 rounded text-xs bg-blue-950 text-blue-300 border border-blue-800 font-semibold';
+          document.getElementById('status-indicator').className = 'status-dot bg-blue-500';
+        } else {
+          document.getElementById('stat-status').innerText = 'STREAMING';
+          document.getElementById('stat-status').className = 'px-2 py-0.5 rounded text-xs bg-green-950 text-green-300 border border-green-800 font-semibold';
+          document.getElementById('status-indicator').className = 'status-dot bg-green-500 animate-pulse';
+        }
+
         // Atualiza arrays de gráfico (janela deslizante de 30 pontos)
         const pushPoint = (chart, dsIdx, val) => {
           const ds = chart.data.datasets[dsIdx].data;
+          if (data.is_completed && ds.length > 0) return;
           ds.push(val);
           if (ds.length > 30) ds.shift();
         };
