@@ -122,34 +122,54 @@ do shell script "open http://127.0.0.1:8050"
     subprocess.run(["osacompile", "-o", app_path, tmp_scpt], check=True)
     os.remove(tmp_scpt)
 
-    print("[3/4] Injetando metadados e ícone no bundle...")
+    print("[3/4] Injetando metadados, removendo Assets.car e configurando ícone...")
     target_icns = os.path.join(app_path, "Contents/Resources/applet.icns")
     shutil.copy(icns_path, target_icns)
 
+    # Remove o catálogo compilado padrão do AppleScript que sobrescreve o .icns
+    assets_car = os.path.join(app_path, "Contents/Resources/Assets.car")
+    if os.path.exists(assets_car):
+        os.remove(assets_car)
+
+    import plistlib
     plist_path = os.path.join(app_path, "Contents/Info.plist")
     if os.path.exists(plist_path):
-        with open(plist_path, "r") as f:
-            plist_data = f.read()
-        plist_data = plist_data.replace(
-            "<key>CFBundleName</key>\n\t<string>applet</string>",
-            "<key>CFBundleName</key>\n\t<string>System 1 HUD</string>\n\t<key>CFBundleDisplayName</key>\n\t<string>System 1 HUD</string>"
-        )
-        with open(plist_path, "w") as f:
-            f.write(plist_data)
+        with open(plist_path, "rb") as f:
+            pl = plistlib.load(f)
+        
+        # Remove CFBundleIconName para forçar uso de CFBundleIconFile (.icns)
+        if "CFBundleIconName" in pl:
+            del pl["CFBundleIconName"]
+        pl["CFBundleIconFile"] = "applet.icns"
+        pl["CFBundleName"] = "System 1 HUD"
+        pl["CFBundleDisplayName"] = "System 1 HUD"
+        
+        with open(plist_path, "wb") as f:
+            plistlib.dump(pl, f)
 
-    subprocess.run(["touch", app_path])
+    # Limpa atributos estendidos (quarentena/FinderInfo) e assina o app
+    subprocess.run(["xattr", "-cr", app_path], check=True)
+    subprocess.run(["codesign", "--force", "--deep", "--sign", "-", app_path], check=True)
 
-    print("[4/4] Copiando para ~/Applications...")
+    print("[4/4] Copiando para ~/Applications e atualizando LaunchServices/Dock...")
     os.makedirs(os.path.expanduser("~/Applications"), exist_ok=True)
     if os.path.exists(user_apps_path):
         shutil.rmtree(user_apps_path)
     shutil.copytree(app_path, user_apps_path)
 
+    # Registra no LaunchServices e limpa cache do Dock
+    lsregister_bin = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+    if os.path.exists(lsregister_bin):
+        subprocess.run([lsregister_bin, "-f", app_path], check=False)
+        subprocess.run([lsregister_bin, "-f", user_apps_path], check=False)
+
+    subprocess.run(["touch", app_path, user_apps_path])
+    subprocess.run(["killall", "Dock"], check=False)
+
     print("\n✅ Sucesso! O aplicativo 'System 1 HUD.app' está pronto:")
     print(f"   • No projeto: {app_path}")
     print(f"   • No sistema: {user_apps_path}")
-    print("\n💡 Para adicionar ao Dock:")
-    print("   Basta arrastar o arquivo 'System 1 HUD.app' diretamente para o seu Dock no macOS!")
+    print("\n💡 O Dock foi atualizado e o ícone personalizado de raio elétrico já está ativo!")
 
 if __name__ == "__main__":
     main()
