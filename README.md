@@ -202,7 +202,8 @@ python -m system1_engine.cli --mode run --env CartPole-v1 --load s1_cartpole.pt 
 | `--load` | `str` | `None` | Checkpoint `.pt` file to load for evaluation. |
 | `--save` | `str` | `None` | Checkpoint destination path for training. |
 | `--transfer-from` | `str` | `None` | Source checkpoint to transfer transferable trunk weights from. |
-| `--freeze-trunk` | `flag` | `True` | Freeze recurrent trunk parameters (`requires_grad = False`). |
+| `--freeze-trunk` / `--no-freeze-trunk` | `flag` | `True` | Freeze recurrent trunk parameters (`requires_grad = False`). Use `--no-freeze-trunk` for fine-tuning. |
+| `--entropy-coef` | `float` | `0.005` | Policy entropy bonus coefficient for PPO exploration. |
 | `--lr` | `float` | `7e-4` | Initial Adam optimizer learning rate. |
 | `--target-return` | `float` | `475.0` | Target moving average return for early stopping. |
 | `--rollout-steps` | `int` | `1024` | Rollout buffer capacity per PPO iteration. |

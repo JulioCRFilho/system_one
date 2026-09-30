@@ -62,6 +62,7 @@ def train_mode(args: argparse.Namespace) -> None:
             rollout_steps=args.rollout_steps,
             chunk_length=args.chunk_length,
             chunk_batch_size=args.chunk_batch_size,
+            entropy_coef=args.entropy_coef,
             tracker=tracker,
         )
 
@@ -297,10 +298,11 @@ def main() -> None:
     )
     parser.add_argument(
         "--freeze-trunk",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         default=True,
-        help="Freeze trunk parameters during transfer",
+        help="Freeze trunk parameters during transfer (use --no-freeze-trunk to fine-tune the trunk)",
     )
+    parser.add_argument("--entropy-coef", type=float, default=0.005, help="Entropy coefficient for PPO exploration (default: 0.005)")
     parser.add_argument("--episodes", type=int, default=5, help="Number of episodes for run mode")
     parser.add_argument("--lr", type=float, default=7e-4, help="Learning rate")
     parser.add_argument(

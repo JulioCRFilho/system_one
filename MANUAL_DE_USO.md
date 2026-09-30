@@ -1089,7 +1089,8 @@ O System 1 Engine inclui uma interface de linha de comando (CLI) completa e padr
 | `--load` | `str` | `None` | Caminho do arquivo de checkpoint `.pt` para carregar pesos no modo `run`. |
 | `--save` | `str` | `None` | Caminho de destino para salvar o checkpoint treinado (`train`). |
 | `--transfer-from` | `str` | `None` | Caminho do checkpoint de origem para transferir pesos do tronco (`System1Trunk`). |
-| `--freeze-trunk` | `flag` | `True` | Congela os parâmetros do tronco (`requires_grad = False`) durante a transferência. |
+| `--freeze-trunk` / `--no-freeze-trunk` | `flag` | `True` | Congela os parâmetros do tronco (`requires_grad = False`) durante a transferência. Use `--no-freeze-trunk` para fine-tuning. |
+| `--entropy-coef` | `float` | `0.005` | Coeficiente de entropia da política no PPO (controla a taxa de exploração estocástica). |
 | `--lr` | `float` | `7e-4` | Taxa de aprendizado inicial do otimizador Adam. |
 | `--target-return` | `float` | `475.0` | Meta de recompensa média móvel para parada antecipada no treino. |
 | `--rollout-steps` | `int` | `1024` | Tamanho do buffer de coleta por iteração do algoritmo PPO. |
