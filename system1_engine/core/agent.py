@@ -33,6 +33,8 @@ class UniversalS1Agent(nn.Module):
         reward_fixed: bool = False,
     ) -> None:
         super().__init__()
+        if isinstance(obs_space, gym.spaces.Dict) and "obs" in obs_space.spaces:
+            obs_space = obs_space.spaces["obs"]
         self.obs_space = obs_space
         self.action_space = action_space
 
@@ -166,15 +168,26 @@ class UniversalS1Agent(nn.Module):
         raw_reward = obs_dict["prev_reward"]
 
         # Fast tensor conversions
-        if isinstance(raw_obs, torch.Tensor):
-            t_obs = raw_obs
-            if t_obs.dim() == 1:
-                t_obs = t_obs.unsqueeze(0).unsqueeze(0)
-            elif t_obs.dim() == 2:
-                t_obs = t_obs.unsqueeze(1)
+        if self.is_visual:
+            if isinstance(raw_obs, torch.Tensor):
+                t_obs = raw_obs
+                if t_obs.dim() == 3:
+                    t_obs = t_obs.unsqueeze(0).unsqueeze(0)
+                elif t_obs.dim() == 4:
+                    t_obs = t_obs.unsqueeze(1)
+            else:
+                arr = np.asarray(raw_obs, dtype=np.float32)
+                t_obs = torch.from_numpy(arr).unsqueeze(0).unsqueeze(0)
         else:
-            arr = np.asarray(raw_obs, dtype=np.float32)
-            t_obs = torch.from_numpy(arr).view(1, 1, -1)
+            if isinstance(raw_obs, torch.Tensor):
+                t_obs = raw_obs
+                if t_obs.dim() == 1:
+                    t_obs = t_obs.unsqueeze(0).unsqueeze(0)
+                elif t_obs.dim() == 2:
+                    t_obs = t_obs.unsqueeze(1)
+            else:
+                arr = np.asarray(raw_obs, dtype=np.float32)
+                t_obs = torch.from_numpy(arr).view(1, 1, -1)
 
         if self.is_visual:
             if isinstance(raw_action, torch.Tensor):
