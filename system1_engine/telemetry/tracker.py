@@ -22,6 +22,8 @@ class PhaseMetrics:
     episode_returns: deque = field(default_factory=lambda: deque(maxlen=100))
     episode_lengths: deque = field(default_factory=lambda: deque(maxlen=100))
     total_steps: int = 0
+    best_return: Optional[float] = None
+    best_mean_return: Optional[float] = None
 
     # Fase 3: Otimização PPO & Saúde dos Gradientes
     policy_losses: deque = field(default_factory=lambda: deque(maxlen=100))
@@ -72,8 +74,18 @@ class LiveStatsTracker:
         m.current_episode_length += 1
 
         if done:
-            m.episode_returns.append(m.current_episode_return)
+            ep_ret = float(m.current_episode_return)
+            m.episode_returns.append(ep_ret)
             m.episode_lengths.append(m.current_episode_length)
+            if m.best_return is None or ep_ret > m.best_return:
+                m.best_return = ep_ret
+
+            rolling_20 = list(m.episode_returns)[-20:]
+            if rolling_20:
+                cur_mean = float(np.mean(rolling_20))
+                if m.best_mean_return is None or cur_mean > m.best_mean_return:
+                    m.best_mean_return = cur_mean
+
             m.current_episode_return = 0.0
             m.current_episode_length = 0
 
@@ -106,6 +118,8 @@ class LiveStatsTracker:
             # Fase 2: Ambiente & Rollout
             "fps": m.fps,
             "mean_return_20": float(np.mean(list(m.episode_returns)[-20:])) if m.episode_returns else 0.0,
+            "best_return": float(m.best_return) if m.best_return is not None else 0.0,
+            "best_mean_return": float(m.best_mean_return) if m.best_mean_return is not None else 0.0,
             "total_steps": m.total_steps,
             "episodes_completed": len(m.episode_returns),
             "current_episode_return": m.current_episode_return,

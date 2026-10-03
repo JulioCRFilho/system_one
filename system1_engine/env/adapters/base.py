@@ -93,6 +93,13 @@ class BaseGameAdapter(gym.Env, ABC):
 
         return obs, float(reward), bool(terminated), bool(truncated), info
 
+    def render(self) -> Optional[np.ndarray]:
+        """Retorna frame visual para streaming in-browser ou renderização."""
+        return self._render_impl()
+
+    def _render_impl(self) -> Optional[np.ndarray]:
+        return None
+
     def close(self) -> None:
         """Encerra recursos de hardware, sockets ou processos anexados."""
         self._close_impl()

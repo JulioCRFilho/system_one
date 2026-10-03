@@ -18,29 +18,80 @@ def build_environment(
     env_id: str,
     scenario: Optional[str] = None,
     render: bool = False,
+    is_training: bool = False,
+    frame_skip: Optional[int] = None,
 ) -> UniversalS1Wrapper:
-    """Instancia o ambiente apropriado (Gymnasium padrão ou Adaptador Nativo ViZDoom)."""
+    """Instancia o ambiente apropriado (Gymnasium padrão ou Adaptador Nativo ViZDoom) no Modo Puro Universal."""
     if env_id.lower() in ["vizdoom", "native"]:
         scenario_path = scenario or "basic.cfg"
-        return make_game_env(
+        fs = frame_skip if frame_skip is not None else 4
+        env = make_game_env(
             "native",
             {
                 "engine_type": "vizdoom",
                 "scenario_path": scenario_path,
-                "args": {"headless": not render},
+                "args": {"headless": not render, "frame_skip": fs},
             },
         )
+        return env
     render_mode = "human" if render else None
     raw_env = gym.make(env_id, render_mode=render_mode)
+    if env_id == "MountainCar-v0":
+        from system1_engine.env.adapters.mountain_car import (
+            MountainCarEnergyRewardWrapper,
+            MountainCarNormalizedWrapper,
+        )
+        if is_training:
+            raw_env = MountainCarEnergyRewardWrapper(raw_env)
+        raw_env = MountainCarNormalizedWrapper(raw_env)
     return UniversalS1Wrapper(raw_env)
 
 
+def resolve_compute_device(device_pref: str = "auto", is_training: bool = True) -> torch.device:
+    """Resolve o dispositivo de computação (CPU, MPS ou CUDA)."""
+    pref = (device_pref or "auto").strip().lower()
+    has_cuda = torch.cuda.is_available()
+    has_mps = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+
+    if pref == "cpu":
+        return torch.device("cpu")
+
+    if pref in ("gpu", "cuda", "mps"):
+        if pref == "cuda" and has_cuda:
+            return torch.device("cuda")
+        if pref == "mps" and has_mps:
+            return torch.device("mps")
+        if has_cuda:
+            return torch.device("cuda")
+        if has_mps:
+            return torch.device("mps")
+        print("[Warning] Requested GPU device not found (no CUDA or MPS available). Falling back to CPU.")
+        return torch.device("cpu")
+
+    # pref == "auto"
+    if is_training:
+        if has_cuda:
+            return torch.device("cuda")
+        if has_mps:
+            return torch.device("mps")
+        return torch.device("cpu")
+    else:
+        return torch.device("cpu")
+
+
 def train_mode(args: argparse.Namespace) -> None:
-    print(f"=== Starting Training Mode on {args.env} ===")
-    env = build_environment(args.env, scenario=args.scenario, render=getattr(args, "render", False))
+    device = resolve_compute_device(getattr(args, "device", "auto"), is_training=True)
+    print(f"=== Starting Training Mode on {args.env} [Device: {device.type.upper()} (preference: {getattr(args, 'device', 'auto')})] ===")
+    env = build_environment(
+        args.env,
+        scenario=args.scenario,
+        render=getattr(args, "render", False),
+        is_training=True,
+        frame_skip=getattr(args, "frame_skip", None),
+    )
 
     agent = UniversalS1Agent(
-        obs_space=env.env.observation_space,
+        obs_space=env.observation_space,
         action_space=env.action_space,
     )
 
@@ -76,6 +127,7 @@ def train_mode(args: argparse.Namespace) -> None:
             chunk_batch_size=args.chunk_batch_size,
             entropy_coef=args.entropy_coef,
             tracker=tracker,
+            device=device,
         )
 
         def train_callback(steps: int, mean_ret: float) -> None:
@@ -135,13 +187,20 @@ def train_mode(args: argparse.Namespace) -> None:
 
 
 def run_mode(args: argparse.Namespace) -> None:
-    print(f"=== Running Agent Evaluation on {args.env} ===")
-    env = build_environment(args.env, scenario=args.scenario, render=getattr(args, "render", False))
+    device = resolve_compute_device(getattr(args, "device", "auto"), is_training=False)
+    print(f"=== Running Agent Evaluation on {args.env} [Device: {device.type.upper()}] ===")
+    env = build_environment(
+        args.env,
+        scenario=args.scenario,
+        render=getattr(args, "render", False),
+        is_training=False,
+        frame_skip=getattr(args, "frame_skip", None),
+    )
 
     agent = UniversalS1Agent(
-        obs_space=env.env.observation_space,
+        obs_space=env.observation_space,
         action_space=env.action_space,
-    )
+    ).to(device)
 
     if args.load:
         checkpoint = torch.load(args.load, map_location="cpu", weights_only=False)
@@ -212,6 +271,11 @@ def run_mode(args: argparse.Namespace) -> None:
                     ep_reward += reward
                     steps += 1
 
+                    if getattr(args, "render", False) and not args.live_stats:
+                        action_labels = {0: "ESQUERDA ⬅️", 1: "DIREITA ➡️", 2: "DISPARO 💥"}
+                        act_str = action_labels.get(action, f"AÇÃO {action}")
+                        print(f"  [Passo {steps:2d}] {act_str:<15} -> Recompensa: {reward:+.1f}")
+
                     if dt_target > 0:
                         elapsed = time.perf_counter() - t_step_start
                         sleep_time = dt_target - elapsed
@@ -252,14 +316,15 @@ def run_mode(args: argparse.Namespace) -> None:
 
 
 def benchmark_mode(args: argparse.Namespace) -> None:
-    print("=== Running act_fast() CPU Latency Benchmark ===")
+    device = resolve_compute_device(getattr(args, "device", "cpu"), is_training=False)
+    print(f"=== Running act_fast() {device.type.upper()} Latency Benchmark ===")
     raw_env = gym.make("CartPole-v1")
     env = UniversalS1Wrapper(raw_env)
 
     agent = UniversalS1Agent(
         obs_space=env.env.observation_space,
         action_space=env.action_space,
-    )
+    ).to(device)
     agent.eval()
 
     obs_dict, _ = env.reset()
@@ -283,7 +348,7 @@ def benchmark_mode(args: argparse.Namespace) -> None:
     min_latency = float(np.min(latencies))
     max_latency = float(np.max(latencies))
 
-    print(f"Benchmark over {args.steps} sequential steps:")
+    print(f"Benchmark over {args.steps} sequential steps ({device.type.upper()}):")
     print(f"  Average Latency : {avg_latency:.4f} ms (Budget: <= 0.8000 ms)")
     print(f"  Median Latency  : {med_latency:.4f} ms")
     print(f"  P95 Latency     : {p95_latency:.4f} ms")
@@ -307,6 +372,13 @@ def main() -> None:
     )
     parser.add_argument("--env", type=str, default="CartPole-v1", help="Gymnasium environment ID or 'vizdoom'")
     parser.add_argument("--scenario", type=str, default=None, help="Scenario file for vizdoom/native environment")
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="auto",
+        choices=["auto", "gpu", "cpu", "mps", "cuda"],
+        help="Compute device for neural operations: auto (GPU for training, CPU for inference), gpu, cpu, mps, or cuda (default: auto)",
+    )
     parser.add_argument("--steps", type=int, default=40000, help="Training steps or benchmark steps")
     parser.add_argument("--save", type=str, default=None, help="Path to save checkpoint (default: None)")
     parser.add_argument("--load", type=str, default=None, help="Path to load checkpoint for run mode")
@@ -381,6 +453,12 @@ def main() -> None:
         action="store_true",
         default=False,
         help="Habilita visualização gráfica do ambiente em tempo real na tela (render_mode='human')",
+    )
+    parser.add_argument(
+        "--frame-skip",
+        type=int,
+        default=None,
+        help="Frame skip para ambientes de motor nativo (padrão: 1 ao renderizar, 4 em headless)",
     )
 
     args = parser.parse_args()

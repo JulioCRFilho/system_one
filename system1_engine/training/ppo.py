@@ -81,6 +81,7 @@ class RecurrentPPOTrainer:
         current_obs_dict: Dict[str, Any],
         current_hx: Optional[torch.Tensor],
         episode_start: bool,
+        step_callback: Optional[Callable[[], None]] = None,
     ) -> Tuple[Dict[str, Any], Optional[torch.Tensor], bool, float]:
         """Collects rollout_steps interactions in the environment."""
         self.buffer.reset()
@@ -170,6 +171,9 @@ class RecurrentPPOTrainer:
 
                 self.curr_ep_return += reward
                 self.total_steps += 1
+
+                if step_callback is not None:
+                    step_callback()
 
                 # Save transition into buffer: 'terminated' flags true terminal failure for GAE
                 self.buffer.add(
@@ -348,6 +352,7 @@ class RecurrentPPOTrainer:
         target_return: Optional[float] = 475.0,
         seed: Optional[int] = None,
         callback: Optional[Callable[[int, float], None]] = None,
+        step_callback: Optional[Callable[[], None]] = None,
         verbose: bool = True,
     ) -> float:
         """Trains the agent until max_steps or target_return is reached."""
@@ -369,18 +374,21 @@ class RecurrentPPOTrainer:
         while self.total_steps < max_steps:
             iteration += 1
             obs_dict, hx, episode_start, mean_return = self.collect_rollouts(
-                obs_dict, hx, episode_start
+                obs_dict, hx, episode_start, step_callback=step_callback
             )
             metrics = self.train_epoch()
 
             if len(self.episode_returns) > 0:
                 best_mean_return = max(best_mean_return, mean_return)
+                if self.tracker is not None:
+                    self.tracker.metrics.best_mean_return = best_mean_return
 
             if verbose and iteration % 2 == 0:
+                peak_val = self.tracker.metrics.best_return if (self.tracker is not None and self.tracker.metrics.best_return is not None) else best_mean_return
                 print(
                     f"[Step {self.total_steps:6d}/{max_steps}] "
                     f"Mean Return (last 20 ep): {mean_return:.2f} | "
-                    f"Best: {best_mean_return:.2f} | "
+                    f"Pico: {peak_val:.2f} | "
                     f"Policy Loss: {metrics['policy_loss']:.4f} | "
                     f"Value Loss: {metrics['value_loss']:.4f}"
                 )

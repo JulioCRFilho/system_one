@@ -192,7 +192,7 @@
     <div class="flex flex-wrap gap-4 text-xs bg-gray-900/80 px-4 py-1.5 rounded border border-gray-800">
       <div>FPS Simulação: <span id="kpi-fps" class="font-bold text-green-400">0.0</span></div>
       <div>Passos: <span id="kpi-steps" class="font-bold text-yellow-400">0</span></div>
-      <div>Retorno Médio: <span id="kpi-return" class="font-bold text-cyan-400">0.00</span></div>
+      <div>Pico: <span id="kpi-return" class="font-bold text-cyan-400" title="Maior pontuação alcançada em um único episódio">0.00</span></div>
       <div>Latência P50: <span id="kpi-latency" class="font-bold text-pink-400">0.0 µs</span></div>
       <div>Confiança: <span id="kpi-confidence" class="font-bold text-emerald-400">0.0%</span></div>
     </div>
@@ -261,7 +261,7 @@
               <option value="my_way_home.cfg">my_way_home.cfg (Labirinto / Navegação)</option>
               <option value="custom">Outro cenário .cfg...</option>
             </select>
-            <input type="text" id="cfg-scenario" placeholder="Nome ou caminho do .cfg..." class="hud-input hidden" value="basic.cfg" />
+            <input type="text" id="cfg-scenario" placeholder="Nome ou caminho do .cfg..." class="hud-input hidden" value="basic.cfg" oninput="onCustomScenarioInput()" />
           </div>
         </div>
 
@@ -287,7 +287,7 @@
                   <span class="tooltip-bubble"><strong>--save</strong>: Nome do arquivo de checkpoint (.pt).<br>Salva os 18 tensores do tronco neural compartilhado + as cabeças específicas de política e valor ao concluir o treinamento ou bater o Target Return.</span>
                 </span>
               </label>
-              <button type="button" onclick="suggestCheckpointName()" class="badge-btn" title="Gera um nome de arquivo .pt contextualizado com o ambiente selecionado">🪄 Sugerir Nome</button>
+              <button type="button" onclick="suggestCheckpointName(true)" class="badge-btn" title="Gera ou incrementa um nome de arquivo .pt contextualizado com o ambiente e cenário selecionados">🪄 Sugerir Nome</button>
             </div>
             <div id="save-input-container" class="flex flex-col gap-1">
               <input type="text" id="cfg-save" placeholder="ex: s1_cartpole.pt" value="s1_cartpole.pt" class="hud-input" oninput="checkSaveConflict()" />
@@ -351,16 +351,18 @@
             </span>
           </div>
           <select id="cfg-render-mode" class="hud-input">
-            <option value="in_browser">In-Browser (HUD Stream MJPEG ao vivo)</option>
+            <option value="in_browser">In-Browser (Visualização Assíncrona Zero-Overhead)</option>
+            <option value="none">Headless (Sem Vídeo / Máxima Velocidade)</option>
             <option value="window">Janela Gráfica do Sistema (Pygame / OS)</option>
-            <option value="none">Headless (Sem Render / Velocidade Máxima)</option>
           </select>
-          <div class="flex items-center justify-between mt-2 gap-2">
+          
+          <!-- Controle de Cadência para Avaliação -->
+          <div id="group-fps-eval" class="hidden flex items-center justify-between mt-2 gap-2">
             <div class="flex items-center gap-1">
               <span class="text-[10px] text-gray-400">Cadência (--fps):</span>
               <span class="tooltip-wrap tooltip-left">
-                <span class="tooltip-icon" title="Taxa máxima de quadros por segundo da simulação. 0 = sem limite (velocidade máxima de hardware).">ⓘ</span>
-                <span class="tooltip-bubble"><strong>--fps</strong>: Cadência da simulação em quadros/seg.<br>• <em>0</em>: Sem limite (máxima velocidade de CPU/GPU).<br>• <em>30/50</em>: Taxa realista para inspeção visual humana.</span>
+                <span class="tooltip-icon" title="Taxa de reprodução para observação humana. 50 = tempo real; 0 = velocidade máxima.">ⓘ</span>
+                <span class="tooltip-bubble"><strong>--fps</strong>: Cadência de visualização na avaliação.<br>• <em>50</em>: Velocidade natural para inspeção visual.<br>• <em>0</em>: Executa à máxima velocidade do hardware.</span>
               </span>
             </div>
             <div class="flex items-center gap-1.5 flex-1 justify-end">
@@ -369,6 +371,39 @@
               <button type="button" onclick="setFPS(50)" class="badge-btn">👁️ 50</button>
               <input type="number" id="cfg-fps" value="50" min="0" max="120" class="hud-input w-16 text-right" />
             </div>
+          </div>
+
+          <!-- Indicador de Throughput Desimpedido no Treino -->
+          <div id="group-fps-train" class="flex items-center gap-1.5 mt-2 p-1.5 rounded bg-emerald-950/40 border border-emerald-800/60 text-[9px] text-emerald-300 font-mono">
+            <span>⚡</span>
+            <span>Processamento a 100% de capacidade (Desimpedido). In-browser amostrado em thread assíncrona sem limitar o treino.</span>
+          </div>
+        </div>
+
+        <!-- DISPOSITIVO DE COMPUTAÇÃO (--device) -->
+        <div class="border-t border-gray-800/80 pt-2 flex flex-col gap-1.5">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-1.5">
+              <label class="text-[11px] text-cyan-300 font-semibold flex items-center gap-1">
+                <span>⚡</span> Dispositivo (--device)
+              </label>
+              <span class="tooltip-wrap tooltip-left">
+                <span class="tooltip-icon" title="Hardware de processamento: Auto (recomendado), GPU (MPS/CUDA) ou CPU (universal).">ⓘ</span>
+                <span class="tooltip-bubble"><strong>--device</strong>: Seleciona o hardware para tensores neurais e gradientes.<br>• <strong>Auto</strong>: GPU para treino PPO (~6x mais rápido) e CPU pura para inferência (&lt; 2 ms sem overhead de barramento).<br>• <strong>GPU</strong>: Força aceleração gráfica (Apple Silicon MPS / NVIDIA CUDA).<br>• <strong>CPU</strong>: Modo puro universal em CPU (compatibilidade total).</span>
+              </span>
+            </div>
+            <div id="device-hw-badge" class="px-1.5 py-0.5 rounded text-[9px] font-mono bg-cyan-950 text-cyan-400 border border-cyan-800 flex items-center gap-1">
+              <span class="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
+              <span id="device-hw-text">Detectando...</span>
+            </div>
+          </div>
+          <select id="cfg-device" class="hud-input" onchange="onDeviceChange()">
+            <option value="auto">Auto (Recomendado: GPU p/ Treino, CPU p/ Avaliação)</option>
+            <option value="gpu">GPU (Aceleração Hardware: MPS / CUDA)</option>
+            <option value="cpu">CPU (Modo Puro Universal)</option>
+          </select>
+          <div id="device-hint" class="text-[9px] text-cyan-400 font-mono italic">
+            Auto: usa aceleração gráfica para BPTT/PPO e CPU pura para reflexo.
           </div>
         </div>
 
@@ -728,6 +763,14 @@
       document.getElementById('group-transfer').classList.toggle('hidden', mode !== 'train');
       document.getElementById('param-train-group').classList.toggle('hidden', mode !== 'train');
       document.getElementById('param-eval-group').classList.toggle('hidden', mode !== 'run');
+      document.getElementById('group-fps-eval').classList.toggle('hidden', mode !== 'run');
+      document.getElementById('group-fps-train').classList.toggle('hidden', mode === 'run');
+
+      if (mode === 'train') {
+        document.getElementById('cfg-fps').value = 0;
+      } else if (mode === 'run' && parseFloat(document.getElementById('cfg-fps').value) === 0) {
+        document.getElementById('cfg-fps').value = 50;
+      }
 
       suggestCheckpointName();
       validateCheckpointCompatibility();
@@ -739,10 +782,27 @@
       document.getElementById('group-vizdoom-scenario').classList.toggle('hidden', env !== 'vizdoom');
       document.getElementById('overlay-env').innerText = env === 'custom' ? (document.getElementById('cfg-custom-env').value || 'Custom') : env;
       
-      // Ajusta target return padrão de acordo com o ambiente
-      if (env === 'CartPole-v1') setTargetReturn(475.0);
-      else if (env === 'Acrobot-v1') setTargetReturn(-100.0);
-      else if (env === 'Pendulum-v1') setTargetReturn(-200.0);
+      // Ajusta target return e hiperparâmetros padrão de acordo com o ambiente
+      if (env === 'CartPole-v1') {
+        setTargetReturn(475.0); setEntropy(0.005);
+        document.getElementById('cfg-chunk-length').value = 16;
+        document.getElementById('cfg-rollout-steps').value = 1024;
+      }
+      else if (env === 'Acrobot-v1') {
+        setTargetReturn(-100.0); setEntropy(0.01);
+        document.getElementById('cfg-chunk-length').value = 16;
+        document.getElementById('cfg-rollout-steps').value = 1024;
+      }
+      else if (env === 'Pendulum-v1') {
+        setTargetReturn(-200.0); setEntropy(0.005);
+        document.getElementById('cfg-chunk-length').value = 16;
+        document.getElementById('cfg-rollout-steps').value = 1024;
+      }
+      else if (env === 'MountainCar-v0') {
+        setTargetReturn(-110.0); setEntropy(0.03);
+        document.getElementById('cfg-chunk-length').value = 32;
+        document.getElementById('cfg-rollout-steps').value = 2048;
+      }
 
       suggestCheckpointName();
       validateCheckpointCompatibility();
@@ -760,10 +820,19 @@
       const scenInp = document.getElementById('cfg-scenario');
       if (scenSel === 'custom') {
         scenInp.classList.remove('hidden');
+        if (!scenInp.value || scenInp.value === 'basic.cfg') {
+          scenInp.value = '';
+          scenInp.focus();
+        }
       } else {
         scenInp.classList.add('hidden');
         scenInp.value = scenSel;
       }
+      suggestCheckpointName();
+    }
+
+    function onCustomScenarioInput() {
+      suggestCheckpointName();
     }
 
     function toggleSaveInput() {
@@ -772,12 +841,121 @@
       document.getElementById('cfg-save').disabled = !enabled;
     }
 
-    function suggestCheckpointName() {
-      const env = document.getElementById('cfg-env').value;
-      const envName = env === 'custom' ? (document.getElementById('cfg-custom-env').value || 'env') : env;
-      const cleanName = envName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+    function getContextualEnvAndScenario() {
+      const envVal = document.getElementById('cfg-env').value;
+      let envClean = '';
+      let scenarioClean = '';
+
+      if (envVal === 'vizdoom') {
+        envClean = 'vizdoom';
+        const scenSel = document.getElementById('cfg-scenario-select').value;
+        const scenInp = document.getElementById('cfg-scenario');
+        let rawScen = scenSel === 'custom' ? scenInp.value.trim() : scenSel;
+        if (!rawScen) rawScen = 'basic.cfg';
+
+        // Extrai o nome base do cenário sem caminho e sem extensão .cfg
+        const baseScen = rawScen.split('/').pop().split('\\').pop().replace(/\.[^/.]+$/, '');
+        scenarioClean = baseScen.toLowerCase().replace(/[^a-z0-9]/g, '_').replace(/^_+|_+$/g, '').replace(/_{2,}/g, '_');
+      } else if (envVal === 'custom') {
+        const rawCustom = document.getElementById('cfg-custom-env').value.trim() || 'custom';
+        envClean = rawCustom.toLowerCase().replace(/[^a-z0-9]/g, '_').replace(/^_+|_+$/g, '').replace(/_{2,}/g, '_');
+      } else {
+        // Gymnasium padrão (ex: CartPole-v1, Acrobot-v1, MountainCar-v0, Pendulum-v1)
+        envClean = envVal.toLowerCase().replace(/[^a-z0-9]/g, '_').replace(/^_+|_+$/g, '').replace(/_{2,}/g, '_');
+      }
+
+      if (!envClean) envClean = 'env';
+      return { envVal, envClean, scenarioClean };
+    }
+
+    function getBaseCheckpointStem() {
+      const { envVal, envClean, scenarioClean } = getContextualEnvAndScenario();
       const suffix = activeMode === 'train' ? 'trained' : 'checkpoint';
-      document.getElementById('cfg-save').value = `s1_${cleanName}_${suffix}.pt`;
+
+      if (envVal === 'vizdoom') {
+        if (scenarioClean && scenarioClean !== 'vizdoom') {
+          return `s1_vizdoom_${scenarioClean}_${suffix}`;
+        }
+        return `s1_vizdoom_${suffix}`;
+      } else {
+        return `s1_${envClean}_${suffix}`;
+      }
+    }
+
+    function isCheckpointTaken(filename) {
+      if (!filename || !availableCheckpoints) return false;
+      const cleanFn = filename.toLowerCase();
+      return availableCheckpoints.some(p => {
+        const pClean = p.toLowerCase();
+        return pClean === cleanFn || pClean.endsWith('/' + cleanFn) || pClean.endsWith('\\' + cleanFn);
+      });
+    }
+
+    function suggestCheckpointName(isUserClick = false) {
+      const baseStem = getBaseCheckpointStem();
+      const saveInput = document.getElementById('cfg-save');
+      const currentVal = saveInput.value.trim();
+
+      if (isUserClick) {
+        // Reativa salvamento caso esteja desmarcado
+        const chkSave = document.getElementById('chk-enable-save');
+        if (chkSave && !chkSave.checked) {
+          chkSave.checked = true;
+          toggleSaveInput();
+        }
+      }
+
+      let chosenName = '';
+
+      if (isUserClick) {
+        // Se o usuário clicou explicitamente no botão 🪄 Sugerir Nome:
+        // Verifica se o valor atual já é uma variação deste baseStem (ex: baseStem.pt ou baseStem_v2.pt)
+        const stemRegex = new RegExp(`^${baseStem}(?:_v(\\d+))?\\.pt$`, 'i');
+        const match = currentVal.match(stemRegex);
+
+        if (match) {
+          // O usuário já está com esse prefixo, avança para a próxima versão livre
+          const currentVer = match[1] ? parseInt(match[1], 10) : 1;
+          let nextVer = currentVer + 1;
+          while (isCheckpointTaken(`${baseStem}_v${nextVer}.pt`)) {
+            nextVer++;
+          }
+          chosenName = `${baseStem}_v${nextVer}.pt`;
+        } else {
+          // Se estava com outro nome ou vazio, busca o primeiro nome livre para este ambiente/cenário
+          if (!isCheckpointTaken(`${baseStem}.pt`)) {
+            chosenName = `${baseStem}.pt`;
+          } else {
+            let ver = 2;
+            while (isCheckpointTaken(`${baseStem}_v${ver}.pt`)) {
+              ver++;
+            }
+            chosenName = `${baseStem}_v${ver}.pt`;
+          }
+        }
+
+        // Animação de feedback visual no campo de texto
+        saveInput.classList.remove('ring-2', 'ring-cyan-400');
+        void saveInput.offsetWidth;
+        saveInput.classList.add('ring-2', 'ring-cyan-400');
+        setTimeout(() => {
+          saveInput.classList.remove('ring-2', 'ring-cyan-400');
+        }, 500);
+      } else {
+        // Chamada automática ao mudar ambiente, cenário ou modo:
+        // Sugere o primeiro nome livre para este ambiente/cenário
+        if (!isCheckpointTaken(`${baseStem}.pt`)) {
+          chosenName = `${baseStem}.pt`;
+        } else {
+          let ver = 2;
+          while (isCheckpointTaken(`${baseStem}_v${ver}.pt`)) {
+            ver++;
+          }
+          chosenName = `${baseStem}_v${ver}.pt`;
+        }
+      }
+
+      saveInput.value = chosenName;
       checkSaveConflict();
     }
 
@@ -788,7 +966,7 @@
         statusEl.innerText = '';
         return;
       }
-      const exists = availableCheckpoints.includes(filename);
+      const exists = isCheckpointTaken(filename);
       if (exists) {
         statusEl.innerHTML = '<span class="text-amber-400">⚠️ Arquivo existente detectado (será sobrescrito ao salvar).</span>';
       } else {
@@ -896,12 +1074,29 @@
       }
     }
 
+    // Dispositivo de Execução
+    function onDeviceChange() {
+      const dev = document.getElementById('cfg-device').value;
+      const hint = document.getElementById('device-hint');
+      if (dev === 'auto') {
+        hint.innerText = 'Auto: GPU para treino (~6x mais rápido) e CPU pura para inferência rápida (< 2 ms).';
+        hint.className = 'text-[9px] text-cyan-400 font-mono italic';
+      } else if (dev === 'gpu') {
+        hint.innerText = 'GPU forçada: tensores e gradientes mantidos no acelerador gráfico (MPS/CUDA).';
+        hint.className = 'text-[9px] text-emerald-400 font-mono italic';
+      } else {
+        hint.innerText = 'CPU universal: execução estrita em CPU sem uso de GPU, garantindo portabilidade máxima.';
+        hint.className = 'text-[9px] text-gray-400 font-mono italic';
+      }
+    }
+
     // Funções de Preset Rápido
     function setFPS(val) { document.getElementById('cfg-fps').value = val; }
     function setSteps(val) { document.getElementById('cfg-steps').value = val; }
     function setTargetReturn(val) { document.getElementById('cfg-target-return').value = val; }
     function setLR(val) { document.getElementById('cfg-lr').value = val; }
     function setEpisodes(val) { document.getElementById('cfg-episodes').value = val; }
+    function setEntropy(val) { document.getElementById('cfg-entropy').value = val; }
 
     function pushDataPoint(chart, datasetIdx, val) {
       const dataArr = chart.data.datasets[datasetIdx].data;
@@ -969,7 +1164,10 @@
           document.getElementById('kpi-fps').innerText = (telemetry.fps || 0).toFixed(1);
           document.getElementById('overlay-fps').innerText = (telemetry.fps || 0).toFixed(1) + ' FPS';
           document.getElementById('kpi-steps').innerText = (telemetry.total_steps || 0).toLocaleString();
-          document.getElementById('kpi-return').innerText = (telemetry.mean_return_20 || 0).toFixed(2);
+          const peakVal = (telemetry.best_return !== undefined && telemetry.best_return !== null && telemetry.best_return !== 0)
+            ? telemetry.best_return 
+            : (telemetry.mean_return_20 || 0);
+          document.getElementById('kpi-return').innerText = Number(peakVal).toFixed(2);
           document.getElementById('kpi-latency').innerText = (telemetry.latency_p50_us || 0).toFixed(1) + ' µs';
           document.getElementById('kpi-confidence').innerText = ((telemetry.mean_confidence || 0) * 100).toFixed(1) + '%';
 
@@ -1159,6 +1357,19 @@
         renderCheckpointsTable();
         updateRunnerStatus(data.runner);
         suggestCheckpointName();
+
+        if (data.hardware) {
+          const hw = data.hardware;
+          const badgeText = document.getElementById('device-hw-text');
+          const badge = document.getElementById('device-hw-badge');
+          if (hw.gpu_available) {
+            badgeText.innerText = hw.device_name;
+            badge.className = 'px-1.5 py-0.5 rounded text-[9px] font-mono bg-emerald-950 text-emerald-300 border border-emerald-800 flex items-center gap-1';
+          } else {
+            badgeText.innerText = 'Apenas CPU';
+            badge.className = 'px-1.5 py-0.5 rounded text-[9px] font-mono bg-gray-900 text-gray-400 border border-gray-700 flex items-center gap-1';
+          }
+        }
       } catch (err) {
         console.error('Falha ao obter estado inicial:', err);
       }
@@ -1175,6 +1386,7 @@
         mode: activeMode,
         env: actualEnv,
         scenario: document.getElementById('cfg-scenario').value,
+        device: document.getElementById('cfg-device').value,
         load: document.getElementById('cfg-load').value || null,
         transfer_from: document.getElementById('cfg-transfer').value || null,
         freeze_trunk: document.getElementById('cfg-freeze-trunk').checked,

@@ -7,6 +7,8 @@ from system1_engine.env.adapters import (
     NativeEngineEnv,
     ProcessMemoryBackend,
     WindowCaptureEnv,
+    MountainCarNormalizedWrapper,
+    MountainCarEnergyRewardWrapper,
     make_game_env,
 )
 from system1_engine.env.wrapper import S1Observation, UniversalS1Wrapper
@@ -22,5 +24,7 @@ __all__ = [
     "BufferMemoryBackend",
     "ProcessMemoryBackend",
     "NativeEngineEnv",
+    "MountainCarNormalizedWrapper",
+    "MountainCarEnergyRewardWrapper",
     "make_game_env",
 ]

@@ -3,6 +3,7 @@ import http.client
 import io
 import json
 import sys
+import threading
 import time
 import urllib.parse
 from typing import Any, Dict, Optional
@@ -20,7 +21,7 @@ from system1_engine.transfer.manager import KnowledgeTransferManager
 
 
 class HUDClient:
-    """Cliente HTTP interno de alta performance e baixa latência para comunicação com o HUDServer."""
+    """Cliente HTTP interno assíncrono de alto desempenho e zero overhead para o HUD."""
 
     def __init__(self, server_url: str) -> None:
         parsed = urllib.parse.urlparse(server_url)
@@ -28,15 +29,76 @@ class HUDClient:
         self.port = parsed.port or 8050
         self._conn: Optional[http.client.HTTPConnection] = None
 
+        # Sincronização assíncrona para zero overhead no loop principal de treino
+        self._lock = threading.Lock()
+        self._pending_frame: Optional[np.ndarray] = None
+        self._pending_telemetry: Optional[Dict[str, Any]] = None
+        self._worker_busy: bool = False
+        self._stop_event = threading.Event()
+        self._wake_event = threading.Event()
+
+        # Thread de segundo plano dedicada à compressão JPEG e tráfego de rede
+        self._thread = threading.Thread(target=self._worker_loop, daemon=True)
+        self._thread.start()
+
     def _get_connection(self) -> http.client.HTTPConnection:
         if self._conn is None:
             self._conn = http.client.HTTPConnection(self.host, self.port, timeout=2.0)
         return self._conn
 
+    def is_ready_for_frame(self) -> bool:
+        """Indica se o worker assíncrono está livre para receber um novo frame.
+        Permite que a thread de treino evite chamadas desnecessárias a env.render()."""
+        with self._lock:
+            return self._pending_frame is None and not self._worker_busy
+
     def send_telemetry(self, data: Dict[str, Any]) -> None:
+        """Enfileira a telemetria mais recente de forma não-bloqueante (< 1 µs)."""
+        with self._lock:
+            self._pending_telemetry = data
+        self._wake_event.set()
+
+    def send_frame(self, frame: np.ndarray) -> None:
+        """Submete o frame RGB de forma não-bloqueante (< 1 µs), sem pausar o treino."""
+        with self._lock:
+            self._pending_frame = frame
+        self._wake_event.set()
+
+    def _worker_loop(self) -> None:
+        """Loop de fundo para processamento offloaded de telemetria e compressão/envio de vídeo."""
+        while not self._stop_event.is_set():
+            self._wake_event.wait(timeout=0.05)
+            self._wake_event.clear()
+
+            # 1. Envia telemetria pendente se houver
+            telem = None
+            with self._lock:
+                if self._pending_telemetry is not None:
+                    telem = self._pending_telemetry
+                    self._pending_telemetry = None
+
+            if telem is not None:
+                self._dispatch_telemetry(telem)
+
+            # 2. Processa e envia frame pendente se houver
+            frame = None
+            with self._lock:
+                if self._pending_frame is not None:
+                    frame = self._pending_frame
+                    self._pending_frame = None
+                    self._worker_busy = True
+
+            if frame is not None:
+                try:
+                    self._dispatch_frame(frame)
+                finally:
+                    with self._lock:
+                        self._worker_busy = False
+
+    def _dispatch_telemetry(self, data: Dict[str, Any]) -> None:
         payload = json.dumps(data).encode("utf-8")
         headers = {"Content-Type": "application/json", "Content-Length": str(len(payload))}
-        for attempt in range(2):
+        for _ in range(2):
             try:
                 conn = self._get_connection()
                 conn.request("POST", "/api/internal/telemetry", payload, headers)
@@ -46,8 +108,7 @@ class HUDClient:
             except Exception:
                 self._conn = None
 
-    def send_frame(self, frame: np.ndarray) -> None:
-        """Codifica array RGB em JPEG de alta performance e envia via POST binário."""
+    def _dispatch_frame(self, frame: np.ndarray) -> None:
         try:
             arr = frame
             # Normalização de dimensões: CHW -> HWC se necessário
@@ -60,16 +121,16 @@ class HUDClient:
                     arr = arr.astype(np.uint8)
 
             img = Image.fromarray(arr)
-            # Redimensiona se for excessivamente grande para manter latência < 2ms
+            # Redimensiona para resolução do viewport se necessário
             if img.width > 640 or img.height > 480:
                 img.thumbnail((640, 480))
 
             buf = io.BytesIO()
-            img.save(buf, format="JPEG", quality=75)
+            img.save(buf, format="JPEG", quality=65)
             jpeg_bytes = buf.getvalue()
 
             headers = {"Content-Type": "image/jpeg", "Content-Length": str(len(jpeg_bytes))}
-            for attempt in range(2):
+            for _ in range(2):
                 try:
                     conn = self._get_connection()
                     conn.request("POST", "/api/internal/frame", jpeg_bytes, headers)
@@ -82,6 +143,12 @@ class HUDClient:
             pass
 
     def close(self) -> None:
+        self._stop_event.set()
+        self._wake_event.set()
+        try:
+            self._thread.join(timeout=0.5)
+        except Exception:
+            pass
         if self._conn is not None:
             try:
                 self._conn.close()
@@ -94,19 +161,23 @@ def build_hud_env(
     env_id: str,
     scenario: Optional[str] = None,
     render_mode: str = "in_browser",
+    is_training: bool = False,
+    frame_skip: Optional[int] = None,
 ) -> UniversalS1Wrapper:
-    """Instancia o ambiente com suporte a renderização in-browser (rgb_array), janela ou headless."""
+    """Instancia o ambiente com suporte a renderização in-browser (rgb_array), janela ou headless no Modo Puro Universal."""
     if env_id.lower() in ["vizdoom", "native"]:
         scenario_path = scenario or "basic.cfg"
         headless = render_mode != "window"
-        return make_game_env(
+        fs = frame_skip if frame_skip is not None else 4
+        env = make_game_env(
             "native",
             {
                 "engine_type": "vizdoom",
                 "scenario_path": scenario_path,
-                "args": {"headless": headless},
+                "args": {"headless": headless, "frame_skip": fs},
             },
         )
+        return env
 
     # Gym environments
     gym_render_mode = None
@@ -116,12 +187,60 @@ def build_hud_env(
         gym_render_mode = "human"
 
     raw_env = gym.make(env_id, render_mode=gym_render_mode)
+    if env_id == "MountainCar-v0":
+        from system1_engine.env.adapters.mountain_car import (
+            MountainCarEnergyRewardWrapper,
+            MountainCarNormalizedWrapper,
+        )
+        if is_training:
+            raw_env = MountainCarEnergyRewardWrapper(raw_env)
+        raw_env = MountainCarNormalizedWrapper(raw_env)
+
     return UniversalS1Wrapper(raw_env)
+
+
+def resolve_compute_device(device_pref: str = "auto", is_training: bool = True) -> torch.device:
+    """Resolve o dispositivo de computação (CPU, MPS ou CUDA).
+
+    - 'auto': Se for treino, usa GPU (MPS/CUDA) se disponível para acelerar backprop (~6x mais rápido).
+              Se for avaliação/inferência passo-a-passo, usa CPU para latência mínima sem overhead de barramento.
+    - 'gpu' / 'cuda' / 'mps': Força o uso do acelerador gráfico disponível (CUDA no Linux/Windows ou MPS no macOS).
+    - 'cpu': Força o uso exclusivo de CPU pura universal.
+    """
+    pref = (device_pref or "auto").strip().lower()
+    has_cuda = torch.cuda.is_available()
+    has_mps = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+
+    if pref == "cpu":
+        return torch.device("cpu")
+
+    if pref in ("gpu", "cuda", "mps"):
+        if pref == "cuda" and has_cuda:
+            return torch.device("cuda")
+        if pref == "mps" and has_mps:
+            return torch.device("mps")
+        if has_cuda:
+            return torch.device("cuda")
+        if has_mps:
+            return torch.device("mps")
+        print("[Aviso] Acelerador GPU solicitado, mas nenhum dispositivo CUDA/MPS foi detectado. Revertendo para CPU.")
+        return torch.device("cpu")
+
+    # pref == 'auto'
+    if is_training:
+        if has_cuda:
+            return torch.device("cuda")
+        if has_mps:
+            return torch.device("mps")
+        return torch.device("cpu")
+    else:
+        return torch.device("cpu")
 
 
 def run_worker_train(config: Dict[str, Any], hud_client: HUDClient) -> None:
     env_id = config.get("env", "CartPole-v1")
     render_mode = config.get("render_mode", "in_browser")
+    device_pref = config.get("device", "auto")
     steps = int(config.get("steps", 40000))
     lr = float(config.get("lr", 7e-4))
     entropy_coef = float(config.get("entropy_coef", 0.005))
@@ -133,14 +252,23 @@ def run_worker_train(config: Dict[str, Any], hud_client: HUDClient) -> None:
     transfer_from = config.get("transfer_from")
     freeze_trunk = bool(config.get("freeze_trunk", True))
 
+    device = resolve_compute_device(device_pref, is_training=True)
+
     print(f"=== [HUD Worker] Modo de Treino Iniciado no Ambiente: {env_id} ===")
+    print(f"Dispositivo de Execução: {device.type.upper()} (Preferência: {device_pref})")
     print(f"Configuração: steps={steps}, lr={lr}, entropy_coef={entropy_coef}, target_return={target_return}")
     if transfer_from:
         print(f"Transferência de pesos ativa a partir de: {transfer_from} (freeze_trunk={freeze_trunk})")
 
-    env = build_hud_env(env_id, scenario=config.get("scenario"), render_mode=render_mode)
+    env = build_hud_env(
+        env_id,
+        scenario=config.get("scenario"),
+        render_mode=render_mode,
+        is_training=True,
+        frame_skip=int(config.get("frame_skip", 4)),
+    )
     agent = UniversalS1Agent(
-        obs_space=env.env.observation_space,
+        obs_space=env.observation_space,
         action_space=env.action_space,
     )
 
@@ -165,9 +293,18 @@ def run_worker_train(config: Dict[str, Any], hud_client: HUDClient) -> None:
         chunk_batch_size=chunk_batch_size,
         entropy_coef=entropy_coef,
         tracker=tracker,
+        device=device,
     )
 
     def train_callback(cur_steps: int, mean_ret: float) -> None:
+        nonlocal last_telemetry_ts
+        now = time.time()
+        snap = tracker.snapshot()
+        snap["grad_norms"] = tracker.metrics.grad_norms
+        hud_client.send_telemetry(snap)
+        last_telemetry_ts = now
+
+    def step_callback() -> None:
         nonlocal last_telemetry_ts, last_frame_ts
         now = time.time()
         # Telemetria a cada ~100 ms
@@ -177,8 +314,10 @@ def run_worker_train(config: Dict[str, Any], hud_client: HUDClient) -> None:
             hud_client.send_telemetry(snap)
             last_telemetry_ts = now
 
-        # Renderização in-browser durante treino (amostrada a ~20 FPS para não atrasar o PPO)
-        if render_mode == "in_browser" and (now - last_frame_ts >= 0.05):
+        # Renderização in-browser durante treino: amostragem assíncrona (~12-15 FPS)
+        # Só solicita env.render() se o worker assíncrono estiver pronto para receber,
+        # eliminando completamente qualquer bloqueio ou perda de throughput no treino!
+        if render_mode == "in_browser" and (now - last_frame_ts >= 0.08) and hud_client.is_ready_for_frame():
             try:
                 frame = env.render()
                 if frame is not None:
@@ -192,6 +331,7 @@ def run_worker_train(config: Dict[str, Any], hud_client: HUDClient) -> None:
             max_steps=steps,
             target_return=target_return,
             callback=train_callback,
+            step_callback=step_callback,
             verbose=True,
         )
 
@@ -216,6 +356,7 @@ def run_worker_train(config: Dict[str, Any], hud_client: HUDClient) -> None:
 def run_worker_eval(config: Dict[str, Any], hud_client: HUDClient) -> None:
     env_id = config.get("env", "CartPole-v1")
     render_mode = config.get("render_mode", "in_browser")
+    device_pref = config.get("device", "auto")
     episodes = int(config.get("episodes", 5))
     load_path = config.get("load")
     save_path = config.get("save")
@@ -223,15 +364,24 @@ def run_worker_eval(config: Dict[str, Any], hud_client: HUDClient) -> None:
     fps_target = float(config.get("fps", 50.0))
     dt_target = (1.0 / fps_target) if fps_target > 0 else 0.0
 
+    device = resolve_compute_device(device_pref, is_training=False)
+
     mode_desc = "act_fast() [Reflexo Puro]" if use_fast else "act_with_confidence() [Gating]"
     print(f"=== [HUD Worker] Modo de Avaliação Iniciado no Ambiente: {env_id} ===")
+    print(f"Dispositivo de Execução: {device.type.upper()} (Preferência: {device_pref})")
     print(f"Episódios: {episodes} | Decisão: {mode_desc} | FPS Alvo: {fps_target} | Renderização: {render_mode}")
 
-    env = build_hud_env(env_id, scenario=config.get("scenario"), render_mode=render_mode)
-    agent = UniversalS1Agent(
-        obs_space=env.env.observation_space,
-        action_space=env.action_space,
+    env = build_hud_env(
+        env_id,
+        scenario=config.get("scenario"),
+        render_mode=render_mode,
+        is_training=False,
+        frame_skip=int(config.get("frame_skip", 4)),
     )
+    agent = UniversalS1Agent(
+        obs_space=env.observation_space,
+        action_space=env.action_space,
+    ).to(device)
 
     if load_path:
         checkpoint = torch.load(load_path, map_location="cpu", weights_only=False)
@@ -289,11 +439,18 @@ def run_worker_eval(config: Dict[str, Any], hud_client: HUDClient) -> None:
                 steps += 1
                 tracker.record_env_step(reward=reward, done=done)
 
-                # Renderização in-browser
+                # Renderização in-browser com indicador de disparo
                 if render_mode == "in_browser":
                     try:
                         frame = env.render()
                         if frame is not None:
+                            is_firing = getattr(getattr(env, "unwrapped", env), "is_attacking", False) or action == 2
+                            if is_firing and isinstance(frame, np.ndarray) and frame.ndim == 3:
+                                frame = frame.copy()
+                                h, w = frame.shape[:2]
+                                cy, cx = h // 2, w // 2
+                                frame[max(0, cy-6):min(h, cy+7), max(0, cx-1):min(w, cx+2)] = [255, 30, 30]
+                                frame[max(0, cy-1):min(h, cy+2), max(0, cx-6):min(w, cx+7)] = [255, 30, 30]
                             hud_client.send_frame(frame)
                     except Exception:
                         pass
@@ -332,13 +489,15 @@ def run_worker_eval(config: Dict[str, Any], hud_client: HUDClient) -> None:
 
 def run_worker_benchmark(config: Dict[str, Any], hud_client: HUDClient) -> None:
     steps = int(config.get("steps", 5000))
-    print(f"=== [HUD Worker] Iniciando Benchmark de Latência CPU ({steps} passos) ===")
+    device_pref = config.get("device", "cpu")
+    device = resolve_compute_device(device_pref, is_training=False)
+    print(f"=== [HUD Worker] Iniciando Benchmark de Latência {device.type.upper()} ({steps} passos) ===")
     raw_env = gym.make("CartPole-v1")
     env = UniversalS1Wrapper(raw_env)
     agent = UniversalS1Agent(
         obs_space=env.env.observation_space,
         action_space=env.action_space,
-    )
+    ).to(device)
     agent.eval()
     obs_dict, _ = env.reset()
     agent.reset_memory()

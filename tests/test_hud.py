@@ -46,6 +46,9 @@ def test_hud_server_lifecycle_and_endpoints():
         assert res.status == 200
         state = json.loads(res.read().decode("utf-8"))
         assert "runner" in state
+        assert "hardware" in state
+        assert "device_name" in state["hardware"]
+        assert "gpu_available" in state["hardware"]
         assert "checkpoints" in state
         assert "checkpoints_detailed" in state
         assert "telemetry" in state
@@ -168,4 +171,89 @@ def test_hud_e2e_evaluation_and_in_browser_rendering(tmp_path):
         import os
         assert os.path.exists(save_ckpt)
         assert os.path.getsize(save_ckpt) > 1000
+
+
+def test_resolve_compute_device():
+    import torch
+    from system1_engine.hud.worker import resolve_compute_device
+
+    # CPU mode should always return cpu
+    dev_cpu = resolve_compute_device("cpu", is_training=True)
+    assert dev_cpu.type == "cpu"
+
+    # Evaluation in auto mode should return cpu (lowest single-step latency)
+    dev_eval_auto = resolve_compute_device("auto", is_training=False)
+    assert dev_eval_auto.type == "cpu"
+
+    # Auto mode during training should select GPU (mps or cuda) if available
+    has_gpu = torch.cuda.is_available() or (hasattr(torch.backends, "mps") and torch.backends.mps.is_available())
+    dev_train_auto = resolve_compute_device("auto", is_training=True)
+    if has_gpu:
+        assert dev_train_auto.type in ("mps", "cuda")
+    else:
+        assert dev_train_auto.type == "cpu"
+
+
+def test_hud_device_selection_in_training():
+    server = HUDServer(host="127.0.0.1", port=8997, open_browser=False)
+    with server:
+        config = {
+            "mode": "train",
+            "env": "CartPole-v1",
+            "device": "cpu",
+            "steps": 64,
+            "rollout_steps": 32,
+            "chunk_length": 8,
+            "chunk_batch_size": 4,
+            "render_mode": "none",
+        }
+        success, msg = server.runner.start(config, "http://127.0.0.1:8997")
+        assert success is True
+
+        t0 = time.time()
+        while server.runner.is_running() and (time.time() - t0 < 8.0):
+            time.sleep(0.1)
+
+        state = server.runner.get_state()
+        assert state["status"] == "COMPLETED"
+
+        logs, count = server.runner.get_logs(0)
+        assert count > 0
+        assert any("Dispositivo de Execução: CPU" in line for line in logs)
+
+
+def test_hud_device_selection_gpu_training():
+    import torch
+    has_gpu = torch.cuda.is_available() or (hasattr(torch.backends, "mps") and torch.backends.mps.is_available())
+    if not has_gpu:
+        pytest.skip("No GPU accelerator (MPS or CUDA) available on this machine.")
+
+    server = HUDServer(host="127.0.0.1", port=8998, open_browser=False)
+    with server:
+        config = {
+            "mode": "train",
+            "env": "CartPole-v1",
+            "device": "gpu",
+            "steps": 64,
+            "rollout_steps": 32,
+            "chunk_length": 8,
+            "chunk_batch_size": 4,
+            "render_mode": "none",
+        }
+        success, msg = server.runner.start(config, "http://127.0.0.1:8998")
+        assert success is True
+
+        t0 = time.time()
+        while server.runner.is_running() and (time.time() - t0 < 8.0):
+            time.sleep(0.1)
+
+        state = server.runner.get_state()
+        assert state["status"] == "COMPLETED"
+
+        logs, count = server.runner.get_logs(0)
+        assert count > 0
+        expected_dev = "CUDA" if torch.cuda.is_available() else "MPS"
+        assert any(f"Dispositivo de Execução: {expected_dev}" in line for line in logs)
+
+
 

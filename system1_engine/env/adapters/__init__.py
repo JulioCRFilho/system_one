@@ -7,7 +7,12 @@ from system1_engine.env.adapters.memory_adapter import (
     MemoryReaderBackend,
     ProcessMemoryBackend,
 )
+from system1_engine.env.adapters.mountain_car import (
+    MountainCarEnergyRewardWrapper,
+    MountainCarNormalizedWrapper,
+)
 from system1_engine.env.adapters.native_adapter import NativeEngineEnv
+from system1_engine.env.adapters.vizdoom import VizdoomAimRewardWrapper
 from system1_engine.env.adapters.window_adapter import WindowCaptureEnv
 
 __all__ = [
@@ -19,5 +24,8 @@ __all__ = [
     "BufferMemoryBackend",
     "ProcessMemoryBackend",
     "NativeEngineEnv",
+    "MountainCarNormalizedWrapper",
+    "MountainCarEnergyRewardWrapper",
+    "VizdoomAimRewardWrapper",
     "make_game_env",
 ]

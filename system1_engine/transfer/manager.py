@@ -19,8 +19,9 @@ class KnowledgeTransferManager:
     ) -> None:
         """Saves agent weights and metadata to file."""
         os.makedirs(os.path.dirname(os.path.abspath(checkpoint_path)), exist_ok=True)
+        state_dict_cpu = {k: v.cpu() if isinstance(v, torch.Tensor) else v for k, v in agent.state_dict().items()}
         payload = {
-            "state_dict": agent.state_dict(),
+            "state_dict": state_dict_cpu,
             "extra_info": extra_info or {},
         }
         torch.save(payload, checkpoint_path)

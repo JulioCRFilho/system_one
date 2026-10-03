@@ -257,6 +257,9 @@ def test_factory_make_game_env():
     assert vzd_env.is_visual
     v_obs, _ = vzd_env.reset()
     assert v_obs["obs"].shape == (2, 84, 84)
+    frame = vzd_env.render()
+    assert frame is not None
+    assert frame.shape == (240, 320, 3)
     next_obs, rew, term, trunc, _ = vzd_env.step(0)
     assert next_obs["obs"].shape == (2, 84, 84)
     vzd_env.close()
@@ -281,4 +284,47 @@ def test_build_environment_render_mode():
     obs, _ = env_render.reset()
     assert obs["obs"].shape == (4,)
     env_render.close()
+
+
+def test_vizdoom_aim_reward_wrapper_strafe_and_rotational():
+    """Valida o VizdoomAimRewardWrapper adaptando-se a cenários laterais e rotacionais 360."""
+    from system1_engine.env.adapters.vizdoom import VizdoomAimRewardWrapper
+
+    # 1. Cenário Lateral (basic.cfg)
+    vzd_strafe = make_game_env(
+        "native",
+        {
+            "engine_type": "vizdoom",
+            "scenario_path": "basic.cfg",
+            "args": {"headless": True, "frame_skip": 4},
+        },
+    )
+    wrapper_strafe = VizdoomAimRewardWrapper(vzd_strafe)
+    obs, info = wrapper_strafe.reset()
+    assert wrapper_strafe._button_names == ["MOVE_LEFT", "MOVE_RIGHT", "ATTACK"]
+    next_obs, r, term, trunc, _ = wrapper_strafe.step(0)
+    assert isinstance(r, float)
+    assert "prev_reward" in next_obs
+    assert next_obs["prev_reward"] == r
+    wrapper_strafe.close()
+
+    # 2. Cenário Rotacional 360° (defend_the_center.cfg)
+    vzd_rot = make_game_env(
+        "native",
+        {
+            "engine_type": "vizdoom",
+            "scenario_path": "defend_the_center.cfg",
+            "args": {"headless": True, "frame_skip": 4},
+        },
+    )
+    wrapper_rot = VizdoomAimRewardWrapper(vzd_rot)
+    obs, info = wrapper_rot.reset()
+    assert wrapper_rot._button_names == ["TURN_LEFT", "TURN_RIGHT", "ATTACK"]
+    # Inicialmente no defend_the_center, há um monstro alinhado na frente (delta=0)
+    next_obs, r_shot, term, trunc, _ = wrapper_rot.step(2)  # ATTACK
+    assert r_shot == 5.0  # Alinhado com alvo frontal
+    next_obs, r_turn, term, trunc, _ = wrapper_rot.step(0)  # TURN_LEFT
+    assert isinstance(r_turn, float)
+    wrapper_rot.close()
+
 

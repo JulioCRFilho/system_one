@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
-"""Builds the native macOS 'System 1 HUD.app' bundle with a custom cyber-themed icon."""
+"""
+Builds the native macOS Desktop 'System 1 HUD.app' bundle.
+Features a standalone native macOS WebKit window (Cocoa + WKWebView):
+  - Zero browser tab dependency: opens in its own dark-themed native desktop window.
+  - Single instance protection: clicking the Dock icon brings the existing window to front,
+    preventing multiple panels or duplicate processes.
+  - Native menubar with shortcuts (Cmd+Q, Cmd+W, Cmd+R, Cmd+C, Cmd+V).
+  - High-res Retina cyberpunk neon icon integrated via Cocoa NSWorkspace & AppIcon.icns.
+"""
 
 import os
 import shutil
 import subprocess
+import plistlib
 from PIL import Image, ImageDraw, ImageFont
+from Cocoa import NSWorkspace, NSImage
 
-def main():
-    project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    app_path = os.path.join(project_dir, "System 1 HUD.app")
-    icns_path = os.path.join(project_dir, "System1HUD.icns")
-    user_apps_path = os.path.expanduser("~/Applications/System 1 HUD.app")
 
+def generate_icon(project_dir, icns_path):
     print("[1/4] Gerando ícone de alta resolução (1024x1024)...")
     size = 1024
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
@@ -72,7 +78,10 @@ def main():
     draw.text((512, 850), "S1 HUD", fill=(56, 189, 248, 255), anchor="ms", font=font)
 
     iconset_dir = os.path.join(project_dir, "tmp_hud.iconset")
+    if os.path.exists(iconset_dir):
+        shutil.rmtree(iconset_dir)
     os.makedirs(iconset_dir, exist_ok=True)
+
     for s in [16, 32, 128, 256, 512]:
         img.resize((s, s), Image.Resampling.LANCZOS).save(f"{iconset_dir}/icon_{s}x{s}.png")
         img.resize((s * 2, s * 2), Image.Resampling.LANCZOS).save(f"{iconset_dir}/icon_{s}x{s}@2x.png")
@@ -80,96 +89,124 @@ def main():
     subprocess.run(["iconutil", "-c", "icns", iconset_dir, "-o", icns_path], check=True)
     shutil.rmtree(iconset_dir)
 
-    print("[2/4] Compilando AppleScript nativo com osacompile...")
+
+def main():
+    project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    app_path = os.path.join(project_dir, "System 1 HUD.app")
+    icns_path = os.path.join(project_dir, "System1HUD.icns")
+    main_m_path = os.path.join(project_dir, "scripts/macos_app/main.m")
+    user_apps_path = os.path.expanduser("~/Applications/System 1 HUD.app")
+    global_apps_path = "/Applications/System 1 HUD.app"
+
+    # 1. Ícone
+    if not os.path.exists(icns_path):
+        generate_icon(project_dir, icns_path)
+    else:
+        print("[1/4] Ícone System1HUD.icns existente verificado.")
+
+    # 2. Estrutura do bundle .app
+    print("[2/4] Criando estrutura do Bundle e compilando App Desktop Nativo (Cocoa + WebKit)...")
     if os.path.exists(app_path):
         shutil.rmtree(app_path)
 
-    python_bin = os.path.join(project_dir, ".venv/bin/python")
-    applescript_code = f'''
-set projectDir to "{project_dir}"
-set pythonBin to "{python_bin}"
-set logFile to "/tmp/system1_hud.log"
+    macos_dir = os.path.join(app_path, "Contents/MacOS")
+    resources_dir = os.path.join(app_path, "Contents/Resources")
+    os.makedirs(macos_dir, exist_ok=True)
+    os.makedirs(resources_dir, exist_ok=True)
 
--- 1. Verifica se o servidor já está ativo na porta 8050
-set isRunning to false
-try
-    do shell script "nc -z 127.0.0.1 8050"
-    set isRunning to true
-end try
+    bin_name = "System 1 HUD"
+    target_bin = os.path.join(macos_dir, bin_name)
 
-if not isRunning then
-    -- Inicia o servidor em segundo plano desanexado do terminal
-    do shell script "cd " & quoted form of projectDir & " && nohup " & quoted form of pythonBin & " -m system1_engine.hud > " & quoted form of logFile & " 2>&1 &"
-    
-    -- Aguarda o servidor responder na porta 8050 (até 6s)
-    repeat 30 times
-        delay 0.2
-        try
-            do shell script "nc -z 127.0.0.1 8050"
-            exit repeat
-        end try
-    end repeat
-end if
+    # Compilação nativa com clang ARM64 + Cocoa + WebKit
+    compile_cmd = [
+        "clang",
+        "-O3",
+        "-arch", "arm64",
+        "-framework", "Cocoa",
+        "-framework", "WebKit",
+        main_m_path,
+        "-o", target_bin,
+    ]
+    subprocess.run(compile_cmd, check=True)
+    os.chmod(target_bin, 0o755)
 
--- 2. Abre a interface no navegador padrão do macOS
-do shell script "open http://127.0.0.1:8050"
-'''
-
-    tmp_scpt = os.path.join(project_dir, "launcher.applescript")
-    with open(tmp_scpt, "w") as f:
-        f.write(applescript_code)
-
-    subprocess.run(["osacompile", "-o", app_path, tmp_scpt], check=True)
-    os.remove(tmp_scpt)
-
-    print("[3/4] Injetando metadados, removendo Assets.car e configurando ícone...")
-    target_icns = os.path.join(app_path, "Contents/Resources/applet.icns")
+    # Copia o ícone para o bundle
+    target_icns = os.path.join(resources_dir, "AppIcon.icns")
     shutil.copy(icns_path, target_icns)
 
-    # Remove o catálogo compilado padrão do AppleScript que sobrescreve o .icns
-    assets_car = os.path.join(app_path, "Contents/Resources/Assets.car")
-    if os.path.exists(assets_car):
-        os.remove(assets_car)
-
-    import plistlib
+    # Info.plist nativo
+    info_plist = {
+        "CFBundleDevelopmentRegion": "pt-BR",
+        "CFBundleDisplayName": "System 1 HUD",
+        "CFBundleExecutable": bin_name,
+        "CFBundleIconFile": "AppIcon",
+        "CFBundleIdentifier": "com.system1.hud",
+        "CFBundleInfoDictionaryVersion": "6.0",
+        "CFBundleName": "System 1 HUD",
+        "CFBundlePackageType": "APPL",
+        "CFBundleShortVersionString": "2.0.0",
+        "CFBundleVersion": "2",
+        "LSMinimumSystemVersion": "12.0",
+        "NSHighResolutionCapable": True,
+        "LSUIElement": False,
+        "NSAppTransportSecurity": {
+            "NSAllowsLocalNetworking": True,
+            "NSAllowsArbitraryLoads": True,
+        },
+    }
     plist_path = os.path.join(app_path, "Contents/Info.plist")
-    if os.path.exists(plist_path):
-        with open(plist_path, "rb") as f:
-            pl = plistlib.load(f)
-        
-        # Remove CFBundleIconName para forçar uso de CFBundleIconFile (.icns)
-        if "CFBundleIconName" in pl:
-            del pl["CFBundleIconName"]
-        pl["CFBundleIconFile"] = "applet.icns"
-        pl["CFBundleName"] = "System 1 HUD"
-        pl["CFBundleDisplayName"] = "System 1 HUD"
-        
-        with open(plist_path, "wb") as f:
-            plistlib.dump(pl, f)
+    with open(plist_path, "wb") as f:
+        plistlib.dump(info_plist, f)
 
-    # Limpa atributos estendidos (quarentena/FinderInfo) e assina o app
+    pkginfo_path = os.path.join(app_path, "Contents/PkgInfo")
+    with open(pkginfo_path, "wb") as f:
+        f.write(b"APPL????")
+
+    # 3. Assinatura e Ícone Cocoa
+    print("[3/4] Gravando ícone nativo via NSWorkspace e assinando bundle...")
+    cocoa_img = NSImage.alloc().initWithContentsOfFile_(icns_path)
+    NSWorkspace.sharedWorkspace().setIcon_forFile_options_(cocoa_img, app_path, 0)
+    subprocess.run(["SetFile", "-a", "C", app_path], check=False)
     subprocess.run(["xattr", "-cr", app_path], check=True)
     subprocess.run(["codesign", "--force", "--deep", "--sign", "-", app_path], check=True)
 
-    print("[4/4] Copiando para ~/Applications e atualizando LaunchServices/Dock...")
+    # 4. Sincroniza com /Applications e ~/Applications
+    print("[4/4] Sincronizando com /Applications e registrando no LaunchServices...")
     os.makedirs(os.path.expanduser("~/Applications"), exist_ok=True)
-    if os.path.exists(user_apps_path):
-        shutil.rmtree(user_apps_path)
-    shutil.copytree(app_path, user_apps_path)
+    target_locations = [global_apps_path, user_apps_path]
 
-    # Registra no LaunchServices e limpa cache do Dock
+    for loc in target_locations:
+        try:
+            if os.path.exists(loc):
+                shutil.rmtree(loc)
+            shutil.copytree(app_path, loc)
+            NSWorkspace.sharedWorkspace().setIcon_forFile_options_(cocoa_img, loc, 0)
+            subprocess.run(["SetFile", "-a", "C", loc], check=False)
+            subprocess.run(["xattr", "-cr", loc], check=True)
+            subprocess.run(["codesign", "--force", "--deep", "--sign", "-", loc], check=True)
+        except Exception as e:
+            print(f"   [aviso] Falha ao sincronizar com {loc}: {e}")
+
+    # Registra no LaunchServices e atualiza Dock
     lsregister_bin = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
     if os.path.exists(lsregister_bin):
-        subprocess.run([lsregister_bin, "-f", app_path], check=False)
-        subprocess.run([lsregister_bin, "-f", user_apps_path], check=False)
+        for loc in [global_apps_path, user_apps_path, app_path]:
+            subprocess.run([lsregister_bin, "-f", "-R", loc], check=False)
 
-    subprocess.run(["touch", app_path, user_apps_path])
+    subprocess.run(["touch", global_apps_path, user_apps_path, app_path], check=False)
     subprocess.run(["killall", "Dock"], check=False)
 
-    print("\n✅ Sucesso! O aplicativo 'System 1 HUD.app' está pronto:")
-    print(f"   • No projeto: {app_path}")
-    print(f"   • No sistema: {user_apps_path}")
-    print("\n💡 O Dock foi atualizado e o ícone personalizado de raio elétrico já está ativo!")
+    print("\n" + "=" * 65)
+    print("✅ APLICATIVO DESKTOP NATIVO CONSTRUÍDO COM SUCESSO!")
+    print(f"   • Localização Principal: {global_apps_path}")
+    print(f"   • Localização Local:     {app_path}")
+    print("=" * 65)
+    print("✨ Destaques do App Desktop:")
+    print("   1. Janela própria e independente (Cocoa + WKWebView nativo).")
+    print("   2. Nunca mais abre abas no Chrome/Safari.")
+    print("   3. Instância única: clicar no Dock traz a janela existente para frente.")
+    print("   4. Ao fechar a janela, encerra o servidor automaticamente.")
+
 
 if __name__ == "__main__":
     main()

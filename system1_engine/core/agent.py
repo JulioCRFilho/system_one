@@ -102,6 +102,14 @@ class UniversalS1Agent(nn.Module):
         # Runtime hidden state for act_fast inference
         self.hx: Optional[torch.Tensor] = None
 
+    @property
+    def device(self) -> torch.device:
+        """Returns the device on which model parameters currently reside."""
+        try:
+            return next(self.parameters()).device
+        except StopIteration:
+            return torch.device("cpu")
+
     def reset_memory(self, batch_size: int = 1, device: Optional[torch.device] = None) -> None:
         """Resets the persistent internal hidden state."""
         self.hx = None
@@ -208,6 +216,9 @@ class UniversalS1Agent(nn.Module):
                 arr = np.asarray(raw_obs, dtype=np.float32)
                 t_obs = torch.from_numpy(arr).view(1, 1, -1)
 
+        dev = self.device
+        to_dev = dev.type != "cpu"
+
         if self.is_visual:
             if isinstance(raw_action, torch.Tensor):
                 t_act = raw_action
@@ -220,6 +231,11 @@ class UniversalS1Agent(nn.Module):
                 t_rew = raw_reward
             else:
                 t_rew = torch.tensor([[[float(raw_reward)]]], dtype=torch.float32)
+
+            if to_dev:
+                t_obs = t_obs.to(dev)
+                t_act = t_act.to(dev)
+                t_rew = t_rew.to(dev)
 
             z_in = self.front_end(
                 obs=t_obs,
@@ -249,6 +265,12 @@ class UniversalS1Agent(nn.Module):
                 t_rew = raw_reward
             else:
                 t_rew = torch.tensor([[[float(raw_reward)]]], dtype=torch.float32)
+
+            if to_dev:
+                t_obs = t_obs.to(dev)
+                t_delta = t_delta.to(dev)
+                t_act = t_act.to(dev)
+                t_rew = t_rew.to(dev)
 
             z_in = self.front_end(
                 obs=t_obs,

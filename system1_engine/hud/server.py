@@ -50,6 +50,8 @@ class HUDServer:
             "fps": 0.0,
             "total_steps": 0,
             "mean_return_20": 0.0,
+            "best_return": 0.0,
+            "best_mean_return": 0.0,
             "latency_p50_us": 0.0,
             "latency_p99_us": 0.0,
             "mean_confidence": 0.0,
@@ -64,13 +66,18 @@ class HUDServer:
         self._running = False
         self._stop_event = threading.Event()
 
-        # Carrega template HTML do dashboard
-        html_path = os.path.join(os.path.dirname(__file__), "dashboard.html")
-        if os.path.exists(html_path):
-            with open(html_path, "r", encoding="utf-8") as f:
-                self.dashboard_html = f.read()
-        else:
-            self.dashboard_html = "<h1>Dashboard template not found</h1>"
+        # Caminho do template HTML do dashboard
+        self.html_path = os.path.join(os.path.dirname(__file__), "dashboard.html")
+
+    def get_dashboard_html(self) -> str:
+        """Lê o template HTML do disco dinamicamente para permitir recarregamento imediato (Cmd+R)."""
+        if os.path.exists(self.html_path):
+            try:
+                with open(self.html_path, "r", encoding="utf-8") as f:
+                    return f.read()
+            except Exception:
+                pass
+        return "<h1>Dashboard template not found</h1>"
 
     def scan_checkpoints(self) -> List[str]:
         """Varre o diretório do projeto em busca de modelos e checkpoints .pt disponíveis."""
@@ -108,6 +115,32 @@ class HUDServer:
                 results.append({"path": path, "filename": os.path.basename(path), "size_mb": 0.0, "mtime": "—"})
         return results
 
+    @staticmethod
+    def get_hardware_info() -> Dict[str, Any]:
+        """Detecta aceleradores de hardware disponíveis (Apple Silicon MPS ou NVIDIA CUDA)."""
+        mps_available = False
+        cuda_available = False
+        device_name = "CPU Universal"
+        try:
+            import torch
+            cuda_available = torch.cuda.is_available()
+            mps_available = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+            if cuda_available:
+                name = torch.cuda.get_device_name(0) if torch.cuda.device_count() > 0 else "CUDA"
+                device_name = f"NVIDIA CUDA ({name})"
+            elif mps_available:
+                device_name = "Apple Silicon GPU (MPS)"
+            else:
+                device_name = "CPU Universal"
+        except Exception:
+            pass
+        return {
+            "mps_available": mps_available,
+            "cuda_available": cuda_available,
+            "gpu_available": mps_available or cuda_available,
+            "device_name": device_name,
+        }
+
     def update_telemetry(self, data: Dict[str, Any]) -> None:
         with self._lock:
             self.latest_telemetry.update(data)
@@ -136,7 +169,7 @@ class HUDServer:
 
             def do_GET(self) -> None:
                 if self.path in ("/", "/index.html"):
-                    encoded_html = server_instance.dashboard_html.encode("utf-8")
+                    encoded_html = server_instance.get_dashboard_html().encode("utf-8")
                     self.send_response(200)
                     self.send_header("Content-Type", "text/html; charset=utf-8")
                     self.send_header("Content-Length", str(len(encoded_html)))
@@ -198,6 +231,7 @@ class HUDServer:
                 elif self.path == "/api/state":
                     resp = {
                         "runner": runner.get_state(),
+                        "hardware": server_instance.get_hardware_info(),
                         "checkpoints": server_instance.scan_checkpoints(),
                         "checkpoints_detailed": server_instance.scan_checkpoints_detailed(),
                         "telemetry": server_instance.get_telemetry_snapshot(),
