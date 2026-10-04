@@ -387,6 +387,7 @@ def run_worker_train(config: Dict[str, Any], hud_client: HUDClient) -> None:
                 agent=agent,
                 checkpoint_path=save_path,
                 extra_info={"env_id": env_id, "final_return": final_return, "steps": trainer.total_steps},
+                auto_sync_web=config.get("auto_sync_web", True),
             )
             print(f"Checkpoint salvo com sucesso em: {save_path}")
 
@@ -546,6 +547,7 @@ def run_worker_eval(config: Dict[str, Any], hud_client: HUDClient) -> None:
                 agent=agent,
                 checkpoint_path=save_path,
                 extra_info={"env_id": env_id, "evaluated_episodes": episodes},
+                auto_sync_web=config.get("auto_sync_web", True),
             )
             print(f"Checkpoint salvo com sucesso em: {save_path}")
 

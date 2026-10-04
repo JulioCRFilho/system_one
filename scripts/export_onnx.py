@@ -57,7 +57,7 @@ class S1OnnxExportWrapper(nn.Module):
         return logits, val, next_hx
 
 
-def export_checkpoint(checkpoint_path: str, env_id: str, output_path: str) -> None:
+def export_checkpoint(checkpoint_path: str, env_id: str, output_path: str, sync_portfolio: bool = True) -> None:
     print(f"📦 Exportando '{checkpoint_path}' para '{output_path}'...")
     
     # 1. Cria o ambiente para resolver espaços de observação e ação
@@ -110,15 +110,39 @@ def export_checkpoint(checkpoint_path: str, env_id: str, output_path: str) -> No
     )
     print(f"✅ Sucesso! Modelo ONNX gerado: {output_path} ({os.path.getsize(output_path):,} bytes)")
 
+    if sync_portfolio:
+        import shutil
+        project_root = Path(__file__).resolve().parent.parent
+        filename = os.path.basename(output_path)
+        portfolio_targets = [
+            project_root.parent / "portfolio" / "public" / "models",
+            project_root.parent / "portfolio" / "dist" / "models",
+        ]
+        for p_dir in portfolio_targets:
+            if p_dir.parent.exists():
+                p_dir.mkdir(parents=True, exist_ok=True)
+                dest = p_dir / filename
+                shutil.copy2(output_path, dest)
+                print(f"  🌐 Sincronizado com portfólio: {dest}")
+
 
 def main():
     parser = argparse.ArgumentParser(description="Exportador PyTorch -> ONNX do System 1")
     parser.add_argument("--checkpoint", type=str, required=True, help="Caminho do arquivo .pt")
     parser.add_argument("--env", type=str, required=True, help="ID do ambiente (ex: RubiksCubeMacro-v0, CartPole-v1)")
-    parser.add_argument("--out", type=str, required=True, help="Caminho de saída .onnx")
+    parser.add_argument("--out", type=str, default=None, help="Caminho de saída .onnx (padrão: web/models/ e portfolio)")
+    parser.add_argument("--no-sync", action="store_true", help="Desativa cópia automática para o portfólio")
     args = parser.parse_args()
 
-    export_checkpoint(args.checkpoint, args.env, args.out)
+    project_root = Path(__file__).resolve().parent.parent
+    if args.out:
+        out_path = args.out
+    else:
+        from system1_engine.core.onnx_exporter import resolve_web_model_filename
+        filename = resolve_web_model_filename(args.env, args.checkpoint)
+        out_path = str(project_root / "web" / "models" / filename)
+
+    export_checkpoint(args.checkpoint, args.env, out_path, sync_portfolio=not args.no_sync)
 
 
 if __name__ == "__main__":

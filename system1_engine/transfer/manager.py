@@ -16,8 +16,9 @@ class KnowledgeTransferManager:
         agent: nn.Module,
         checkpoint_path: str,
         extra_info: Optional[Dict[str, Any]] = None,
+        auto_sync_web: bool = True,
     ) -> None:
-        """Saves agent weights and metadata to file."""
+        """Saves agent weights and metadata to file, and auto-syncs ONNX for Web HUD."""
         os.makedirs(os.path.dirname(os.path.abspath(checkpoint_path)), exist_ok=True)
         state_dict_cpu = {k: v.cpu() if isinstance(v, torch.Tensor) else v for k, v in agent.state_dict().items()}
         payload = {
@@ -25,6 +26,13 @@ class KnowledgeTransferManager:
             "extra_info": extra_info or {},
         }
         torch.save(payload, checkpoint_path)
+
+        if auto_sync_web and hasattr(agent, "front_end") and hasattr(agent, "trunk"):
+            try:
+                from system1_engine.core.onnx_exporter import auto_sync_web_model
+                auto_sync_web_model(agent, checkpoint_path=checkpoint_path, extra_info=extra_info)
+            except Exception:
+                pass
 
     @staticmethod
     def load_transferable_weights(
