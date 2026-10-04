@@ -190,9 +190,14 @@ class HUDServer:
             "LunarLander-v2": {"target_return": 200.0, "entropy_coef": 0.01, "steps": 100000},
             "BipedalWalker-v3": {"target_return": 300.0, "entropy_coef": 0.01, "steps": 200000},
             "FrozenLake-v1": {"target_return": 0.9, "entropy_coef": 0.02, "steps": 30000},
+            "Ant-v5": {"target_return": 4000.0, "entropy_coef": 0.005, "steps": 300000},
             "Ant-v4": {"target_return": 4000.0, "entropy_coef": 0.005, "steps": 300000},
+            "HalfCheetah-v5": {"target_return": 4000.0, "entropy_coef": 0.005, "steps": 300000},
             "HalfCheetah-v4": {"target_return": 4000.0, "entropy_coef": 0.005, "steps": 300000},
+            "Hopper-v5": {"target_return": 3000.0, "entropy_coef": 0.005, "steps": 300000},
             "Hopper-v4": {"target_return": 3000.0, "entropy_coef": 0.005, "steps": 300000},
+            "Humanoid-v5": {"target_return": 5000.0, "entropy_coef": 0.005, "steps": 500000},
+            "Walker2d-v5": {"target_return": 4000.0, "entropy_coef": 0.005, "steps": 300000},
         }
 
         results = []
