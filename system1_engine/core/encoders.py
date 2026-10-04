@@ -231,6 +231,7 @@ class ImpalaVisualEncoder(nn.Module):
             x = self.block3(x)
             flatten_dim = int(np.prod(x.shape[1:]))
 
+        self.adaptive_pool = nn.AdaptiveAvgPool2d((11, 11))
         self.head = nn.Sequential(
             nn.ReLU(),
             nn.Linear(flatten_dim, out_dim),
@@ -252,6 +253,7 @@ class ImpalaVisualEncoder(nn.Module):
         x = self.block1(x)
         x = self.block2(x)
         x = self.block3(x)
+        x = self.adaptive_pool(x)
         x = x.view(b * t, -1)
         z = self.head(x)
         z_vis = z.view(b, t, self.out_dim)

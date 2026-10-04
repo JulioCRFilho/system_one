@@ -73,3 +73,63 @@ def test_wrapper_continuous_action():
 
     np.testing.assert_allclose(next_dict["prev_action"], action)
     assert next_dict["prev_reward"] == float(reward)
+
+
+def test_wrapper_visual_standardization():
+    """Verify visual observations in HWC, CHW, or arbitrary resolutions standardize to (2*C, 84, 84)."""
+    # Create a mock visual gym environment returning (96, 96, 3) like CarRacing
+    class MockHWCEnv(gym.Env):
+        def __init__(self):
+            self.observation_space = gym.spaces.Box(low=0, high=255, shape=(96, 96, 3), dtype=np.uint8)
+            self.action_space = gym.spaces.Box(low=-1, high=1, shape=(3,), dtype=np.float32)
+        def reset(self, **kwargs):
+            return np.zeros((96, 96, 3), dtype=np.uint8), {}
+        def step(self, action):
+            return np.ones((96, 96, 3), dtype=np.uint8) * 128, 1.0, False, False, {}
+
+    wrapped = UniversalS1Wrapper(MockHWCEnv())
+    assert wrapped.is_visual
+    assert wrapped.observation_space["obs"].shape == (6, 84, 84)
+
+    obs0, _ = wrapped.reset()
+    assert obs0["obs"].shape == (6, 84, 84)
+    assert obs0["obs"].dtype == np.float32
+    assert obs0["obs"].min() >= 0.0 and obs0["obs"].max() <= 1.0
+
+    obs1, rew, _, _, _ = wrapped.step(np.array([0.5, 0.2, 0.0], dtype=np.float32))
+    assert obs1["obs"].shape == (6, 84, 84)
+    assert obs1["prev_action"].shape == (3,)
+    assert rew == 1.0
+
+
+def test_wrapper_discrete_and_structured_observation_spaces():
+    """Verify that Discrete, MultiDiscrete, MultiBinary, and Tuple observation spaces vectorize accurately."""
+    # 1. Discrete observation space (FrozenLake-v1)
+    fl_env = UniversalS1Wrapper(gym.make("FrozenLake-v1"))
+    assert not fl_env.is_visual
+    assert fl_env.observation_space["obs"].shape == (16,)
+    assert fl_env.observation_space["delta_obs"].shape == (16,)
+
+    obs0, _ = fl_env.reset()
+    assert obs0["obs"].shape == (16,)
+    assert obs0["obs"][0] == 1.0
+    assert np.all(obs0["delta_obs"] == 0.0)
+
+    obs1, _, _, _, _ = fl_env.step(1)
+    assert obs1["obs"].shape == (16,)
+    # delta_obs is current_obs - prev_obs
+    expected_delta = obs1["obs"] - obs0["obs"]
+    np.testing.assert_allclose(obs1["delta_obs"], expected_delta)
+    fl_env.close()
+
+    # 2. Tuple observation space (Blackjack-v1: 32 + 11 + 2 = 45)
+    bj_env = UniversalS1Wrapper(gym.make("Blackjack-v1"))
+    assert not bj_env.is_visual
+    assert bj_env.observation_space["obs"].shape == (45,)
+
+    bj_obs0, _ = bj_env.reset()
+    assert bj_obs0["obs"].shape == (45,)
+    assert bj_obs0["obs"].sum() == 3.0  # 1 one-hot active per subspace
+    assert np.all(bj_obs0["delta_obs"] == 0.0)
+    bj_env.close()
+

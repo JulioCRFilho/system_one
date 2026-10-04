@@ -13,7 +13,9 @@ from PIL import Image
 import torch
 
 from system1_engine.core.agent import UniversalS1Agent
+from system1_engine.core.attention import GradCAMExplainer
 from system1_engine.env.adapters import make_game_env
+from system1_engine.env.dependencies import make_gym_env_with_auto_install
 from system1_engine.env.wrapper import UniversalS1Wrapper
 from system1_engine.telemetry.tracker import LiveStatsTracker
 from system1_engine.training.ppo import RecurrentPPOTrainer
@@ -23,11 +25,12 @@ from system1_engine.transfer.manager import KnowledgeTransferManager
 class HUDClient:
     """Cliente HTTP interno assíncrono de alto desempenho e zero overhead para o HUD."""
 
-    def __init__(self, server_url: str) -> None:
+    def __init__(self, server_url: str, initial_vision_mode: str = "normal") -> None:
         parsed = urllib.parse.urlparse(server_url)
         self.host = parsed.hostname or "127.0.0.1"
         self.port = parsed.port or 8050
         self._conn: Optional[http.client.HTTPConnection] = None
+        self._vision_mode: str = initial_vision_mode
 
         # Sincronização assíncrona para zero overhead no loop principal de treino
         self._lock = threading.Lock()
@@ -63,6 +66,11 @@ class HUDClient:
         with self._lock:
             self._pending_frame = frame
         self._wake_event.set()
+
+    def get_vision_mode(self) -> str:
+        """Retorna o modo de atenção visual atualmente selecionado no HUD."""
+        with self._lock:
+            return self._vision_mode
 
     def _worker_loop(self) -> None:
         """Loop de fundo para processamento offloaded de telemetria e compressão/envio de vídeo."""
@@ -103,7 +111,15 @@ class HUDClient:
                 conn = self._get_connection()
                 conn.request("POST", "/api/internal/telemetry", payload, headers)
                 res = conn.getresponse()
-                res.read()
+                raw = res.read()
+                if res.status == 200 and raw:
+                    try:
+                        resp_data = json.loads(raw.decode("utf-8"))
+                        if "vision_mode" in resp_data:
+                            with self._lock:
+                                self._vision_mode = resp_data["vision_mode"]
+                    except Exception:
+                        pass
                 return
             except Exception:
                 self._conn = None
@@ -135,7 +151,15 @@ class HUDClient:
                     conn = self._get_connection()
                     conn.request("POST", "/api/internal/frame", jpeg_bytes, headers)
                     res = conn.getresponse()
-                    res.read()
+                    raw = res.read()
+                    if res.status == 200 and raw:
+                        try:
+                            resp_data = json.loads(raw.decode("utf-8"))
+                            if "vision_mode" in resp_data:
+                                with self._lock:
+                                    self._vision_mode = resp_data["vision_mode"]
+                        except Exception:
+                            pass
                     return
                 except Exception:
                     self._conn = None
@@ -186,7 +210,7 @@ def build_hud_env(
     elif render_mode == "window":
         gym_render_mode = "human"
 
-    raw_env = gym.make(env_id, render_mode=gym_render_mode)
+    raw_env = make_gym_env_with_auto_install(env_id, render_mode=gym_render_mode)
     if env_id == "MountainCar-v0":
         from system1_engine.env.adapters.mountain_car import (
             MountainCarEnergyRewardWrapper,
@@ -296,6 +320,8 @@ def run_worker_train(config: Dict[str, Any], hud_client: HUDClient) -> None:
         device=device,
     )
 
+    explainer = GradCAMExplainer(agent)
+
     def train_callback(cur_steps: int, mean_ret: float) -> None:
         nonlocal last_telemetry_ts
         now = time.time()
@@ -321,6 +347,21 @@ def run_worker_train(config: Dict[str, Any], hud_client: HUDClient) -> None:
             try:
                 frame = env.render()
                 if frame is not None:
+                    try:
+                        v_mode = hud_client.get_vision_mode()
+                        if v_mode != "normal" and explainer.is_supported():
+                            action_descs = getattr(getattr(env, "unwrapped", env), "action_descriptions", None)
+                            cam_obs = getattr(env, "latest_obs_dict", None)
+                            if cam_obs is not None:
+                                heatmap, label = explainer.compute_saliency(
+                                    obs_dict=cam_obs,
+                                    hx=agent.hx,
+                                    mode=v_mode,
+                                    action_names=action_descs,
+                                )
+                                frame = explainer.render_overlay(frame, heatmap, label=label)
+                    except Exception:
+                        pass
                     hud_client.send_frame(frame)
                     last_frame_ts = now
             except Exception:
@@ -350,6 +391,7 @@ def run_worker_train(config: Dict[str, Any], hud_client: HUDClient) -> None:
         print(f"=== [HUD Worker] Treinamento Concluído! Retorno Final: {final_return:.2f} ===")
 
     finally:
+        explainer.close()
         env.close()
 
 
@@ -398,6 +440,7 @@ def run_worker_eval(config: Dict[str, Any], hud_client: HUDClient) -> None:
         print("[Aviso] Nenhum checkpoint especificado; utilizando pesos aleatórios inicializados.")
 
     agent.eval()
+    explainer = GradCAMExplainer(agent)
     tracker = LiveStatsTracker()
     last_telemetry_ts = 0.0
 
@@ -439,18 +482,39 @@ def run_worker_eval(config: Dict[str, Any], hud_client: HUDClient) -> None:
                 steps += 1
                 tracker.record_env_step(reward=reward, done=done)
 
-                # Renderização in-browser com indicador de disparo
+                # Renderização in-browser com indicador de disparo e mapas de atenção visual (Grad-CAM)
                 if render_mode == "in_browser":
                     try:
                         frame = env.render()
                         if frame is not None:
-                            is_firing = getattr(getattr(env, "unwrapped", env), "is_attacking", False) or action == 2
-                            if is_firing and isinstance(frame, np.ndarray) and frame.ndim == 3:
-                                frame = frame.copy()
-                                h, w = frame.shape[:2]
-                                cy, cx = h // 2, w // 2
-                                frame[max(0, cy-6):min(h, cy+7), max(0, cx-1):min(w, cx+2)] = [255, 30, 30]
-                                frame[max(0, cy-1):min(h, cy+2), max(0, cx-6):min(w, cx+7)] = [255, 30, 30]
+                            try:
+                                is_firing = bool(getattr(getattr(env, "unwrapped", env), "is_attacking", False)) or (
+                                    env_id.lower().startswith("vizdoom")
+                                    and isinstance(action, (int, np.integer))
+                                    and int(action) == 2
+                                )
+                                if is_firing and isinstance(frame, np.ndarray) and frame.ndim == 3:
+                                    frame = frame.copy()
+                                    h, w = frame.shape[:2]
+                                    cy, cx = h // 2, w // 2
+                                    frame[max(0, cy-6):min(h, cy+7), max(0, cx-1):min(w, cx+2)] = [255, 30, 30]
+                                    frame[max(0, cy-1):min(h, cy+2), max(0, cx-6):min(w, cx+7)] = [255, 30, 30]
+
+                                v_mode = hud_client.get_vision_mode()
+                                if v_mode != "normal" and explainer.is_supported():
+                                    action_descs = getattr(getattr(env, "unwrapped", env), "action_descriptions", None)
+                                    cam_obs = getattr(env, "latest_obs_dict", obs_dict)
+                                    heatmap, label = explainer.compute_saliency(
+                                        obs_dict=cam_obs,
+                                        hx=agent.hx,
+                                        mode=v_mode,
+                                        action=action,
+                                        action_names=action_descs,
+                                    )
+                                    frame = explainer.render_overlay(frame, heatmap, label=label)
+                            except Exception:
+                                pass
+
                             hud_client.send_frame(frame)
                     except Exception:
                         pass
@@ -484,6 +548,7 @@ def run_worker_eval(config: Dict[str, Any], hud_client: HUDClient) -> None:
         print("=== [HUD Worker] Avaliação Concluída com Sucesso! ===")
 
     finally:
+        explainer.close()
         env.close()
 
 
@@ -547,7 +612,7 @@ def main() -> None:
     config = json.loads(args.config)
     mode = config.get("mode", "train")
 
-    hud_client = HUDClient(args.server_url)
+    hud_client = HUDClient(args.server_url, initial_vision_mode=config.get("vision_mode", "normal"))
 
     try:
         if mode == "train":

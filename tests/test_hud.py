@@ -21,6 +21,11 @@ def test_video_frame_buffer_placeholder_and_update():
     buf.update_frame(dummy_jpeg)
     assert buf.get_frame() == dummy_jpeg
 
+    # Test wait_for_frame_change
+    cur_frame, count = buf.wait_for_frame_change(last_count=-1, timeout=0.1)
+    assert cur_frame == dummy_jpeg
+    assert count > 0
+
     buf.reset_placeholder("TEST TITLE", "TEST SUBTITLE")
     frame1 = buf.get_frame()
     assert frame1[:2] == b"\xff\xd8"
@@ -39,6 +44,8 @@ def test_hud_server_lifecycle_and_endpoints():
         html = res.read().decode("utf-8")
         assert "SYSTEM 1 ENGINE" in html
         assert "Visual Control HUD" in html
+        assert "openGymCatalogModal()" in html
+        assert "https://gymnasium.farama.org/environments/" in html
 
         # 2. Test GET /api/state
         conn.request("GET", "/api/state")
@@ -62,6 +69,17 @@ def test_hud_server_lifecycle_and_endpoints():
         assert "checkpoints" in ckpt_resp
         assert "checkpoints_detailed" in ckpt_resp
         assert isinstance(ckpt_resp["checkpoints_detailed"], list)
+
+        # 2.2 Test GET /api/gym_environments
+        conn.request("GET", "/api/gym_environments")
+        res = conn.getresponse()
+        assert res.status == 200
+        gym_resp = json.loads(res.read().decode("utf-8"))
+        assert "environments" in gym_resp
+        assert "docs_url" in gym_resp
+        assert len(gym_resp["environments"]) > 30
+        assert any(e["id"] == "CartPole-v1" for e in gym_resp["environments"])
+        assert any("doc_url" in e and "category" in e for e in gym_resp["environments"])
 
         # 3. Test POST /api/internal/telemetry
         telemetry_payload = json.dumps({"fps": 60.5, "total_steps": 1234}).encode("utf-8")
@@ -90,6 +108,13 @@ def test_hud_server_lifecycle_and_endpoints():
         assert res.status == 200
         res.read()
         assert server.frame_buffer.get_frame() == dummy_frame
+
+        # 4.1 Test GET /api/frame snapshot endpoint
+        conn.request("GET", "/api/frame")
+        res = conn.getresponse()
+        assert res.status == 200
+        assert res.getheader("Content-Type") == "image/jpeg"
+        assert res.read() == dummy_frame
 
         # 5. Test POST /api/action stop
         action_payload = json.dumps({"action": "stop"}).encode("utf-8")
@@ -254,6 +279,137 @@ def test_hud_device_selection_gpu_training():
         assert count > 0
         expected_dev = "CUDA" if torch.cuda.is_available() else "MPS"
         assert any(f"Dispositivo de Execução: {expected_dev}" in line for line in logs)
+
+
+def test_hud_carracing_visual_training():
+    """Verify that HUD worker trains visual continuous environment CarRacing-v3 without dimension error."""
+    server = HUDServer(host="127.0.0.1", port=8999, open_browser=False)
+    with server:
+        config = {
+            "mode": "train",
+            "env": "CarRacing-v3",
+            "device": "cpu",
+            "steps": 32,
+            "rollout_steps": 16,
+            "chunk_length": 8,
+            "chunk_batch_size": 2,
+            "render_mode": "none",
+        }
+        success, msg = server.runner.start(config, "http://127.0.0.1:8999")
+        assert success is True
+
+        t0 = time.time()
+        while server.runner.is_running() and (time.time() - t0 < 15.0):
+            time.sleep(0.2)
+
+        state = server.runner.get_state()
+        assert state["status"] == "COMPLETED"
+
+        logs, count = server.runner.get_logs(0)
+        assert count > 0
+        assert not any("RuntimeError" in line for line in logs)
+        assert any("CarRacing-v3" in line for line in logs)
+
+
+def test_hud_auth_token_protection():
+    """Verify that when auth_token is set, unauthenticated requests return 401."""
+    import urllib.request
+    import urllib.error
+
+    server = HUDServer(host="127.0.0.1", port=9001, open_browser=False, auth_token="supersecret123")
+    with server:
+        # 1. Sem token -> 401 Unauthorized
+        try:
+            urllib.request.urlopen("http://127.0.0.1:9001/api/state")
+            assert False, "Deveria ter lançado HTTPError 401"
+        except urllib.error.HTTPError as e:
+            assert e.code == 401
+
+        # 2. Token incorreto no cabeçalho -> 401 Unauthorized
+        try:
+            req = urllib.request.Request(
+                "http://127.0.0.1:9001/api/state",
+                headers={"Authorization": "Bearer wrong_token"},
+            )
+            urllib.request.urlopen(req)
+            assert False, "Deveria ter lançado HTTPError 401"
+        except urllib.error.HTTPError as e:
+            assert e.code == 401
+
+        # 3. Token correto no cabeçalho Bearer -> 200 OK
+        req_valid = urllib.request.Request(
+            "http://127.0.0.1:9001/api/state",
+            headers={"Authorization": "Bearer supersecret123"},
+        )
+        with urllib.request.urlopen(req_valid) as resp:
+            assert resp.status == 200
+
+        # 4. Token correto via query parameter ?token= -> 200 OK
+        with urllib.request.urlopen("http://127.0.0.1:9001/api/state?token=supersecret123") as resp:
+            assert resp.status == 200
+
+
+def test_hud_carracing_in_browser_evaluation_streaming():
+    """Verify that evaluating CarRacing-v3 (continuous action space) in in_browser mode streams frames to the buffer."""
+    server = HUDServer(host="127.0.0.1", port=9002, open_browser=False)
+    with server:
+        config = {
+            "mode": "run",
+            "env": "CarRacing-v3",
+            "episodes": 1,
+            "fps": 0.0,
+            "render_mode": "in_browser",
+            "inference_mode": "confidence",
+        }
+        success, msg = server.runner.start(config, "http://127.0.0.1:9002")
+        assert success is True
+
+        # Wait until at least 1 frame arrives in the buffer (should be within 3-4s)
+        t0 = time.time()
+        frame_received = False
+        while time.time() - t0 < 10.0:
+            cur_frame = server.frame_buffer.get_frame()
+            if cur_frame != server.frame_buffer._default_frame and cur_frame[:2] == b"\xff\xd8":
+                frame_received = True
+                break
+            time.sleep(0.1)
+
+        # Stop runner cleanly
+        server.runner.stop()
+
+        assert frame_received, "Expected live game frame from CarRacing-v3 to arrive in HUD frame buffer"
+
+
+def test_hud_frozenlake_training():
+    """Verify that HUD worker trains discrete observation environment FrozenLake-v1 without AssertionErrors."""
+    server = HUDServer(host="127.0.0.1", port=9003, open_browser=False)
+    with server:
+        config = {
+            "mode": "train",
+            "env": "FrozenLake-v1",
+            "device": "cpu",
+            "steps": 32,
+            "rollout_steps": 16,
+            "chunk_length": 8,
+            "chunk_batch_size": 2,
+            "render_mode": "none",
+        }
+        success, msg = server.runner.start(config, "http://127.0.0.1:9003")
+        assert success is True
+
+        t0 = time.time()
+        while server.runner.is_running() and (time.time() - t0 < 10.0):
+            time.sleep(0.1)
+
+        state = server.runner.get_state()
+        assert state["status"] == "COMPLETED"
+
+        logs, count = server.runner.get_logs(0)
+        assert count > 0
+        assert not any("AssertionError" in line for line in logs)
+        assert any("FrozenLake-v1" in line for line in logs)
+
+
 
 
 

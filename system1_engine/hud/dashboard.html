@@ -229,12 +229,22 @@
 
         <!-- Ambiente e Cenário -->
         <div>
-          <div class="flex items-center gap-1.5 mb-1">
-            <label class="text-[11px] text-gray-400 font-semibold">Ambiente (--env)</label>
-            <span class="tooltip-wrap tooltip-down tooltip-left">
-              <span class="tooltip-icon" title="Identificador do ambiente: CartPole, Acrobot, Pendulum, MountainCar ou ViZDoom nativo.">ⓘ</span>
-              <span class="tooltip-bubble"><strong>--env</strong>: Seleciona o ambiente de simulação.<br>• <em>Vetoriais</em>: CartPole, Acrobot, etc. usam adaptador MLP de ultra-baixa latência.<br>• <em>ViZDoom</em>: Doom nativo com extrator visual IMPALA CNN 3D.</span>
-            </span>
+          <div class="flex items-center justify-between mb-1">
+            <div class="flex items-center gap-1.5">
+              <label class="text-[11px] text-gray-400 font-semibold">Ambiente (--env)</label>
+              <span class="tooltip-wrap tooltip-down tooltip-left">
+                <span class="tooltip-icon" title="Identificador do ambiente: CartPole, Acrobot, Pendulum, MountainCar ou ViZDoom nativo.">ⓘ</span>
+                <span class="tooltip-bubble"><strong>--env</strong>: Seleciona o ambiente de simulação.<br>• <em>Vetoriais</em>: CartPole, Acrobot, etc. usam adaptador MLP de ultra-baixa latência.<br>• <em>ViZDoom</em>: Doom nativo com extrator visual IMPALA CNN 3D.</span>
+              </span>
+            </div>
+            <div class="flex items-center gap-1">
+              <button type="button" onclick="openGymCatalogModal()" class="text-[10px] text-cyan-300 hover:text-cyan-200 font-mono flex items-center gap-1 bg-cyan-950/80 hover:bg-cyan-900/90 px-1.5 py-0.5 rounded border border-cyan-700/80 transition cursor-pointer shadow-sm" title="Abrir catálogo interativo com todos os ambientes e jogos do Gymnasium">
+                <span>📚</span> Lista de Jogos
+              </button>
+              <a href="https://gymnasium.farama.org/environments/" target="_blank" rel="noopener noreferrer" class="text-[10px] text-gray-400 hover:text-gray-200 font-mono flex items-center gap-0.5 bg-gray-900 hover:bg-gray-800 px-1.5 py-0.5 rounded border border-gray-800 transition" title="Abrir documentação oficial do Farama Gymnasium em nova aba">
+                Docs ↗
+              </a>
+            </div>
           </div>
           <select id="cfg-env" class="hud-input mb-1.5" onchange="onEnvChange()">
             <option value="CartPole-v1">CartPole-v1 (Vetor, 4D, 2 Ações)</option>
@@ -244,7 +254,23 @@
             <option value="vizdoom">ViZDoom (Nativo / Visual IMPALA)</option>
             <option value="custom">Outro (Customizado Gymnasium...)</option>
           </select>
-          <input type="text" id="cfg-custom-env" placeholder="Digite o ID do Gymnasium (ex: LunarLander-v2)..." class="hud-input hidden mb-1.5" oninput="onCustomEnvInput()" />
+          <input type="text" id="cfg-custom-env" placeholder="Digite o ID do Gymnasium (ex: LunarLander-v3)..." class="hud-input hidden mb-1.5" oninput="onCustomEnvInput()" />
+
+          <!-- Atalhos Rápidos para Jogos Populares quando em Modo Customizado -->
+          <div id="custom-env-suggestions" class="hidden flex flex-col gap-1 mb-1.5 p-1.5 rounded bg-gray-950/70 border border-gray-800/80 text-[10px]">
+            <div class="flex items-center justify-between text-gray-400">
+              <span class="font-semibold text-gray-300 flex items-center gap-1"><span>💡</span> Jogos Populares:</span>
+              <button type="button" onclick="openGymCatalogModal()" class="text-cyan-400 hover:underline">Ver Todos (60+) ↗</button>
+            </div>
+            <div class="flex flex-wrap gap-1">
+              <button type="button" onclick="selectGymEnvFromChip('LunarLander-v3')" class="px-1.5 py-0.5 rounded bg-purple-950 text-purple-300 hover:bg-purple-900 border border-purple-800 text-[9px] font-mono cursor-pointer transition">LunarLander-v3</button>
+              <button type="button" onclick="selectGymEnvFromChip('BipedalWalker-v3')" class="px-1.5 py-0.5 rounded bg-purple-950 text-purple-300 hover:bg-purple-900 border border-purple-800 text-[9px] font-mono cursor-pointer transition">BipedalWalker-v3</button>
+              <button type="button" onclick="selectGymEnvFromChip('CarRacing-v3')" class="px-1.5 py-0.5 rounded bg-purple-950 text-purple-300 hover:bg-purple-900 border border-purple-800 text-[9px] font-mono cursor-pointer transition">CarRacing-v3</button>
+              <button type="button" onclick="selectGymEnvFromChip('FrozenLake-v1')" class="px-1.5 py-0.5 rounded bg-amber-950 text-amber-300 hover:bg-amber-900 border border-amber-800 text-[9px] font-mono cursor-pointer transition">FrozenLake-v1</button>
+              <button type="button" onclick="selectGymEnvFromChip('Ant-v4')" class="px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 hover:bg-emerald-900 border border-emerald-800 text-[9px] font-mono cursor-pointer transition">Ant-v4</button>
+              <button type="button" onclick="selectGymEnvFromChip('HalfCheetah-v4')" class="px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 hover:bg-emerald-900 border border-emerald-800 text-[9px] font-mono cursor-pointer transition">HalfCheetah-v4</button>
+            </div>
+          </div>
           
           <div id="group-vizdoom-scenario" class="hidden">
             <div class="flex items-center gap-1.5 mb-1">
@@ -569,14 +595,41 @@
             </span>
             <span id="feed-status" class="px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-400 font-mono">STANDBY</span>
           </div>
-          <span class="text-[10px] text-gray-500 font-mono">MJPEG stream in-browser</span>
+          <div class="flex items-center gap-2">
+            <button type="button" onclick="refreshVideoFeed()" class="px-1.5 py-0.5 rounded text-[9px] bg-gray-800 hover:bg-gray-700 text-gray-300 font-mono transition" title="Reconectar stream MJPEG">↻ Reconectar</button>
+            <span class="text-[10px] text-gray-500 font-mono">MJPEG stream</span>
+          </div>
         </div>
 
         <div class="relative bg-black rounded overflow-hidden aspect-[4/3] flex items-center justify-center border border-gray-800/80">
-          <img id="game-feed" src="/video_feed" alt="System 1 Game Viewport" class="w-full h-full object-contain" />
+          <img id="game-feed" src="/video_feed" alt="System 1 Game Viewport" class="w-full h-full object-contain" onerror="handleVideoFeedError()" />
           <div id="video-overlay" class="absolute bottom-2 left-2 right-2 flex justify-between items-center px-2 py-1 rounded bg-black/60 backdrop-blur-sm text-[10px] font-mono text-gray-400 pointer-events-none">
             <span id="overlay-env">CartPole-v1</span>
             <span id="overlay-fps">50.0 FPS</span>
+          </div>
+        </div>
+
+        <!-- Barra de Controle de Modos de Visão & Atenção Visual (Grad-CAM / XAI) -->
+        <div class="mt-2.5 pt-2 border-t border-gray-800/80 flex flex-col gap-1.5">
+          <div class="flex justify-between items-center">
+            <span class="text-[10px] font-bold text-cyan-400 uppercase tracking-wider flex items-center gap-1">
+              <span>👁️</span> Atenção Visual (XAI)
+            </span>
+            <span id="vision-mode-badge" class="text-[9px] font-mono text-gray-400 uppercase">NORMAL</span>
+          </div>
+          <div class="grid grid-cols-4 gap-1">
+            <button type="button" id="btn-vis-normal" onclick="setVisionMode('normal')" title="Transmissão padrão sem overlay térmico" class="py-1 px-1 rounded text-[10px] font-semibold tracking-tight transition flex items-center justify-center gap-1 bg-cyan-600 text-white shadow-sm shadow-cyan-950">
+              Normal
+            </button>
+            <button type="button" id="btn-vis-gradcam_policy" onclick="setVisionMode('gradcam_policy')" title="Grad-CAM guiado pela ação: onde a política foca para decidir" class="py-1 px-1 rounded text-[10px] font-semibold tracking-tight transition flex items-center justify-center gap-1 bg-gray-900 hover:bg-gray-800 text-gray-400 border border-gray-800">
+              🎯 Ação
+            </button>
+            <button type="button" id="btn-vis-saliency_value" onclick="setVisionMode('saliency_value')" title="Saliência do Crítico V(s): regiões que geram ameaça ou recompensa" class="py-1 px-1 rounded text-[10px] font-semibold tracking-tight transition flex items-center justify-center gap-1 bg-gray-900 hover:bg-gray-800 text-gray-400 border border-gray-800">
+              🧭 Valor
+            </button>
+            <button type="button" id="btn-vis-saliency_entropy" onclick="setVisionMode('saliency_entropy')" title="Incerteza/Entropia: regiões visuais que causam confusão" class="py-1 px-1 rounded text-[10px] font-semibold tracking-tight transition flex items-center justify-center gap-1 bg-gray-900 hover:bg-gray-800 text-gray-400 border border-gray-800">
+              ❓ Dúvida
+            </button>
           </div>
         </div>
       </div>
@@ -657,15 +710,323 @@
 
   </main>
 
+  <!-- MODAL: CATÁLOGO COMPLETO DE JOGOS & AMBIENTES GYMNASIUM -->
+  <div id="modal-gym-catalog" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden items-center justify-center p-3 sm:p-4">
+    <div class="bg-[#080d19] border border-cyan-800/80 rounded-xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+      
+      <!-- Cabeçalho do Modal -->
+      <div class="p-3.5 bg-[#0b1222] border-b border-gray-800 flex items-center justify-between">
+        <div class="flex items-center gap-2.5">
+          <span class="text-xl">🎮</span>
+          <div>
+            <div class="flex items-center gap-2">
+              <h3 class="text-sm font-bold text-white tracking-wide">Catálogo de Jogos & Ambientes Gymnasium</h3>
+              <span class="px-2 py-0.5 rounded text-[9px] font-mono bg-cyan-950 text-cyan-300 border border-cyan-800 font-semibold">Farama Foundation</span>
+            </div>
+            <p class="text-[11px] text-gray-400">Selecione qualquer jogo ou ambiente para treinar ou inspecionar no System 1</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <a href="https://gymnasium.farama.org/environments/" target="_blank" rel="noopener noreferrer" class="hidden sm:flex px-2.5 py-1 rounded bg-cyan-600 hover:bg-cyan-500 text-white text-[11px] font-semibold items-center gap-1.5 transition shadow">
+            <span>🌐</span> Docs Farama Oficial ↗
+          </a>
+          <button type="button" onclick="closeGymCatalogModal()" class="w-7 h-7 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 flex items-center justify-center text-sm font-bold transition cursor-pointer" title="Fechar modal (Esc)">
+            ✕
+          </button>
+        </div>
+      </div>
+
+      <!-- Barra de Filtros e Busca -->
+      <div class="p-3 bg-[#070b14] border-b border-gray-800/80 flex flex-col sm:flex-row gap-2.5 justify-between items-center">
+        <!-- Campo de Pesquisa -->
+        <div class="relative w-full sm:w-72">
+          <span class="absolute left-2.5 top-2 text-gray-500 text-xs">🔍</span>
+          <input type="text" id="gym-search-input" oninput="filterGymEnvironments()" placeholder="Filtrar jogo (ex: Lunar, Cart, Race, Walker)..." class="w-full pl-8 pr-3 py-1.5 rounded bg-gray-900 border border-gray-700 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500" />
+        </div>
+
+        <!-- Abas de Categorias -->
+        <div id="gym-category-tabs" class="flex flex-wrap gap-1 w-full sm:w-auto justify-start sm:justify-end">
+          <button type="button" onclick="setGymCategoryFilter('all')" id="gym-tab-all" class="px-2.5 py-1 rounded text-[11px] font-semibold transition bg-cyan-600 text-white shadow cursor-pointer">
+            Todos (<span id="gym-count-all">0</span>)
+          </button>
+          <button type="button" onclick="setGymCategoryFilter('Classic Control')" id="gym-tab-classic" class="px-2.5 py-1 rounded text-[11px] font-semibold transition bg-gray-900 hover:bg-gray-800 text-gray-400 border border-gray-800 cursor-pointer">
+            Classic Control
+          </button>
+          <button type="button" onclick="setGymCategoryFilter('Box2D')" id="gym-tab-box2d" class="px-2.5 py-1 rounded text-[11px] font-semibold transition bg-gray-900 hover:bg-gray-800 text-gray-400 border border-gray-800 cursor-pointer">
+            Box2D
+          </button>
+          <button type="button" onclick="setGymCategoryFilter('Toy Text')" id="gym-tab-toy" class="px-2.5 py-1 rounded text-[11px] font-semibold transition bg-gray-900 hover:bg-gray-800 text-gray-400 border border-gray-800 cursor-pointer">
+            Toy Text
+          </button>
+          <button type="button" onclick="setGymCategoryFilter('MuJoCo')" id="gym-tab-mujoco" class="px-2.5 py-1 rounded text-[11px] font-semibold transition bg-gray-900 hover:bg-gray-800 text-gray-400 border border-gray-800 cursor-pointer">
+            MuJoCo
+          </button>
+        </div>
+      </div>
+
+      <!-- Grid de Ambientes -->
+      <div id="gym-cards-container" class="p-3.5 overflow-y-auto flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5 max-h-[55vh]">
+        <div class="col-span-full py-8 text-center text-gray-500 italic text-xs">
+          Carregando lista completa de ambientes...
+        </div>
+      </div>
+
+      <!-- Rodapé do Modal -->
+      <div class="p-2.5 bg-[#050811] border-t border-gray-800/80 flex flex-col sm:flex-row items-center justify-between text-[11px] text-gray-500 gap-1.5">
+        <div class="flex items-center gap-1.5">
+          <span>💡</span> Clique em <strong>Usar no HUD</strong> para preencher o ambiente e calibrar hiperparâmetros automaticamente.
+        </div>
+        <div class="flex items-center gap-3">
+          <a href="https://gymnasium.farama.org/environments/" target="_blank" rel="noopener noreferrer" class="text-cyan-400 hover:underline font-mono">
+            Catálogo Web Farama ↗
+          </a>
+          <span class="font-mono text-gray-400">Total: <strong id="gym-total-label" class="text-cyan-400 font-bold">0</strong> ambientes</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
   <footer class="mt-4 pt-2 border-t border-gray-800/80 text-[11px] text-gray-500 flex justify-between items-center">
-    <div>System 1 Engine • Amortized Reflex Intelligence Framework</div>
+    <div class="flex items-center gap-2">
+      <span>System 1 Engine • Amortized Reflex Intelligence Framework</span>
+      <span>•</span>
+      <a href="https://gymnasium.farama.org/environments/" target="_blank" rel="noopener noreferrer" class="text-cyan-400 hover:text-cyan-300 underline font-mono text-[10px]" title="Documentação completa do ecossistema Farama Gymnasium">
+        Gymnasium Farama Docs ↗
+      </a>
+    </div>
     <div class="font-mono">Status SSE: <span id="footer-sse-status" class="text-green-400">CONECTADO</span></div>
   </footer>
 
   <script>
+    // Autenticação Segura via Token (?token=... ou Header)
+    const urlParams = new URLSearchParams(window.location.search);
+    const s1AuthToken = urlParams.get('token') || '';
+    if (s1AuthToken) {
+      const _origFetch = window.fetch;
+      window.fetch = function(url, options = {}) {
+        const opts = { ...options };
+        opts.headers = { ...(opts.headers || {}) };
+        opts.headers['Authorization'] = 'Bearer ' + s1AuthToken;
+        let targetUrl = url;
+        if (!targetUrl.includes('token=')) {
+          targetUrl += (targetUrl.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(s1AuthToken);
+        }
+        return _origFetch(targetUrl, opts);
+      };
+    }
+
+    // Gerenciamento e Resiliência do Stream de Vídeo MJPEG
+    let _feedReconnectTimer = null;
+    function refreshVideoFeed() {
+      const gameFeed = document.getElementById('game-feed');
+      if (!gameFeed) return;
+      const tokenParam = s1AuthToken ? `&token=${encodeURIComponent(s1AuthToken)}` : '';
+      const feedUrl = `/video_feed?_t=${Date.now()}${tokenParam}`;
+      gameFeed.src = feedUrl;
+    }
+
+    function handleVideoFeedError() {
+      console.warn('Conexão do stream de vídeo interrompida. Tentando reconectar em 1.5s...');
+      if (_feedReconnectTimer) clearTimeout(_feedReconnectTimer);
+      _feedReconnectTimer = setTimeout(() => {
+        refreshVideoFeed();
+      }, 1500);
+    }
+
+    // Sincroniza feed no carregamento inicial (anexa token se houver)
+    if (s1AuthToken) {
+      window.addEventListener('DOMContentLoaded', refreshVideoFeed);
+    }
+
     let activeMode = 'train';
     let availableCheckpoints = [];
     let availableCheckpointsDetailed = [];
+    let currentVisionMode = 'normal';
+
+    // Controle de Mapas de Atenção Visual (Grad-CAM / XAI)
+    async function setVisionMode(mode) {
+      currentVisionMode = mode;
+      updateVisionModeButtons(mode);
+      try {
+        await fetch('/api/action', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'set_vision_mode', mode: mode })
+        });
+      } catch (err) {
+        console.error('Falha ao alternar modo de visão:', err);
+      }
+    }
+
+    function updateVisionModeButtons(mode) {
+      const modes = ['normal', 'gradcam_policy', 'saliency_value', 'saliency_entropy'];
+      const badge = document.getElementById('vision-mode-badge');
+      const labels = {
+        'normal': 'NORMAL',
+        'gradcam_policy': 'FOCO AÇÃO',
+        'saliency_value': 'VALOR V(s)',
+        'saliency_entropy': 'DÚVIDA H'
+      };
+      if (badge) {
+        badge.innerText = labels[mode] || mode.toUpperCase();
+        badge.className = mode === 'normal' ? 'text-[9px] font-mono text-gray-400 uppercase' : 'text-[9px] font-mono text-cyan-400 font-bold uppercase';
+      }
+
+      modes.forEach(m => {
+        const btn = document.getElementById('btn-vis-' + m);
+        if (!btn) return;
+        if (m === mode) {
+          btn.className = 'py-1 px-1 rounded text-[10px] font-semibold tracking-tight transition flex items-center justify-center gap-1 bg-cyan-600 text-white shadow-sm shadow-cyan-950';
+        } else {
+          btn.className = 'py-1 px-1 rounded text-[10px] font-semibold tracking-tight transition flex items-center justify-center gap-1 bg-gray-900 hover:bg-gray-800 text-gray-400 border border-gray-800';
+        }
+      });
+    }
+
+    // Controle do Catálogo de Jogos do Gymnasium
+    let availableGymEnvironments = [];
+    let currentGymCategory = 'all';
+
+    async function loadGymEnvironments() {
+      try {
+        const res = await fetch('/api/gym_environments');
+        const data = await res.json();
+        availableGymEnvironments = data.environments || [];
+        updateGymCounts();
+        filterGymEnvironments();
+      } catch (err) {
+        console.error('Falha ao carregar lista de ambientes do Gymnasium:', err);
+      }
+    }
+
+    function openGymCatalogModal() {
+      const modal = document.getElementById('modal-gym-catalog');
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+      if (availableGymEnvironments.length === 0) {
+        loadGymEnvironments();
+      } else {
+        filterGymEnvironments();
+      }
+      setTimeout(() => {
+        const inp = document.getElementById('gym-search-input');
+        if (inp) inp.focus();
+      }, 50);
+    }
+
+    function closeGymCatalogModal() {
+      const modal = document.getElementById('modal-gym-catalog');
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    }
+
+    function setGymCategoryFilter(cat) {
+      currentGymCategory = cat;
+      const tabs = [
+        { id: 'gym-tab-all', cat: 'all' },
+        { id: 'gym-tab-classic', cat: 'Classic Control' },
+        { id: 'gym-tab-box2d', cat: 'Box2D' },
+        { id: 'gym-tab-toy', cat: 'Toy Text' },
+        { id: 'gym-tab-mujoco', cat: 'MuJoCo' }
+      ];
+      tabs.forEach(t => {
+        const el = document.getElementById(t.id);
+        if (!el) return;
+        if (t.cat === cat) {
+          el.className = 'px-2.5 py-1 rounded text-[11px] font-semibold transition bg-cyan-600 text-white shadow cursor-pointer';
+        } else {
+          el.className = 'px-2.5 py-1 rounded text-[11px] font-semibold transition bg-gray-900 hover:bg-gray-800 text-gray-400 border border-gray-800 cursor-pointer';
+        }
+      });
+      filterGymEnvironments();
+    }
+
+    function updateGymCounts() {
+      const countEl = document.getElementById('gym-count-all');
+      const totalEl = document.getElementById('gym-total-label');
+      if (countEl) countEl.innerText = availableGymEnvironments.length;
+      if (totalEl) totalEl.innerText = availableGymEnvironments.length;
+    }
+
+    function filterGymEnvironments() {
+      const search = (document.getElementById('gym-search-input').value || '').toLowerCase().trim();
+      const filtered = availableGymEnvironments.filter(item => {
+        const matchesCat = currentGymCategory === 'all' || item.category === currentGymCategory;
+        const matchesSearch = !search || item.id.toLowerCase().includes(search) || item.category.toLowerCase().includes(search) || (item.type_tag && item.type_tag.toLowerCase().includes(search));
+        return matchesCat && matchesSearch;
+      });
+      renderGymCards(filtered);
+    }
+
+    function renderGymCards(items) {
+      const container = document.getElementById('gym-cards-container');
+      if (!items || items.length === 0) {
+        container.innerHTML = '<div class="col-span-full py-8 text-center text-gray-500 italic text-xs">Nenhum ambiente encontrado para este filtro.</div>';
+        return;
+      }
+
+      container.innerHTML = items.map(item => {
+        let badgeColor = 'bg-gray-900 text-gray-400 border-gray-800';
+        if (item.category === 'Classic Control') badgeColor = 'bg-emerald-950 text-emerald-300 border-emerald-800';
+        else if (item.category === 'Box2D') badgeColor = 'bg-purple-950 text-purple-300 border-purple-800';
+        else if (item.category === 'Toy Text') badgeColor = 'bg-amber-950 text-amber-300 border-amber-800';
+        else if (item.category === 'MuJoCo') badgeColor = 'bg-cyan-950 text-cyan-300 border-cyan-800';
+
+        const targetText = item.target_return !== null && item.target_return !== undefined 
+          ? `<span class="text-[10px] text-gray-400 font-mono">Meta: <strong class="text-cyan-400">${item.target_return}</strong> pts</span>` 
+          : '';
+
+        return `
+          <div class="p-2.5 rounded bg-gray-900/60 border border-gray-800 hover:border-gray-700 transition flex flex-col justify-between gap-2">
+            <div class="flex flex-col gap-1">
+              <div class="flex items-center justify-between gap-1">
+                <span class="font-bold text-xs font-mono text-gray-100 truncate" title="${item.id}">${item.id}</span>
+                <span class="px-1.5 py-0.5 rounded text-[9px] font-mono border ${badgeColor} whitespace-nowrap">${item.category}</span>
+              </div>
+              <div class="flex items-center justify-between text-[10px] text-gray-400">
+                <span>${item.type_tag}</span>
+                ${targetText}
+              </div>
+            </div>
+            <div class="flex items-center gap-1.5 pt-1.5 border-t border-gray-800/60">
+              <button type="button" onclick="selectGymEnvFromCatalog('${item.id}', ${item.target_return || 'null'}, ${item.entropy_coef || 'null'}, ${item.steps || 'null'})" class="flex-1 py-1 px-2 rounded bg-cyan-600 hover:bg-cyan-500 text-white font-semibold text-[10px] tracking-wide flex items-center justify-center gap-1 transition shadow cursor-pointer">
+                <span>⚡</span> Usar no HUD
+              </button>
+              <a href="${item.doc_url}" target="_blank" rel="noopener noreferrer" class="py-1 px-2 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 font-mono text-[10px] transition flex items-center gap-0.5 border border-gray-700" title="Abrir documentação no Farama Gymnasium">
+                Docs ↗
+              </a>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function selectGymEnvFromCatalog(envId, targetReturn, entropyCoef, steps) {
+      selectGymEnvFromChip(envId);
+      if (targetReturn !== null && targetReturn !== undefined) setTargetReturn(targetReturn);
+      if (entropyCoef !== null && entropyCoef !== undefined) setEntropy(entropyCoef);
+      if (steps !== null && steps !== undefined) setSteps(steps);
+      closeGymCatalogModal();
+    }
+
+    function selectGymEnvFromChip(envId) {
+      const envSel = document.getElementById('cfg-env');
+      if (Array.from(envSel.options).some(o => o.value === envId)) {
+        envSel.value = envId;
+      } else {
+        envSel.value = 'custom';
+        const customInput = document.getElementById('cfg-custom-env');
+        customInput.value = envId;
+      }
+      onEnvChange();
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        closeGymCatalogModal();
+      }
+    });
 
     // Configurações Comuns de Gráficos Chart.js
     const chartBaseOpts = {
@@ -779,6 +1140,8 @@
     function onEnvChange() {
       const env = document.getElementById('cfg-env').value;
       document.getElementById('cfg-custom-env').classList.toggle('hidden', env !== 'custom');
+      const customSug = document.getElementById('custom-env-suggestions');
+      if (customSug) customSug.classList.toggle('hidden', env !== 'custom');
       document.getElementById('group-vizdoom-scenario').classList.toggle('hidden', env !== 'vizdoom');
       document.getElementById('overlay-env').innerText = env === 'custom' ? (document.getElementById('cfg-custom-env').value || 'Custom') : env;
       
@@ -1136,7 +1499,8 @@
 
     // Inicialização e Conexão SSE
     function initSSE() {
-      const evt = new EventSource('/stream');
+      const streamUrl = s1AuthToken ? `/stream?token=${encodeURIComponent(s1AuthToken)}` : '/stream';
+      const evt = new EventSource(streamUrl);
       evt.onopen = () => {
         document.getElementById('footer-sse-status').innerText = 'CONECTADO';
         document.getElementById('footer-sse-status').className = 'text-green-400';
@@ -1357,6 +1721,7 @@
         renderCheckpointsTable();
         updateRunnerStatus(data.runner);
         suggestCheckpointName();
+        loadGymEnvironments();
 
         if (data.hardware) {
           const hw = data.hardware;
@@ -1369,6 +1734,11 @@
             badgeText.innerText = 'Apenas CPU';
             badge.className = 'px-1.5 py-0.5 rounded text-[9px] font-mono bg-gray-900 text-gray-400 border border-gray-700 flex items-center gap-1';
           }
+        }
+
+        if (data.vision_mode) {
+          currentVisionMode = data.vision_mode;
+          updateVisionModeButtons(currentVisionMode);
         }
       } catch (err) {
         console.error('Falha ao obter estado inicial:', err);
@@ -1387,6 +1757,7 @@
         env: actualEnv,
         scenario: document.getElementById('cfg-scenario').value,
         device: document.getElementById('cfg-device').value,
+        vision_mode: currentVisionMode,
         load: document.getElementById('cfg-load').value || null,
         transfer_from: document.getElementById('cfg-transfer').value || null,
         freeze_trunk: document.getElementById('cfg-freeze-trunk').checked,
@@ -1428,7 +1799,9 @@
           body: JSON.stringify({ action: 'start', config: payload })
         });
         const resp = await res.json();
-        if (!resp.success) {
+        if (resp.success) {
+          refreshVideoFeed();
+        } else {
           alert('Erro ao iniciar: ' + resp.message);
         }
       } catch (e) {
@@ -1444,6 +1817,7 @@
           body: JSON.stringify({ action: 'stop' })
         });
         const resp = await res.json();
+        setTimeout(refreshVideoFeed, 400);
       } catch (e) {
         alert('Erro ao solicitar parada: ' + e);
       }

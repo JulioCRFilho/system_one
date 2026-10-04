@@ -14,6 +14,7 @@ from system1_engine.core.heads import (
 )
 from system1_engine.core.trunk import ResMLPBlock, System1Trunk
 from system1_engine.core.agent import ReflexDecision, UniversalS1Agent
+from system1_engine.core.attention import GradCAMExplainer
 
 __all__ = [
     "StateEncoder",
@@ -30,4 +31,5 @@ __all__ = [
     "ValueHead",
     "UniversalS1Agent",
     "ReflexDecision",
+    "GradCAMExplainer",
 ]

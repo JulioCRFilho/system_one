@@ -8,6 +8,7 @@ import torch
 
 from system1_engine.core.agent import UniversalS1Agent
 from system1_engine.env.adapters import make_game_env
+from system1_engine.env.dependencies import make_gym_env_with_auto_install
 from system1_engine.env.wrapper import UniversalS1Wrapper
 from system1_engine.telemetry import LiveStatsTracker, S1LiveDashboard, TelemetryServer
 from system1_engine.training.ppo import RecurrentPPOTrainer
@@ -35,7 +36,7 @@ def build_environment(
         )
         return env
     render_mode = "human" if render else None
-    raw_env = gym.make(env_id, render_mode=render_mode)
+    raw_env = make_gym_env_with_auto_install(env_id, render_mode=render_mode)
     if env_id == "MountainCar-v0":
         from system1_engine.env.adapters.mountain_car import (
             MountainCarEnergyRewardWrapper,

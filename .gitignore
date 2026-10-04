@@ -9,3 +9,4 @@ _vizdoom.ini
 *.ini
 *.app
 .DS_Store
+*.log

@@ -11,6 +11,11 @@ from system1_engine.env.adapters import (
     MountainCarEnergyRewardWrapper,
     make_game_env,
 )
+from system1_engine.env.dependencies import (
+    install_packages,
+    make_gym_env_with_auto_install,
+    resolve_missing_packages,
+)
 from system1_engine.env.wrapper import S1Observation, UniversalS1Wrapper
 
 __all__ = [
@@ -27,4 +32,7 @@ __all__ = [
     "MountainCarNormalizedWrapper",
     "MountainCarEnergyRewardWrapper",
     "make_game_env",
+    "make_gym_env_with_auto_install",
+    "resolve_missing_packages",
+    "install_packages",
 ]

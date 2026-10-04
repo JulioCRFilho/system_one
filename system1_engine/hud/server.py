@@ -6,6 +6,7 @@ import socketserver
 import sys
 import threading
 import time
+import urllib.parse
 from typing import Any, Dict, List, Optional
 
 from system1_engine.hud.frame_buffer import VideoFrameBuffer
@@ -39,10 +40,12 @@ class HUDServer:
         host: str = "127.0.0.1",
         port: int = 8050,
         open_browser: bool = True,
+        auth_token: Optional[str] = None,
     ) -> None:
         self.host = host
         self.port = port
         self.open_browser = open_browser
+        self.auth_token = auth_token or os.environ.get("S1_AUTH_TOKEN")
         self.runner = HUDProcessRunner()
         self.frame_buffer = VideoFrameBuffer()
         self._lock = threading.Lock()
@@ -60,6 +63,7 @@ class HUDServer:
             "value_loss": 0.0,
             "grad_norms": {"FrontEnd": 0.0, "Trunk": 0.0, "PolicyHead": 0.0},
         }
+        self.vision_mode: str = "normal"
 
         self.server: Optional[ThreadedTCPServer] = None
         self.thread: Optional[threading.Thread] = None
@@ -141,6 +145,100 @@ class HUDServer:
             "device_name": device_name,
         }
 
+    @staticmethod
+    def get_gym_environments() -> List[Dict[str, Any]]:
+        """Retorna a lista estruturada e categorizada de ambientes do Gymnasium disponíveis com documentação."""
+        try:
+            import gymnasium as gym
+        except Exception:
+            return []
+
+        doc_urls = {
+            "cartpole": "https://gymnasium.farama.org/environments/classic_control/cart_pole/",
+            "mountaincar": "https://gymnasium.farama.org/environments/classic_control/mountain_car/",
+            "mountaincarcontinuous": "https://gymnasium.farama.org/environments/classic_control/mountain_car_continuous/",
+            "pendulum": "https://gymnasium.farama.org/environments/classic_control/pendulum/",
+            "acrobot": "https://gymnasium.farama.org/environments/classic_control/acrobot/",
+            "lunarlander": "https://gymnasium.farama.org/environments/box2d/lunar_lander/",
+            "lunarlandercontinuous": "https://gymnasium.farama.org/environments/box2d/lunar_lander/",
+            "bipedalwalker": "https://gymnasium.farama.org/environments/box2d/bipedal_walker/",
+            "bipedalwalkerhardcore": "https://gymnasium.farama.org/environments/box2d/bipedal_walker/",
+            "carracing": "https://gymnasium.farama.org/environments/box2d/car_racing/",
+            "blackjack": "https://gymnasium.farama.org/environments/toy_text/blackjack/",
+            "frozenlake": "https://gymnasium.farama.org/environments/toy_text/frozen_lake/",
+            "cliffwalking": "https://gymnasium.farama.org/environments/toy_text/cliff_walking/",
+            "taxi": "https://gymnasium.farama.org/environments/toy_text/taxi/",
+            "ant": "https://gymnasium.farama.org/environments/mujoco/ant/",
+            "halfcheetah": "https://gymnasium.farama.org/environments/mujoco/half_cheetah/",
+            "hopper": "https://gymnasium.farama.org/environments/mujoco/hopper/",
+            "humanoid": "https://gymnasium.farama.org/environments/mujoco/humanoid/",
+            "humanoidstandup": "https://gymnasium.farama.org/environments/mujoco/humanoidstandup/",
+            "invertedpendulum": "https://gymnasium.farama.org/environments/mujoco/inverted_pendulum/",
+            "inverteddoublependulum": "https://gymnasium.farama.org/environments/mujoco/inverted_double_pendulum/",
+            "reacher": "https://gymnasium.farama.org/environments/mujoco/reacher/",
+            "swimmer": "https://gymnasium.farama.org/environments/mujoco/swimmer/",
+            "walker2d": "https://gymnasium.farama.org/environments/mujoco/walker2d/",
+            "pusher": "https://gymnasium.farama.org/environments/mujoco/pusher/",
+        }
+
+        defaults = {
+            "CartPole-v1": {"target_return": 475.0, "entropy_coef": 0.005, "steps": 40000},
+            "Acrobot-v1": {"target_return": -100.0, "entropy_coef": 0.01, "steps": 50000},
+            "Pendulum-v1": {"target_return": -200.0, "entropy_coef": 0.005, "steps": 60000},
+            "MountainCar-v0": {"target_return": -110.0, "entropy_coef": 0.03, "steps": 80000},
+            "LunarLander-v3": {"target_return": 200.0, "entropy_coef": 0.01, "steps": 100000},
+            "LunarLander-v2": {"target_return": 200.0, "entropy_coef": 0.01, "steps": 100000},
+            "BipedalWalker-v3": {"target_return": 300.0, "entropy_coef": 0.01, "steps": 200000},
+            "FrozenLake-v1": {"target_return": 0.9, "entropy_coef": 0.02, "steps": 30000},
+            "Ant-v4": {"target_return": 4000.0, "entropy_coef": 0.005, "steps": 300000},
+            "HalfCheetah-v4": {"target_return": 4000.0, "entropy_coef": 0.005, "steps": 300000},
+            "Hopper-v4": {"target_return": 3000.0, "entropy_coef": 0.005, "steps": 300000},
+        }
+
+        results = []
+        registered_keys = sorted(list(gym.envs.registry.keys()))
+        for env_id in registered_keys:
+            if env_id.startswith(("GymV21", "GymV26", "phys2d", "tabular")):
+                continue
+
+            entry = gym.envs.registry[env_id]
+            entry_point = str(entry.entry_point) if entry.entry_point else ""
+
+            if "classic_control" in entry_point:
+                category = "Classic Control"
+                type_tag = "Física Clássica"
+            elif "box2d" in entry_point:
+                category = "Box2D"
+                type_tag = "Física 2D / Dinâmica"
+            elif "toy_text" in entry_point:
+                category = "Toy Text"
+                type_tag = "Discreto / Tabular"
+            elif "mujoco" in entry_point:
+                category = "MuJoCo"
+                type_tag = "Robótica Contínua 3D"
+            elif "atari" in entry_point or "ale" in entry_point.lower():
+                category = "Atari (ALE)"
+                type_tag = "Visual 2D / Retro"
+            else:
+                category = "Outros"
+                type_tag = "Gymnasium"
+
+            clean_id = env_id.split("-")[0].lower()
+            doc_link = doc_urls.get(clean_id, "https://gymnasium.farama.org/environments/")
+            preset = defaults.get(env_id, {})
+
+            results.append({
+                "id": env_id,
+                "category": category,
+                "type_tag": type_tag,
+                "doc_url": doc_link,
+                "target_return": preset.get("target_return"),
+                "entropy_coef": preset.get("entropy_coef"),
+                "steps": preset.get("steps"),
+            })
+
+        return results
+
     def update_telemetry(self, data: Dict[str, Any]) -> None:
         with self._lock:
             self.latest_telemetry.update(data)
@@ -148,6 +246,32 @@ class HUDServer:
     def get_telemetry_snapshot(self) -> Dict[str, Any]:
         with self._lock:
             return dict(self.latest_telemetry)
+
+    @staticmethod
+    def get_local_ip() -> Optional[str]:
+        """Detecta o endereço IP na rede local (Wi-Fi ou Ethernet)."""
+        import socket
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect(("8.8.8.8", 80))
+                return s.getsockname()[0]
+        except Exception:
+            return None
+
+    @staticmethod
+    def get_tailscale_ip() -> Optional[str]:
+        """Detecta o endereço IP IPv4 da interface Tailscale caso ativa."""
+        import shutil
+        import subprocess
+        ts_bin = shutil.which("tailscale")
+        if ts_bin:
+            try:
+                res = subprocess.run([ts_bin, "ip", "-4"], capture_output=True, text=True, timeout=1.0)
+                if res.returncode == 0 and res.stdout.strip():
+                    return res.stdout.strip().splitlines()[0].strip()
+            except Exception:
+                pass
+        return None
 
     def start(self) -> None:
         if self._running:
@@ -167,8 +291,47 @@ class HUDServer:
                 except (ConnectionResetError, BrokenPipeError, ConnectionAbortedError, TimeoutError, OSError):
                     pass
 
+            def _is_authorized(self) -> bool:
+                if not server_instance.auth_token:
+                    return True
+                auth_hdr = self.headers.get("Authorization", "")
+                if auth_hdr.startswith("Bearer "):
+                    token = auth_hdr.split("Bearer ", 1)[1].strip()
+                    if token == server_instance.auth_token:
+                        return True
+                parsed = urllib.parse.urlparse(self.path)
+                params = urllib.parse.parse_qs(parsed.query)
+                if "token" in params and params["token"][0] == server_instance.auth_token:
+                    return True
+                return False
+
+            def _send_unauthorized(self) -> None:
+                self.send_response(401)
+                self.send_header("Content-Type", "application/json")
+                err_msg = b'{"error": "Unauthorized: invalid or missing authentication token"}'
+                self.send_header("Content-Length", str(len(err_msg)))
+                self.send_header("WWW-Authenticate", 'Bearer realm="System1HUD"')
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(err_msg)
+
+            def do_OPTIONS(self) -> None:
+                self.send_response(200)
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+                self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
             def do_GET(self) -> None:
-                if self.path in ("/", "/index.html"):
+                parsed_url = urllib.parse.urlparse(self.path)
+                clean_path = parsed_url.path
+
+                if not self._is_authorized():
+                    self._send_unauthorized()
+                    return
+
+                if clean_path in ("/", "/index.html"):
                     encoded_html = server_instance.get_dashboard_html().encode("utf-8")
                     self.send_response(200)
                     self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -176,18 +339,21 @@ class HUDServer:
                     self.end_headers()
                     self.wfile.write(encoded_html)
 
-                elif self.path == "/video_feed":
-                    # MJPEG Video Streaming Endpoint
+                elif clean_path == "/video_feed":
+                    # MJPEG Video Streaming Endpoint de Alta Eficiência
                     self.send_response(200)
                     self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
-                    self.send_header("Cache-Control", "no-cache, private")
+                    self.send_header("Cache-Control", "no-cache, no-store, must-revalidate, pre-check=0, post-check=0, max-age=0")
                     self.send_header("Pragma", "no-cache")
-                    self.send_header("Connection", "close")
+                    self.send_header("Expires", "0")
+                    self.send_header("Connection", "keep-alive")
+                    self.send_header("Access-Control-Allow-Origin", "*")
                     self.end_headers()
 
                     try:
+                        last_count = -1
                         while not stop_event.is_set():
-                            frame = frame_buffer.wait_for_next_frame(timeout=0.1)
+                            frame, count = frame_buffer.wait_for_frame_change(last_count, timeout=1.0)
                             header = (
                                 b"--frame\r\n"
                                 b"Content-Type: image/jpeg\r\n"
@@ -195,11 +361,25 @@ class HUDServer:
                             )
                             self.wfile.write(header + frame + b"\r\n")
                             self.wfile.flush()
-                            time.sleep(0.02)  # ~50 FPS máx para o streaming HTTP
+                            last_count = count
+                            time.sleep(0.01)  # Respiro anti-flooding
                     except (BrokenPipeError, ConnectionResetError, OSError):
                         pass
 
-                elif self.path == "/stream":
+                elif clean_path in ("/api/frame", "/api/snapshot"):
+                    # Frame Snapshot Endpoint (captura instantânea de frame único)
+                    frame = frame_buffer.get_frame()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/jpeg")
+                    self.send_header("Content-Length", str(len(frame)))
+                    self.send_header("Cache-Control", "no-cache, no-store, must-revalidate, max-age=0")
+                    self.send_header("Pragma", "no-cache")
+                    self.send_header("Expires", "0")
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.end_headers()
+                    self.wfile.write(frame)
+
+                elif clean_path == "/stream":
                     # SSE Real-time Telemetry & Log Stream
                     self.send_response(200)
                     self.send_header("Content-Type", "text/event-stream")
@@ -228,13 +408,14 @@ class HUDServer:
                     except (BrokenPipeError, ConnectionResetError, OSError):
                         pass
 
-                elif self.path == "/api/state":
+                elif clean_path == "/api/state":
                     resp = {
                         "runner": runner.get_state(),
                         "hardware": server_instance.get_hardware_info(),
                         "checkpoints": server_instance.scan_checkpoints(),
                         "checkpoints_detailed": server_instance.scan_checkpoints_detailed(),
                         "telemetry": server_instance.get_telemetry_snapshot(),
+                        "vision_mode": server_instance.vision_mode,
                     }
                     encoded_resp = json.dumps(resp).encode("utf-8")
                     self.send_response(200)
@@ -244,10 +425,23 @@ class HUDServer:
                     self.end_headers()
                     self.wfile.write(encoded_resp)
 
-                elif self.path == "/api/checkpoints":
+                elif clean_path == "/api/checkpoints":
                     resp = {
                         "checkpoints": server_instance.scan_checkpoints(),
                         "checkpoints_detailed": server_instance.scan_checkpoints_detailed(),
+                    }
+                    encoded_resp = json.dumps(resp).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(encoded_resp)))
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.end_headers()
+                    self.wfile.write(encoded_resp)
+
+                elif clean_path == "/api/gym_environments":
+                    resp = {
+                        "environments": server_instance.get_gym_environments(),
+                        "docs_url": "https://gymnasium.farama.org/environments/",
                     }
                     encoded_resp = json.dumps(resp).encode("utf-8")
                     self.send_response(200)
@@ -263,15 +457,35 @@ class HUDServer:
                     self.end_headers()
 
             def do_POST(self) -> None:
+                parsed_url = urllib.parse.urlparse(self.path)
+                clean_path = parsed_url.path
+
+                # Proteção de endpoints de IPC interno: somente localhost
+                if clean_path in ("/api/internal/telemetry", "/api/internal/frame"):
+                    client_ip = self.client_address[0]
+                    if client_ip not in ("127.0.0.1", "::1", "localhost", "testclient"):
+                        self.send_response(403)
+                        self.send_header("Content-Type", "application/json")
+                        err_bytes = b'{"error": "Forbidden: internal IPC endpoint accessible only from localhost"}'
+                        self.send_header("Content-Length", str(len(err_bytes)))
+                        self.end_headers()
+                        self.wfile.write(err_bytes)
+                        return
+                elif not self._is_authorized():
+                    self._send_unauthorized()
+                    return
+
                 content_len = int(self.headers.get("Content-Length", 0))
                 body = self.rfile.read(content_len)
 
-                if self.path == "/api/action":
+                if clean_path == "/api/action":
                     try:
                         data = json.loads(body.decode("utf-8"))
                         action = data.get("action")
                         if action == "start":
                             cfg = data.get("config", {})
+                            if "vision_mode" in cfg:
+                                server_instance.vision_mode = cfg["vision_mode"]
                             url = f"http://{server_instance.host}:{server_instance.port}"
                             success, msg = runner.start(cfg, url)
                             resp = {"success": success, "message": msg}
@@ -279,6 +493,10 @@ class HUDServer:
                             success, msg = runner.stop()
                             frame_buffer.reset_placeholder("⚡ SYSTEM 1 ENGINE", "TAREFA INTERROMPIDA PELO USUÁRIO")
                             resp = {"success": success, "message": msg}
+                        elif action == "set_vision_mode":
+                            mode = data.get("mode", "normal")
+                            server_instance.vision_mode = mode
+                            resp = {"success": True, "vision_mode": mode}
                         else:
                             resp = {"success": False, "message": f"Ação desconhecida: {action}"}
                     except Exception as err:
@@ -292,21 +510,29 @@ class HUDServer:
                     self.end_headers()
                     self.wfile.write(encoded_action)
 
-                elif self.path == "/api/internal/telemetry":
+                elif clean_path == "/api/internal/telemetry":
                     try:
                         data = json.loads(body.decode("utf-8"))
                         server_instance.update_telemetry(data)
+                        resp_body = json.dumps({"vision_mode": server_instance.vision_mode}).encode("utf-8")
                         self.send_response(200)
+                        self.send_header("Content-Type", "application/json")
+                        self.send_header("Content-Length", str(len(resp_body)))
+                        self.end_headers()
+                        self.wfile.write(resp_body)
                     except Exception:
                         self.send_response(400)
-                    self.send_header("Content-Length", "0")
-                    self.end_headers()
+                        self.send_header("Content-Length", "0")
+                        self.end_headers()
 
-                elif self.path == "/api/internal/frame":
+                elif clean_path == "/api/internal/frame":
                     frame_buffer.update_frame(body)
+                    resp_body = json.dumps({"vision_mode": server_instance.vision_mode}).encode("utf-8")
                     self.send_response(200)
-                    self.send_header("Content-Length", "0")
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(resp_body)))
                     self.end_headers()
+                    self.wfile.write(resp_body)
 
                 else:
                     self.send_response(404)
@@ -323,10 +549,28 @@ class HUDServer:
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
 
-        dashboard_url = f"http://{self.host}:{self.port}"
+        local_host = "127.0.0.1" if self.host in ("0.0.0.0", "::") else self.host
+        dashboard_url = f"http://{local_host}:{self.port}"
+        if self.auth_token:
+            dashboard_url += f"/?token={self.auth_token}"
+
         print("\n" + "=" * 70)
         print("🎮 SYSTEM 1 ENGINE — VISUAL CONTROL HUD INICIALIZADO")
-        print(f"🌐 Acesse no seu navegador em: {dashboard_url}")
+        print(f"🌐 Local (este Mac):      {dashboard_url}")
+
+        local_wifi_ip = self.get_local_ip()
+        if local_wifi_ip and (self.host in ("0.0.0.0", "::") or self.host == local_wifi_ip):
+            wifi_url = f"http://{local_wifi_ip}:{self.port}"
+            if self.auth_token:
+                wifi_url += f"/?token={self.auth_token}"
+            print(f"🏠 Rede Wi-Fi (Tablet/Cel): {wifi_url}")
+
+        ts_ip = self.get_tailscale_ip()
+        if ts_ip and (self.host in ("0.0.0.0", "::") or self.host == ts_ip):
+            ts_url = f"http://{ts_ip}:{self.port}"
+            if self.auth_token:
+                ts_url += f"/?token={self.auth_token}"
+            print(f"🔒 Remoto (Tailscale VPN):  {ts_url}")
         print("=" * 70)
 
         if self.open_browser:

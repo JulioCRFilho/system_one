@@ -56,3 +56,10 @@ class VideoFrameBuffer:
         with self._cond:
             self._cond.wait(timeout=timeout)
             return self._current_frame
+
+    def wait_for_frame_change(self, last_count: int, timeout: float = 1.0) -> tuple[bytes, int]:
+        """Aguarda a publicação de um novo frame ou expira enviando heartbeat do frame atual."""
+        with self._cond:
+            if self._frame_count == last_count:
+                self._cond.wait(timeout=timeout)
+            return self._current_frame, self._frame_count
