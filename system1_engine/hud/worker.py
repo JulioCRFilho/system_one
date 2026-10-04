@@ -189,6 +189,12 @@ def build_hud_env(
     frame_skip: Optional[int] = None,
 ) -> UniversalS1Wrapper:
     """Instancia o ambiente com suporte a renderização in-browser (rgb_array), janela ou headless no Modo Puro Universal."""
+    env_lower = env_id.lower().replace("_", "-")
+    if env_lower in ("rubiks", "rubik", "rubiks-macro", "rubiksmacro", "rubik-macro"):
+        env_id = "RubiksCubeMacro-v0"
+    elif env_lower in ("rubiks-atomic", "rubik-atomic", "rubiksatomic", "rubikatomic"):
+        env_id = "RubiksCube-v0"
+
     if env_id.lower() in ["vizdoom", "native"]:
         scenario_path = scenario or "basic.cfg"
         headless = render_mode != "window"

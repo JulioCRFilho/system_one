@@ -227,6 +227,31 @@
           </div>
         </div>
 
+        <!-- ACESSO RÁPIDO: CUBO MÁGICO 3X3 (SYSTEM 1) -->
+        <div class="bg-gradient-to-br from-amber-950/50 via-purple-950/40 to-cyan-950/40 p-2.5 rounded-lg border border-amber-500/50 flex flex-col gap-2 shadow-sm">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] font-bold text-amber-300 flex items-center gap-1.5">
+              <span>🎲</span> Treino Rápido: Cubo Mágico 3x3
+            </span>
+            <span class="text-[9px] px-1.5 py-0.5 rounded bg-amber-900/70 text-amber-200 border border-amber-600/70 font-mono">CFOP / Macro</span>
+          </div>
+          <p class="text-[10px] text-gray-300 leading-tight">
+            Treine reflexos com 12 macro-ações de speedcubing ou giros atômicos com visualização 2D Net ao vivo no viewport.
+          </p>
+          <div class="grid grid-cols-2 gap-1.5">
+            <button type="button" onclick="quickLaunchRubiks('macro', 'train')" class="py-1.5 px-2 text-[10px] font-bold rounded bg-amber-600 hover:bg-amber-500 text-white border border-amber-400 transition flex items-center justify-center gap-1 cursor-pointer shadow-sm">
+              <span>⚡</span> Treinar Macro (CFOP)
+            </button>
+            <button type="button" onclick="quickLaunchRubiks('macro', 'run')" class="py-1.5 px-2 text-[10px] font-bold rounded bg-purple-700 hover:bg-purple-600 text-white border border-purple-400 transition flex items-center justify-center gap-1 cursor-pointer shadow-sm">
+              <span>▶</span> Avaliar Cubo
+            </button>
+          </div>
+          <div class="flex items-center justify-between text-[9px] text-gray-400 font-mono pt-0.5 border-t border-gray-800/80">
+            <button type="button" onclick="quickLaunchRubiks('atomic', 'train')" class="text-gray-400 hover:text-amber-300 underline cursor-pointer">Modo Atômico (12 Giros)</button>
+            <span class="text-emerald-400 flex items-center gap-1"><span>●</span> Checkpoint s1_rubiks_macro_trained.pt</span>
+          </div>
+        </div>
+
         <!-- Ambiente e Cenário -->
         <div>
           <div class="flex items-center justify-between mb-1">
@@ -247,6 +272,8 @@
             </div>
           </div>
           <select id="cfg-env" class="hud-input mb-1.5" onchange="onEnvChange()">
+            <option value="RubiksCubeMacro-v0">🎲 Cubo Mágico: Macro-Ações (CFOP / 12 Algoritmos)</option>
+            <option value="RubiksCube-v0">🎲 Cubo Mágico: Atômico (12 Giros Simples)</option>
             <option value="CartPole-v1">CartPole-v1 (Vetor, 4D, 2 Ações)</option>
             <option value="Acrobot-v1">Acrobot-v1 (Vetor, 6D, 3 Ações)</option>
             <option value="Pendulum-v1">Pendulum-v1 (Vetor, Contínuo Box)</option>
@@ -1166,9 +1193,44 @@
         document.getElementById('cfg-chunk-length').value = 32;
         document.getElementById('cfg-rollout-steps').value = 2048;
       }
+      else if (env === 'RubiksCubeMacro-v0') {
+        setTargetReturn(12.0); setEntropy(0.01);
+        document.getElementById('cfg-chunk-length').value = 16;
+        document.getElementById('cfg-rollout-steps').value = 1024;
+      }
+      else if (env === 'RubiksCube-v0') {
+        setTargetReturn(10.0); setEntropy(0.01);
+        document.getElementById('cfg-chunk-length').value = 16;
+        document.getElementById('cfg-rollout-steps').value = 1024;
+      }
 
       suggestCheckpointName();
       validateCheckpointCompatibility();
+    }
+
+    function quickLaunchRubiks(type, mode) {
+      const envId = type === 'macro' ? 'RubiksCubeMacro-v0' : 'RubiksCube-v0';
+      const envSel = document.getElementById('cfg-env');
+      if (envSel) {
+        envSel.value = envId;
+        onEnvChange();
+      }
+      setMode(mode);
+
+      if (mode === 'run') {
+        // Tenta auto-selecionar o checkpoint do cubo mágico se disponível
+        const chkSelect = document.getElementById('cfg-checkpoint-select');
+        if (chkSelect && chkSelect.options.length > 0) {
+          for (let i = 0; i < chkSelect.options.length; i++) {
+            const optVal = chkSelect.options[i].value.toLowerCase();
+            if (optVal.includes('rubiks')) {
+              chkSelect.selectedIndex = i;
+              onCheckpointSelectChange();
+              break;
+            }
+          }
+        }
+      }
     }
 
     function onCustomEnvInput() {

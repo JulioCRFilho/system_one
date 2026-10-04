@@ -159,7 +159,7 @@ system_one/
 │   │   ├── frame_buffer.py         # VideoFrameBuffer para streaming in-browser de frames
 │   │   └── dashboard.html          # Interface gráfica dark mode interativa e responsiva
 │   └── cli.py                      # Interface de linha de comando CLI (--mode train/run/benchmark)
-├── examples/                       # Catálogo de 12 tasks práticas prontas para rodar
+├── examples/                       # Catálogo de 13 tasks práticas prontas para rodar
 │   ├── 01_benchmark_latency.py     # Task 1: Benchmark de latência CPU (<= 0.8 ms)
 │   ├── 02_evaluate_cartpole.py     # Task 2: Avaliação de checkpoint pré-treinado
 │   ├── 03_train_cartpole.py        # Task 3: Treinamento do zero com Recurrent PPO
@@ -171,8 +171,9 @@ system_one/
 │   ├── 09_confidence_gating.py     # Task 9: Mecanismo de incerteza e gatilho System 2
 │   ├── 10_vizdoom_visual_transfer.py # Task 10: Teste de fogo visual no ViZDoom
 │   ├── 11_live_telemetry_dashboard.py # Task 11: Telemetria assíncrona e painel Rich
-│   └── 12_web_telemetry_streaming.py  # Task 12: Servidor web SSE e gráficos Chart.js
-├── tests/                          # Suíte de testes rigorosa com 37 testes unitários
+│   ├── 12_web_telemetry_streaming.py  # Task 12: Servidor web SSE e gráficos Chart.js
+│   └── 13_train_rubiks_cube.py     # Task 13: Treinamento no Cubo Mágico (Macro & Atômico)
+├── tests/                          # Suíte de testes rigorosa com 79 testes unitários
 │   ├── test_dimensions.py          # Verificação dimensional do barramento ℝ^337
 │   ├── test_wrapper.py             # Zeração temporal e integridade de deltas
 │   ├── test_latency.py             # Orçamento rígido de latência CPU (<= 0.8 ms)
@@ -180,6 +181,7 @@ system_one/
 │   ├── test_convergence.py         # Convergência comprovada no CartPole-v1 (>= 475.0)
 │   ├── test_adapters.py            # Testes dos adaptadores Window, Memory e Native
 │   ├── test_confidence.py          # Confidence Gating discreto e contínuo (underflow free)
+│   ├── test_rubiks.py              # Matemática 3D, permutações e macro-ações do Cubo Mágico
 │   ├── test_telemetry.py           # Ring buffers O(1) do tracker e layout do dashboard
 │   ├── test_telemetry_server.py    # Ciclo de vida HTTP, endpoints REST e SSE
 │   └── test_hud.py                 # Validação do HUD, buffers MJPEG e subprocessos
@@ -836,15 +838,57 @@ Disponibiliza um servidor HTTP assíncrono nativo (`http.server` + `socketserver
 
 ---
 
-### Task 13: Execução da Suíte de Testes Automatizada
+### Task 13: Treinamento no Cubo Mágico (Macro-Ações e Movimentos Pré-Definidos)
 
-Executa a suíte de testes rigorosa com 33 testes unitários cobrindo contratos de dimensão, adaptadores dos 3 níveis (incluindo ViZDoom nativo real e visualização render_mode='human'), gatilho de incerteza (Confidence Gating discreto e contínuo com proteção de underflow), subsistema de telemetria assíncrona O(1), servidor web SSE com endpoints REST, reset de wrappers e convergência matemática.
+Demonstra o treinamento do **System 1 Engine** no ambiente de quebra-cabeça combinatório 3D do Cubo Mágico 3x3x3 ([`RubiksCubeMacro-v0`](file:///Users/juliocesarreisfilho/Projects/system_one/system1_engine/env/adapters/rubiks.py#L274) e [`RubiksCube-v0`](file:///Users/juliocesarreisfilho/Projects/system_one/system1_engine/env/adapters/rubiks.py#L198)). Utiliza o framework de **Macro-Ações / Hierarchical RL** com os 12 algoritmos canônicos de speedcubing (Sexy Move, Sune, T-Perm, Inserção de Meios, Cruz Amarela, Giros de Orientação) e representação vetorial *one-hot* de 324 dimensões ($54 \text{ facetas} \times 6 \text{ cores}$).
+
+```bash
+# Treinamento com macro-ações pré-definidas (recomendado):
+.venv/bin/python examples/13_train_rubiks_cube.py --mode macro --steps 15000 --scramble-depth 2
+
+# Treinamento com movimentos atômicos elementares (U, D, L, R, F, B):
+.venv/bin/python examples/13_train_rubiks_cube.py --mode atomic --steps 20000 --scramble-depth 1
+
+# Treinamento direto via CLI unificada:
+.venv/bin/python -m system1_engine.cli --mode train --env RubiksCubeMacro-v0 --steps 20000 --save s1_rubiks_macro_trained.pt
+```
+
+#### Saída Esperada no Terminal:
+```text
+===========================================================================
+🎲 TREINAMENTO DO SYSTEM 1 NO CUBO MÁGICO (MACRO)
+Ambiente: RubiksCubeMacro-v0 | Scramble Depth: 2 | Passos Máximos: 15000
+===========================================================================
+🧩 CATÁLOGO DE MACRO-AÇÕES E ALGORITMOS PRÉ-DEFINIDOS (SYSTEM 1)
+Ação | Nome da Macro      | Sequência de Giros           | Efeito Controlado
+0    | SEXY_MOVE_R        | R U R_prime U_prime          | Trigger Direito (troca/orienta quinas)
+1    | SEXY_MOVE_L        | L_prime U_prime L U          | Trigger Esquerdo (simetria)
+2    | SUNE               | R U R_prime U R U U R_p...   | Orientação de cantos amarelos (topo)
+3    | ANTI_SUNE          | R U U R_prime U_prime R...   | Orientação inversa de cantos (topo)
+4    | T_PERM             | R U R_prime U_prime R_p...   | Permutação de quinas/meios da última camada
+5    | INSERT_EDGE_R      | U R U_prime R_prime U_p...   | Insere meio na segunda camada (direita)
+6    | INSERT_EDGE_L      | U_prime L_prime U L U F...   | Insere meio na segunda camada (esquerda)
+7    | YELLOW_CROSS       | F R U R_prime U_prime F...   | Fru-Ruf (cria a cruz amarela no topo)
+8    | ROTATE_Y           | Y                            | Giro do cubo todo no eixo Y (+90°)
+9    | ROTATE_Y_PRIME     | Y_prime                      | Giro do cubo todo no eixo Y (-90°)
+10   | U_TURN             | U                            | Giro da camada superior (alinhamento)
+11   | U_PRIME_TURN       | U_prime                      | Giro inverso da camada superior
+===========================================================================
+⏱️ Treinamento finalizado em 6.2s (15360 passos coletados)
+💾 Checkpoint persistido com sucesso: s1_rubiks_macro_trained.pt
+```
+
+---
+
+### Task 14: Execução da Suíte de Testes Automatizada
+
+Executa a suíte de testes rigorosa com 79 testes unitários cobrindo contratos de dimensão, adaptadores dos 3 níveis (incluindo ViZDoom nativo real e visualização render_mode='human'), cubo mágico 3D e macro-ações, gatilho de incerteza (Confidence Gating discreto e contínuo com proteção de underflow), subsistema de telemetria assíncrona O(1), servidor web SSE com endpoints REST, reset de wrappers e convergência matemática.
 
 ```bash
 .venv/bin/pytest tests/ -v
 ```
 
-#### Testes Cobertos (37/37 Aprovados):
+#### Testes Cobertos (79/79 Aprovados):
 1. `test_confidence_gating_discrete`: Valida cálculo de incerteza e gatilho em espaço discreto.
 2. `test_confidence_gating_continuous`: Valida incerteza e gatilho em espaço contínuo Box.
 3. `test_confidence_gating_continuous_low_sigma`: Valida ausência de underflow e incerteza estritamente positiva para $\sigma < 0.242$ ($H < 0$).

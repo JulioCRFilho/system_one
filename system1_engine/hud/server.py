@@ -198,7 +198,15 @@ class HUDServer:
             "Hopper-v4": {"target_return": 3000.0, "entropy_coef": 0.005, "steps": 300000},
             "Humanoid-v5": {"target_return": 5000.0, "entropy_coef": 0.005, "steps": 500000},
             "Walker2d-v5": {"target_return": 4000.0, "entropy_coef": 0.005, "steps": 300000},
+            "RubiksCubeMacro-v0": {"target_return": 12.0, "entropy_coef": 0.01, "steps": 30000},
+            "RubiksCube-v0": {"target_return": 10.0, "entropy_coef": 0.01, "steps": 50000},
         }
+
+        # Garante registro dos ambientes customizados
+        try:
+            import system1_engine.env  # noqa: F401
+        except Exception:
+            pass
 
         results = []
         registered_keys = sorted(list(gym.envs.registry.keys()))
@@ -209,7 +217,10 @@ class HUDServer:
             entry = gym.envs.registry[env_id]
             entry_point = str(entry.entry_point) if entry.entry_point else ""
 
-            if "classic_control" in entry_point:
+            if "rubiks" in entry_point.lower() or "rubik" in env_id.lower():
+                category = "Cubo Mágico"
+                type_tag = "Macro / Combinatório" if "macro" in env_id.lower() else "Atômico / 3D"
+            elif "classic_control" in entry_point:
                 category = "Classic Control"
                 type_tag = "Física Clássica"
             elif "box2d" in entry_point:
@@ -323,10 +334,13 @@ class HUDServer:
             def do_OPTIONS(self) -> None:
                 self.send_response(200)
                 self.send_header("Access-Control-Allow-Origin", "*")
-                self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+                self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS, HEAD")
                 self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
                 self.send_header("Content-Length", "0")
                 self.end_headers()
+
+            def do_HEAD(self) -> None:
+                self.do_GET()
 
             def do_GET(self) -> None:
                 parsed_url = urllib.parse.urlparse(self.path)
@@ -545,8 +559,8 @@ class HUDServer:
                     self.end_headers()
 
             def log_message(self, format: str, *args) -> None:
-                # Silencia logs verbosos no console
-                return
+                sys.stderr.write(f"[{time.strftime('%H:%M:%S')}] {self.client_address[0]} - {format % args}\n")
+                sys.stderr.flush()
 
         self._stop_event.clear()
         self.server = ThreadedTCPServer((self.host, self.port), HUDRequestHandler)

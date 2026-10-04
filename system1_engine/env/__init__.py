@@ -10,6 +10,9 @@ from system1_engine.env.adapters import (
     MountainCarNormalizedWrapper,
     MountainCarEnergyRewardWrapper,
     make_game_env,
+    RubiksCubeCore,
+    RubiksCubeEnv,
+    RubiksCubeMacroEnv,
 )
 from system1_engine.env.dependencies import (
     install_packages,
@@ -32,6 +35,9 @@ __all__ = [
     "MountainCarNormalizedWrapper",
     "MountainCarEnergyRewardWrapper",
     "make_game_env",
+    "RubiksCubeCore",
+    "RubiksCubeEnv",
+    "RubiksCubeMacroEnv",
     "make_gym_env_with_auto_install",
     "resolve_missing_packages",
     "install_packages",

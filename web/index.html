@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>System 1 Engine — Portfolio Live Evaluation</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- ONNX Runtime Web via CDN (WebAssembly / WebGPU) -->
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js"></script>
+  <!-- Runtime e Simuladores do System 1 -->
+  <script src="./system1-eval.js"></script>
+  <style>
+    body { background-color: #07090E; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace; }
+    .glass-card { background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(51, 65, 85, 0.6); }
+  </style>
+</head>
+<body class="text-gray-200 min-h-screen flex flex-col items-center p-3 md:p-6 select-none">
+
+  <!-- Header do Portfólio -->
+  <header class="w-full max-w-4xl flex items-center justify-between pb-4 mb-4 border-b border-gray-800">
+    <div class="flex items-center gap-2.5">
+      <div class="w-8 h-8 rounded bg-gradient-to-tr from-cyan-600 to-amber-500 flex items-center justify-center font-bold text-white shadow-lg">⚡</div>
+      <div>
+        <h1 class="text-base md:text-lg font-bold text-white tracking-wide flex items-center gap-2">
+          System 1 Engine
+          <span class="text-[10px] px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800 font-mono">LIVE EVALUATION</span>
+        </h1>
+        <p class="text-xs text-gray-400">Agente Neural Recorrente Amortizado • Inferência Sub-Milissegundo</p>
+      </div>
+    </div>
+    <a href="https://github.com/JulioCRFilho/system_one" target="_blank" rel="noopener noreferrer" class="text-xs text-gray-300 hover:text-white bg-gray-900 hover:bg-gray-800 border border-gray-700 px-3 py-1.5 rounded transition flex items-center gap-1.5 shadow-sm">
+      <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+      Ver no GitHub
+    </a>
+  </header>
+
+  <!-- Container Principal -->
+  <main class="w-full max-w-4xl grid grid-cols-1 md:grid-cols-3 gap-4">
+
+    <!-- Viewport da Simulação (Esquerda / 2 Colunas) -->
+    <div class="md:col-span-2 flex flex-col gap-3">
+      <div class="glass-card rounded-xl p-3 flex flex-col gap-2 shadow-2xl">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span id="label-viewport" class="text-xs font-mono font-bold text-gray-300">Cubo Mágico 3x3 (Macro / CFOP)</span>
+          </div>
+          <span id="badge-fps" class="text-[10px] font-mono text-cyan-400 bg-cyan-950/80 px-2 py-0.5 rounded border border-cyan-800">60 FPS</span>
+        </div>
+
+        <!-- Canvas do Jogo / Viewport -->
+        <div class="relative bg-black rounded-lg overflow-hidden border border-gray-800 flex items-center justify-center">
+          <canvas id="viewport-canvas" width="480" height="320" class="w-full h-auto max-h-[320px] object-contain"></canvas>
+          <div id="loader-overlay" class="absolute inset-0 bg-black/80 flex flex-col items-center justify-center gap-2 text-xs font-mono text-cyan-400">
+            <div class="w-6 h-6 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin"></div>
+            <span>Carregando pesos neurais...</span>
+          </div>
+        </div>
+
+        <!-- Controles Interativos -->
+        <div class="flex items-center justify-between pt-1 gap-2">
+          <div class="flex items-center gap-1.5">
+            <button id="btn-toggle" onclick="toggleEvaluation()" class="px-3 py-1.5 text-xs font-bold rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white transition flex items-center gap-1.5 shadow">
+              <span id="icon-toggle">▶</span> <span id="text-toggle">Iniciar</span>
+            </button>
+            <button id="btn-scramble" onclick="scrambleEnv()" class="px-2.5 py-1.5 text-xs font-medium rounded-lg bg-gray-800 hover:bg-gray-700 text-amber-300 border border-gray-700 transition flex items-center gap-1">
+              🎲 Embaralhar
+            </button>
+            <button onclick="resetEnv()" class="px-2.5 py-1.5 text-xs font-medium rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 transition">
+              🔄 Reset
+            </button>
+          </div>
+          <span id="status-desc" class="text-[11px] font-mono text-gray-400 truncate max-w-[200px]">Pronto para avaliar</span>
+        </div>
+      </div>
+
+      <!-- Telemetria em Tempo Real -->
+      <div class="grid grid-cols-3 gap-2">
+        <div class="glass-card rounded-lg p-2.5 flex flex-col">
+          <span class="text-[10px] text-gray-400 font-mono">LATÊNCIA INFERÊNCIA</span>
+          <span id="metric-latency" class="text-base font-bold font-mono text-cyan-300 mt-0.5">0.18 ms</span>
+          <span class="text-[9px] text-gray-500">Sub-milissegundo CPU</span>
+        </div>
+        <div class="glass-card rounded-lg p-2.5 flex flex-col">
+          <span class="text-[10px] text-gray-400 font-mono">CONFIANÇA (TOP-1)</span>
+          <span id="metric-confidence" class="text-base font-bold font-mono text-emerald-400 mt-0.5">--%</span>
+          <span class="text-[9px] text-gray-500">Certeza do reflexo</span>
+        </div>
+        <div class="glass-card rounded-lg p-2.5 flex flex-col">
+          <span class="text-[10px] text-gray-400 font-mono">INCERTEZA (GATING)</span>
+          <span id="metric-uncertainty" class="text-base font-bold font-mono text-amber-400 mt-0.5">--%</span>
+          <span class="text-[9px] text-gray-500">Entropia de Shannon</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Painel de Configuração (Direita / 1 Coluna) -->
+    <div class="flex flex-col gap-3">
+      <div class="glass-card rounded-xl p-3.5 flex flex-col gap-3">
+        <h2 class="text-xs font-bold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
+          <span>⚙️</span> Selecionar Demonstração
+        </h2>
+
+        <div>
+          <label class="text-[11px] text-gray-400 block mb-1">Ambiente & Checkpoint</label>
+          <select id="select-demo" onchange="onDemoChange()" class="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500">
+            <option value="rubiks">🎲 Cubo Mágico 3x3 (Macro / CFOP)</option>
+            <option value="cartpole">⚖️ CartPole-v1 (Controle Clássico)</option>
+          </select>
+        </div>
+
+        <div class="bg-gray-900/60 p-2.5 rounded-lg border border-gray-800 text-xs text-gray-300 space-y-1.5 leading-relaxed">
+          <div class="font-semibold text-cyan-300 flex items-center gap-1">
+            <span>🧠</span> Arquitetura Universal S1:
+          </div>
+          <p class="text-[11px] text-gray-400">
+            • <strong>Tronco Recorrente</strong>: GRU + ResMLP (256 dims)<br>
+            • <strong>Cálculo Amortizado</strong>: Ação reflexiva sem busca em árvore<br>
+            • <strong>Confidence Gating</strong>: Disparo autônomo do System 2 quando a incerteza atinge limiar crítico
+          </p>
+        </div>
+
+        <div class="pt-1 border-t border-gray-800/80 flex flex-col gap-1.5 text-[11px] text-gray-400 font-mono">
+          <div class="flex justify-between">
+            <span>Runtime:</span>
+            <span class="text-cyan-400">ONNX Web (Wasm SIMD)</span>
+          </div>
+          <div class="flex justify-between">
+            <span>Tamanho Modelo:</span>
+            <span id="model-size-label" class="text-gray-300">~105 KB</span>
+          </div>
+          <div class="flex justify-between">
+            <span>Origem Pesos:</span>
+            <span class="text-emerald-400 truncate max-w-[150px]">system_one@main</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const GITHUB_REPO = "JulioCRFilho/system_one";
+    const MODELS = {
+      rubiks: {
+        name: "Cubo Mágico 3x3 (Macro / CFOP)",
+        file: "s1_rubiks_macro.onnx",
+        url: `./models/s1_rubiks_macro.onnx`,
+        cdnUrl: `https://cdn.jsdelivr.net/gh/${GITHUB_REPO}@master/web/models/s1_rubiks_macro.onnx`,
+        size: "3.3 MB"
+      },
+      cartpole: {
+        name: "CartPole-v1 (Controle Clássico)",
+        file: "s1_cartpole.onnx",
+        url: `./models/s1_cartpole.onnx`,
+        cdnUrl: `https://cdn.jsdelivr.net/gh/${GITHUB_REPO}@master/web/models/s1_cartpole.onnx`,
+        size: "2.9 MB"
+      }
+    };
+
+    let activeDemo = "rubiks";
+    let sim = null;
+    let agent = null;
+    let isRunning = false;
+    let animId = null;
+
+    const canvas = document.getElementById('viewport-canvas');
+
+    async function loadModel(demoKey) {
+      document.getElementById('loader-overlay').classList.remove('hidden');
+      const cfg = MODELS[demoKey];
+      document.getElementById('model-size-label').innerText = cfg.size;
+
+      let session = null;
+      try {
+        session = await ort.InferenceSession.create(cfg.url, { executionProviders: ['wasm'] });
+      } catch (err) {
+        console.warn("Falha ao carregar modelo local, tentando CDN do GitHub...", err);
+        session = await ort.InferenceSession.create(cfg.cdnUrl, { executionProviders: ['wasm'] });
+      }
+
+      agent = new System1.System1AgentWeb(session);
+      document.getElementById('loader-overlay').classList.add('hidden');
+    }
+
+    function initSim(demoKey) {
+      if (demoKey === "rubiks") {
+        sim = new System1.RubiksCubeSim();
+        sim.scramble(2);
+        document.getElementById('btn-scramble').classList.remove('hidden');
+      } else {
+        sim = new System1.CartPoleSim();
+        document.getElementById('btn-scramble').classList.add('hidden');
+      }
+      sim.render(canvas);
+      if (agent) agent.resetMemory();
+    }
+
+    async function onDemoChange() {
+      stopEvaluation();
+      activeDemo = document.getElementById('select-demo').value;
+      document.getElementById('label-viewport').innerText = MODELS[activeDemo].name;
+      initSim(activeDemo);
+      await loadModel(activeDemo);
+    }
+
+    function toggleEvaluation() {
+      if (isRunning) stopEvaluation();
+      else startEvaluation();
+    }
+
+    function startEvaluation() {
+      if (!agent) return;
+      isRunning = true;
+      document.getElementById('btn-toggle').classList.replace('bg-cyan-600', 'bg-amber-600');
+      document.getElementById('btn-toggle').classList.replace('hover:bg-cyan-500', 'hover:bg-amber-500');
+      document.getElementById('icon-toggle').innerText = "⏸";
+      document.getElementById('text-toggle').innerText = "Pausar";
+      stepLoop();
+    }
+
+    function stopEvaluation() {
+      isRunning = false;
+      if (animId) cancelAnimationFrame(animId);
+      document.getElementById('btn-toggle').classList.replace('bg-amber-600', 'bg-cyan-600');
+      document.getElementById('btn-toggle').classList.replace('hover:bg-amber-500', 'hover:bg-cyan-500');
+      document.getElementById('icon-toggle').innerText = "▶";
+      document.getElementById('text-toggle').innerText = "Iniciar";
+    }
+
+    function scrambleEnv() {
+      if (activeDemo === "rubiks") {
+        sim.scramble(2);
+        sim.render(canvas);
+        if (agent) agent.resetMemory();
+      }
+    }
+
+    function resetEnv() {
+      sim.reset();
+      sim.render(canvas);
+      if (agent) agent.resetMemory();
+    }
+
+    let lastStepTime = 0;
+    async function stepLoop(timestamp) {
+      if (!isRunning) return;
+
+      const interval = activeDemo === "rubiks" ? 250 : 25; // 4 Hz para Cubo (apreciação visual), 40 Hz para CartPole
+      if (timestamp - lastStepTime >= interval) {
+        lastStepTime = timestamp;
+
+        const obs = activeDemo === "rubiks" ? sim.getOneHot() : sim.getState();
+        const decision = await agent.actWithConfidence(obs);
+
+        // Atualiza telemetria na UI
+        document.getElementById('metric-latency').innerText = `${decision.latencyMs.toFixed(2)} ms`;
+        document.getElementById('metric-confidence').innerText = `${(decision.confidence * 100).toFixed(1)}%`;
+        document.getElementById('metric-uncertainty').innerText = `${(decision.uncertainty * 100).toFixed(1)}%`;
+
+        if (activeDemo === "rubiks") {
+          const macroName = System1.RubiksCubeSim.MACRO_NAMES[decision.action];
+          sim.applyMacro(macroName);
+          document.getElementById('status-desc').innerText = `Ação: ${macroName}`;
+          if (sim.isSolved()) {
+            stopEvaluation();
+            document.getElementById('status-desc').innerText = "🏆 CUBO RESOLVIDO!";
+          }
+        } else {
+          const res = sim.step(decision.action);
+          document.getElementById('status-desc').innerText = `Passos: ${res.steps}`;
+          if (res.done) sim.reset();
+        }
+
+        sim.render(canvas);
+      }
+
+      animId = requestAnimationFrame(stepLoop);
+    }
+
+    // Inicialização ao carregar
+    window.addEventListener('DOMContentLoaded', async () => {
+      initSim("rubiks");
+      await loadModel("rubiks");
+    });
+  </script>
+</body>
+</html>

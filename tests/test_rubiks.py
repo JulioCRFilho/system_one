@@ -1,0 +1,196 @@
+"""Testes unitários e de integração para o Cubo Mágico (Rubik's Cube 3x3) no System 1 Engine.
+
+Valida:
+1. Matemática do grupo de permutações (identidade, inversos, teorema do Sexy Move).
+2. Conformidade dos ambientes `RubiksCube-v0` e `RubiksCubeMacro-v0` com o padrão Gymnasium.
+3. Renderização 2D Net no padrão do HUD (RGB 480x320).
+4. Integração completa com `UniversalS1Wrapper`, `UniversalS1Agent` e `RecurrentPPOTrainer`.
+"""
+
+import gymnasium as gym
+import numpy as np
+import pytest
+import torch
+
+from system1_engine.core.agent import UniversalS1Agent
+from system1_engine.env.adapters.rubiks import (
+    RubiksCubeCore,
+    RubiksCubeEnv,
+    RubiksCubeMacroEnv,
+)
+from system1_engine.env.wrapper import UniversalS1Wrapper
+from system1_engine.training.ppo import RecurrentPPOTrainer
+
+
+class TestRubiksCubeMath:
+    """Valida a física e a teoria dos grupos do simulador vetorial do Cubo Mágico."""
+
+    def test_solved_state(self):
+        core = RubiksCubeCore()
+        assert core.is_solved()
+        assert core.get_aligned_count() == 54
+        assert core.get_score() == 1.0
+
+    def test_four_turns_identity(self):
+        """Qualquer giro atômico aplicado 4 vezes deve retornar à identidade."""
+        for move in RubiksCubeCore.ATOMIC_MOVES:
+            core = RubiksCubeCore()
+            init_state = core.state.copy()
+            for _ in range(4):
+                core.apply_atomic(move)
+            assert np.array_equal(core.state, init_state), f"4 giros de {move} não retornaram à identidade"
+
+    def test_move_inverses(self):
+        """Cada movimento atômico e seu inverso devem anular-se mutuamente."""
+        pairs = [
+            ("U", "U_prime"), ("D", "D_prime"),
+            ("F", "F_prime"), ("B", "B_prime"),
+            ("R", "R_prime"), ("L", "L_prime"),
+            ("Y", "Y_prime"),
+        ]
+        for m, m_inv in pairs:
+            core = RubiksCubeCore()
+            init_state = core.state.copy()
+            core.apply_atomic(m)
+            assert not np.array_equal(core.state, init_state)
+            core.apply_atomic(m_inv)
+            assert np.array_equal(core.state, init_state), f"{m} + {m_inv} não retornaram à identidade"
+
+    def test_sexy_move_order_six(self):
+        """Teorema matemático: o Sexy Move (R U R' U') tem ordem exata 6."""
+        core = RubiksCubeCore()
+        init_state = core.state.copy()
+        for i in range(1, 6):
+            core.apply_macro("SEXY_MOVE_R")
+            assert not np.array_equal(core.state, init_state), f"Sexy Move repetiu prematuramente no ciclo {i}"
+        core.apply_macro("SEXY_MOVE_R")
+        assert np.array_equal(core.state, init_state), "(R U R' U')^6 não retornou à identidade!"
+
+    def test_all_macros_executable(self):
+        """Verifica se todas as 12 macro-ações executam sem exceção e alteram o cubo."""
+        for macro in RubiksCubeCore.MACRO_NAMES:
+            core = RubiksCubeCore()
+            core.apply_macro(macro)
+            # Rotação Y do cubo inteiro preserva o alinhamento relativo
+            if macro not in ("ROTATE_Y", "ROTATE_Y_PRIME"):
+                assert not core.is_solved(), f"Macro {macro} não alterou o cubo resolvido"
+
+    def test_rendering_dimensions(self):
+        """Garante que a renderização 2D Net gere array RGB compatível com o HUD."""
+        core = RubiksCubeCore()
+        frame = core.render_net(width=480, height=320, last_action="TEST", steps=5)
+        assert isinstance(frame, np.ndarray)
+        assert frame.shape == (320, 480, 3)
+        assert frame.dtype == np.uint8
+
+
+class TestRubiksGymEnvironments:
+    """Testa os ambientes compatíveis com Gymnasium."""
+
+    def test_atomic_env_lifecycle(self):
+        env = RubiksCubeEnv(scramble_depth=2, max_steps=10)
+        assert env.action_space.n == 12
+        assert env.observation_space.shape == (324,)
+
+        obs, info = env.reset(seed=42)
+        assert obs.shape == (324,)
+        assert "aligned_stickers" in info
+        assert "score" in info
+
+        # Executa passos
+        for _ in range(5):
+            action = env.action_space.sample()
+            obs, reward, terminated, truncated, step_info = env.step(action)
+            assert obs.shape == (324,)
+            assert isinstance(reward, float)
+            assert isinstance(terminated, bool)
+            assert isinstance(truncated, bool)
+
+        # Renderização
+        frame = env.render()
+        assert frame is not None
+        assert frame.shape == (320, 480, 3)
+
+    def test_macro_env_lifecycle(self):
+        env = RubiksCubeMacroEnv(scramble_depth=2, max_steps=15)
+        assert env.action_space.n == 12
+        assert env.observation_space.shape == (324,)
+
+        obs, info = env.reset(seed=123)
+        assert obs.shape == (324,)
+        assert "is_solved" in info
+
+        # Executa macro-ações
+        for _ in range(5):
+            action = env.action_space.sample()
+            obs, reward, terminated, truncated, step_info = env.step(action)
+            assert obs.shape == (324,)
+            assert isinstance(reward, float)
+
+        frame = env.render()
+        assert frame is not None
+        assert frame.shape == (320, 480, 3)
+
+    def test_gym_registry_integration(self):
+        """Garante que os ambientes podem ser criados via gym.make()."""
+        raw_atomic = gym.make("RubiksCube-v0")
+        assert raw_atomic is not None
+        raw_atomic.reset()
+        raw_atomic.close()
+
+        raw_macro = gym.make("RubiksCubeMacro-v0")
+        assert raw_macro is not None
+        raw_macro.reset()
+        raw_macro.close()
+
+
+class TestRubiksSystemOneIntegration:
+    """Valida a integração completa com o UniversalS1Agent e o loop de PPO."""
+
+    def test_wrapper_and_agent_reflex_inference(self):
+        raw_env = RubiksCubeMacroEnv(scramble_depth=2)
+        wrapped_env = UniversalS1Wrapper(raw_env)
+
+        agent = UniversalS1Agent(
+            obs_space=wrapped_env.observation_space,
+            action_space=wrapped_env.action_space,
+        )
+
+        obs_dict, _ = wrapped_env.reset(seed=42)
+        assert "obs" in obs_dict
+        assert "delta_obs" in obs_dict
+        assert obs_dict["obs"].shape == (324,)
+
+        # Inferência amortizada ultra-rápida (<= 0.8 ms)
+        decision = agent.act_fast(obs_dict, return_decision=True)
+        assert decision.action in range(12)
+        assert 0.0 <= decision.confidence <= 1.0
+        assert 0.0 <= decision.uncertainty <= 1.0
+
+        # Próximo passo no ambiente com a ação do agente
+        next_obs, reward, term, trunc, _ = wrapped_env.step(decision.action)
+        assert next_obs["obs"].shape == (324,)
+
+    def test_ppo_short_training_run(self):
+        """Verifica que o RecurrentPPOTrainer treina sem erros no RubiksCubeMacro-v0."""
+        raw_env = RubiksCubeMacroEnv(scramble_depth=1, max_steps=10)
+        wrapped_env = UniversalS1Wrapper(raw_env)
+
+        agent = UniversalS1Agent(
+            obs_space=wrapped_env.observation_space,
+            action_space=wrapped_env.action_space,
+        )
+
+        trainer = RecurrentPPOTrainer(
+            agent=agent,
+            env=wrapped_env,
+            learning_rate=1e-3,
+            rollout_steps=64,
+            chunk_length=8,
+            chunk_batch_size=8,
+            device=torch.device("cpu"),
+        )
+
+        # Executa um ciclo curto de 128 passos
+        ret = trainer.train(max_steps=128, target_return=100.0, verbose=False)
+        assert isinstance(ret, float)
