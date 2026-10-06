@@ -33,6 +33,7 @@ class RecurrentPPOTrainer:
         chunk_batch_size: int = 16,
         device: Union[str, torch.device] = "cpu",
         tracker: Optional[LiveStatsTracker] = None,
+        exploration_scale: float = 1.0,
     ) -> None:
         self.agent = agent.to(device)
         self.env = env
@@ -49,6 +50,7 @@ class RecurrentPPOTrainer:
         self.chunk_batch_size = chunk_batch_size
         self.device = torch.device(device)
         self.tracker = tracker
+        self.exploration_scale = float(np.clip(exploration_scale, 0.05, 1.0))
 
         # Optimize only parameters that require grad (respects frozen trunk)
         trainable_params = [p for p in self.agent.parameters() if p.requires_grad]
@@ -129,13 +131,25 @@ class RecurrentPPOTrainer:
                 t0 = time.perf_counter_ns()
                 dist, value, next_hx = self.agent.forward(input_dict, hx=current_hx, dones=None)
                 if self.agent.is_discrete:
-                    action = dist.sample()
-                    log_prob = dist.log_prob(action)
+                    if self.exploration_scale != 1.0:
+                        scaled_logits = dist.logits / self.exploration_scale
+                        dist_sample = torch.distributions.Categorical(logits=scaled_logits)
+                    else:
+                        dist_sample = dist
+                    action = dist_sample.sample()
+                    log_prob = dist_sample.log_prob(action)
                     env_action = int(action.item())
                 else:
-                    action = dist.sample()
-                    log_prob = dist.log_prob(action).sum(dim=-1)
+                    if self.exploration_scale != 1.0:
+                        scaled_std = dist.scale * self.exploration_scale
+                        dist_sample = torch.distributions.Normal(loc=dist.mean, scale=scaled_std)
+                    else:
+                        dist_sample = dist
+                    action = dist_sample.sample()
+                    log_prob = dist_sample.log_prob(action).sum(dim=-1)
                     env_action = action.squeeze(0).squeeze(0).cpu().numpy()
+                    if isinstance(self.env.action_space, gym.spaces.Box):
+                        env_action = np.clip(env_action, self.env.action_space.low, self.env.action_space.high)
                 lat_us = (time.perf_counter_ns() - t0) / 1000.0
 
                 if self.tracker is not None:
@@ -273,11 +287,21 @@ class RecurrentPPOTrainer:
                 values_sq = values.squeeze(-1)  # [B, T]
 
                 if self.agent.is_discrete:
-                    new_log_probs = dist.log_prob(batch.actions)  # [B, T]
-                    entropy = dist.entropy()                       # [B, T]
+                    if self.exploration_scale != 1.0:
+                        scaled_logits = dist.logits / self.exploration_scale
+                        dist_eval = torch.distributions.Categorical(logits=scaled_logits)
+                    else:
+                        dist_eval = dist
+                    new_log_probs = dist_eval.log_prob(batch.actions)  # [B, T]
+                    entropy = dist_eval.entropy()                       # [B, T]
                 else:
-                    new_log_probs = dist.log_prob(batch.actions).sum(dim=-1)
-                    entropy = dist.entropy().sum(dim=-1)
+                    if self.exploration_scale != 1.0:
+                        scaled_std = dist.scale * self.exploration_scale
+                        dist_eval = torch.distributions.Normal(loc=dist.mean, scale=scaled_std)
+                    else:
+                        dist_eval = dist
+                    new_log_probs = dist_eval.log_prob(batch.actions).sum(dim=-1)
+                    entropy = dist_eval.entropy().sum(dim=-1)
 
                 # Ratio
                 ratio = torch.exp(new_log_probs - batch.old_log_probs)

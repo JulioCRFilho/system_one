@@ -7,6 +7,8 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- ONNX Runtime Web via CDN (WebAssembly / WebGPU) -->
   <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js"></script>
+  <!-- Three.js via CDN para Visualização 3D do Cubo Mágico -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
   <!-- Runtime e Simuladores do System 1 -->
   <script src="./system1-eval.js"></script>
   <style>
@@ -28,10 +30,15 @@
         <p class="text-xs text-gray-400">Agente Neural Recorrente Amortizado • Inferência Sub-Milissegundo</p>
       </div>
     </div>
-    <a href="https://github.com/JulioCRFilho/system_one" target="_blank" rel="noopener noreferrer" class="text-xs text-gray-300 hover:text-white bg-gray-900 hover:bg-gray-800 border border-gray-700 px-3 py-1.5 rounded transition flex items-center gap-1.5 shadow-sm">
-      <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-      Ver no GitHub
-    </a>
+    <div class="flex items-center gap-2">
+      <button onclick="syncWebModels()" class="text-xs text-cyan-300 hover:text-white bg-cyan-950 hover:bg-cyan-900 border border-cyan-800 px-2.5 py-1.5 rounded transition flex items-center gap-1 shadow-sm cursor-pointer" title="Varre o disco local e sincroniza novos checkpoints treinados">
+        <span>🔄</span> <span class="hidden sm:inline">Sincronizar Modelos</span>
+      </button>
+      <a href="https://github.com/JulioCRFilho/system_one" target="_blank" rel="noopener noreferrer" class="text-xs text-gray-300 hover:text-white bg-gray-900 hover:bg-gray-800 border border-gray-700 px-3 py-1.5 rounded transition flex items-center gap-1.5 shadow-sm">
+        <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        <span class="hidden sm:inline">GitHub</span>
+      </a>
+    </div>
   </header>
 
   <!-- Container Principal -->
@@ -43,53 +50,82 @@
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
             <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span id="label-viewport" class="text-xs font-mono font-bold text-gray-300">Cubo Mágico 3x3 (Macro / CFOP)</span>
+            <span id="label-viewport" class="text-xs font-mono font-bold text-gray-300">Cubo Mágico 3x3 (Atômico - 12 Giros)</span>
           </div>
-          <span id="badge-fps" class="text-[10px] font-mono text-cyan-400 bg-cyan-950/80 px-2 py-0.5 rounded border border-cyan-800">60 FPS</span>
+          <div class="flex items-center gap-2">
+            <!-- Alternador de Visão 3D vs 2D Net para o Cubo Mágico -->
+            <div id="rubiks-view-toggle" class="flex items-center bg-gray-900 border border-gray-700 rounded p-0.5 text-[10px] font-mono">
+              <button type="button" id="btn-web-3d" onclick="setWebCubeViewMode('3d')" class="px-2 py-0.5 rounded font-bold bg-indigo-600 text-white transition shadow-sm cursor-pointer">🎲 3D</button>
+              <button type="button" id="btn-web-2d" onclick="setWebCubeViewMode('2d')" class="px-2 py-0.5 rounded text-gray-400 hover:text-white transition cursor-pointer">🗺️ 2D Net</button>
+            </div>
+            <span id="badge-fps" class="text-[10px] font-mono text-cyan-400 bg-cyan-950/80 px-2 py-0.5 rounded border border-cyan-800">60 FPS</span>
+          </div>
         </div>
 
         <!-- Canvas do Jogo / Viewport -->
-        <div class="relative bg-black rounded-lg overflow-hidden border border-gray-800 flex items-center justify-center">
-          <canvas id="viewport-canvas" width="480" height="320" class="w-full h-auto max-h-[320px] object-contain"></canvas>
-          <div id="loader-overlay" class="absolute inset-0 bg-black/80 flex flex-col items-center justify-center gap-2 text-xs font-mono text-cyan-400">
+        <div class="relative bg-black rounded-lg overflow-hidden border border-gray-800 flex items-center justify-center min-h-[320px]">
+          <canvas id="viewport-canvas" width="480" height="320" class="w-full h-auto max-h-[320px] object-contain hidden"></canvas>
+          <div id="rubiks-3d-container" class="w-full h-[320px] relative cursor-grab active:cursor-grabbing select-none flex items-center justify-center">
+            <div class="absolute bottom-2 left-2 text-[10px] font-mono text-gray-400 bg-black/60 backdrop-blur-sm px-2 py-0.5 rounded pointer-events-none border border-gray-800/80 flex items-center gap-1 z-10">
+              <span>🖱️</span> Arraste para orbitar • 2 cliques para resetar ângulo
+            </div>
+          </div>
+          <div id="loader-overlay" class="absolute inset-0 bg-black/80 flex flex-col items-center justify-center gap-2 text-xs font-mono text-cyan-400 z-20">
             <div class="w-6 h-6 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin"></div>
             <span>Carregando pesos neurais...</span>
           </div>
         </div>
 
         <!-- Controles Interativos -->
-        <div class="flex items-center justify-between pt-1 gap-2">
-          <div class="flex items-center gap-1.5">
-            <button id="btn-toggle" onclick="toggleEvaluation()" class="px-3 py-1.5 text-xs font-bold rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white transition flex items-center gap-1.5 shadow">
+        <div class="flex flex-wrap items-center justify-between pt-1 gap-2">
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <button id="btn-toggle" onclick="toggleEvaluation()" class="px-3 py-1.5 text-xs font-bold rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white transition flex items-center gap-1.5 shadow cursor-pointer">
               <span id="icon-toggle">▶</span> <span id="text-toggle">Iniciar</span>
             </button>
-            <button id="btn-scramble" onclick="scrambleEnv()" class="px-2.5 py-1.5 text-xs font-medium rounded-lg bg-gray-800 hover:bg-gray-700 text-amber-300 border border-gray-700 transition flex items-center gap-1">
-              🎲 Embaralhar
+            <button id="btn-step" onclick="stepOnce()" class="px-2.5 py-1.5 text-xs font-medium rounded-lg bg-gray-800 hover:bg-gray-700 text-cyan-300 border border-gray-700 transition flex items-center gap-1 cursor-pointer" title="Executa um único passo reflexivo">
+              ⏯ Passo
             </button>
-            <button onclick="resetEnv()" class="px-2.5 py-1.5 text-xs font-medium rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 transition">
+            <div id="scramble-controls" class="flex items-center gap-1">
+              <button id="btn-scramble" onclick="scrambleEnv()" class="px-2.5 py-1.5 text-xs font-bold rounded-lg bg-amber-950/80 hover:bg-amber-900 text-amber-300 border border-amber-700/60 transition flex items-center gap-1 shadow-sm cursor-pointer" title="Embaralha o estado garantindo não-cancelamento">
+                🎲 Embaralhar
+              </button>
+              <select id="select-scramble-depth" onchange="onScrambleDepthChange()" class="bg-gray-900 text-[11px] font-mono border border-gray-700 rounded-lg px-2 py-1.5 text-amber-300 focus:outline-none cursor-pointer">
+                <option value="1">1 giro (Reflexo Puro)</option>
+                <option value="2">2 giros (Médio)</option>
+                <option value="3" selected>3 giros (Padrão)</option>
+                <option value="4">4 giros (Avançado)</option>
+                <option value="5">5 giros (Desafio)</option>
+              </select>
+            </div>
+            <button onclick="resetEnv()" class="px-2.5 py-1.5 text-xs font-medium rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 transition cursor-pointer">
               🔄 Reset
             </button>
           </div>
-          <span id="status-desc" class="text-[11px] font-mono text-gray-400 truncate max-w-[200px]">Pronto para avaliar</span>
+          <span id="status-desc" class="text-[11px] font-mono text-gray-400 truncate max-w-[280px]">Pronto para avaliar</span>
         </div>
       </div>
 
       <!-- Telemetria em Tempo Real -->
-      <div class="grid grid-cols-3 gap-2">
+      <div class="grid grid-cols-4 gap-2">
         <div class="glass-card rounded-lg p-2.5 flex flex-col">
-          <span class="text-[10px] text-gray-400 font-mono">LATÊNCIA INFERÊNCIA</span>
+          <span class="text-[10px] text-gray-400 font-mono">LATÊNCIA</span>
           <span id="metric-latency" class="text-base font-bold font-mono text-cyan-300 mt-0.5">0.18 ms</span>
-          <span class="text-[9px] text-gray-500">Sub-milissegundo CPU</span>
+          <span class="text-[9px] text-gray-500">CPU ultrarrápida</span>
         </div>
         <div class="glass-card rounded-lg p-2.5 flex flex-col">
-          <span class="text-[10px] text-gray-400 font-mono">CONFIANÇA (TOP-1)</span>
+          <span class="text-[10px] text-gray-400 font-mono">CONFIANÇA</span>
           <span id="metric-confidence" class="text-base font-bold font-mono text-emerald-400 mt-0.5">--%</span>
           <span class="text-[9px] text-gray-500">Certeza do reflexo</span>
         </div>
         <div class="glass-card rounded-lg p-2.5 flex flex-col">
-          <span class="text-[10px] text-gray-400 font-mono">INCERTEZA (GATING)</span>
+          <span class="text-[10px] text-gray-400 font-mono">INCERTEZA</span>
           <span id="metric-uncertainty" class="text-base font-bold font-mono text-amber-400 mt-0.5">--%</span>
-          <span class="text-[9px] text-gray-500">Entropia de Shannon</span>
+          <span class="text-[9px] text-gray-500">Entropia Shannon</span>
+        </div>
+        <div class="glass-card rounded-lg p-2.5 flex flex-col">
+          <span class="text-[10px] text-gray-400 font-mono">CALIBRAÇÃO</span>
+          <span id="metric-calib" class="text-base font-bold font-mono text-purple-400 mt-0.5">0.00</span>
+          <span class="text-[9px] text-gray-500" id="metric-calib-sub">Homeostase S1</span>
         </div>
       </div>
     </div>
@@ -97,26 +133,48 @@
     <!-- Painel de Configuração (Direita / 1 Coluna) -->
     <div class="flex flex-col gap-3">
       <div class="glass-card rounded-xl p-3.5 flex flex-col gap-3">
-        <h2 class="text-xs font-bold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
-          <span>⚙️</span> Selecionar Demonstração
+        <h2 class="text-xs font-bold text-gray-300 uppercase tracking-wider flex items-center justify-between">
+          <span class="flex items-center gap-1.5"><span>⚙️</span> Selecionar Demonstração</span>
+          <span id="badge-sync-status" class="text-[9px] text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-800">ONLINE</span>
         </h2>
 
         <div>
-          <label class="text-[11px] text-gray-400 block mb-1">Ambiente & Checkpoint</label>
-          <select id="select-demo" onchange="onDemoChange()" class="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500">
-            <option value="rubiks">🎲 Cubo Mágico 3x3 (Macro / CFOP)</option>
+          <label class="text-[11px] text-gray-400 block mb-1">Ambiente & Modelo ONNX</label>
+          <select id="select-demo" onchange="onDemoChange()" class="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500 font-mono">
+            <option value="rubiks_atomic">🎲 Cubo Mágico 3x3 (Atômico - 12 Giros)</option>
+            <option value="rubiks_macro">🧩 Cubo Mágico 3x3 (Macro / CFOP)</option>
             <option value="cartpole">⚖️ CartPole-v1 (Controle Clássico)</option>
+            <option value="acrobot">🤸 Acrobot-v1 (Braço Duplo)</option>
+            <option value="mountaincar">⛰️ MountainCar-v0 (Controle Clássico)</option>
+            <option value="lunarlander">🚀 LunarLander-v3 (Pouso Lunar Box2D)</option>
+            <option value="ant_v5">🐜 Ant-v5 (Robótica Contínua MuJoCo)</option>
           </select>
+        </div>
+
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <label class="text-[11px] text-gray-400 block font-semibold">Calibração Estocástica</label>
+            <span id="label-web-calib" class="text-[10px] font-mono text-cyan-300">⚡ Auto (Homeostase)</span>
+          </div>
+          <div class="flex items-center gap-2 mb-1.5">
+            <input type="range" id="select-web-calibration" min="0.0" max="1.0" step="0.05" value="0.5" oninput="onWebCalibChange(this.value)" class="w-full accent-cyan-500 cursor-pointer" />
+          </div>
+          <div class="grid grid-cols-4 gap-1">
+            <button type="button" onclick="setWebCalib(0.0)" class="py-0.5 text-[9px] font-mono rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 cursor-pointer text-center">0.0 (Det)</button>
+            <button type="button" onclick="setWebCalib(0.5)" class="py-0.5 text-[9px] font-mono rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 cursor-pointer text-center">0.5 (Calib)</button>
+            <button type="button" onclick="setWebCalib(1.0)" class="py-0.5 text-[9px] font-mono rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 cursor-pointer text-center">1.0 (Estoc)</button>
+            <button type="button" id="btn-web-calib-auto" onclick="setWebCalib('auto')" class="py-0.5 text-[9px] font-mono rounded bg-purple-950/80 hover:bg-purple-900 text-purple-300 border border-purple-800 cursor-pointer text-center font-bold">⚡ Auto</button>
+          </div>
         </div>
 
         <div class="bg-gray-900/60 p-2.5 rounded-lg border border-gray-800 text-xs text-gray-300 space-y-1.5 leading-relaxed">
           <div class="font-semibold text-cyan-300 flex items-center gap-1">
             <span>🧠</span> Arquitetura Universal S1:
           </div>
-          <p class="text-[11px] text-gray-400">
+          <p id="model-desc-text" class="text-[11px] text-gray-400 leading-normal">
             • <strong>Tronco Recorrente</strong>: GRU + ResMLP (256 dims)<br>
-            • <strong>Cálculo Amortizado</strong>: Ação reflexiva sem busca em árvore<br>
-            • <strong>Confidence Gating</strong>: Disparo autônomo do System 2 quando a incerteza atinge limiar crítico
+            • <strong>Cálculo Amortizado</strong>: Decisão reflexiva em &lt; 0.8 ms sem busca em árvore<br>
+            • <strong>Homeostase Termodinâmica</strong>: Auto-ajuste de calibração por momentum de recompensa (System 1 puro)
           </p>
         </div>
 
@@ -126,12 +184,16 @@
             <span class="text-cyan-400">ONNX Web (Wasm SIMD)</span>
           </div>
           <div class="flex justify-between">
-            <span>Tamanho Modelo:</span>
-            <span id="model-size-label" class="text-gray-300">~105 KB</span>
+            <span>Arquivo ONNX:</span>
+            <span id="model-file-label" class="text-gray-300 truncate max-w-[150px]">s1_rubiks_atomic.onnx</span>
           </div>
           <div class="flex justify-between">
-            <span>Origem Pesos:</span>
-            <span class="text-emerald-400 truncate max-w-[150px]">system_one@main</span>
+            <span>Tamanho Modelo:</span>
+            <span id="model-size-label" class="text-gray-300">~3.18 MB</span>
+          </div>
+          <div class="flex justify-between">
+            <span>Sincronizado:</span>
+            <span id="model-mtime-label" class="text-emerald-400 truncate max-w-[150px]">Recente</span>
           </div>
         </div>
       </div>
@@ -140,65 +202,510 @@
 
   <script>
     const GITHUB_REPO = "JulioCRFilho/system_one";
-    const MODELS = {
-      rubiks: {
-        name: "Cubo Mágico 3x3 (Macro / CFOP)",
+
+    // Catálogo inicial curado com suporte completo a todos os modelos
+    let MODELS = {
+      rubiks_atomic: {
+        key: "rubiks_atomic",
+        name: "🎲 Cubo Mágico 3x3 (Atômico - 12 Giros)",
+        file: "s1_rubiks_atomic.onnx",
+        mode: "atomic",
+        type: "rubiks",
+        size: "3.18 MB",
+        description: "12 giros atômicos elementares (U, D, F, B, R, L) com física e permutação 3D exatas. Taxa de resolução reflexiva comprovada de até 100%."
+      },
+      rubiks_macro: {
+        key: "rubiks_macro",
+        name: "🧩 Cubo Mágico 3x3 (Macro / CFOP)",
         file: "s1_rubiks_macro.onnx",
-        url: `./models/s1_rubiks_macro.onnx`,
-        cdnUrl: `https://cdn.jsdelivr.net/gh/${GITHUB_REPO}@master/web/models/s1_rubiks_macro.onnx`,
-        size: "3.3 MB"
+        mode: "macro",
+        type: "rubiks",
+        size: "3.18 MB",
+        description: "Hierarchical RL com macro-ações CFOP pré-definidas (Sune, Anti-Sune, Sexy Move, T-Perm, Insert Edge)."
       },
       cartpole: {
-        name: "CartPole-v1 (Controle Clássico)",
+        key: "cartpole",
+        name: "⚖️ CartPole-v1 (Controle Clássico)",
         file: "s1_cartpole.onnx",
-        url: `./models/s1_cartpole.onnx`,
-        cdnUrl: `https://cdn.jsdelivr.net/gh/${GITHUB_REPO}@master/web/models/s1_cartpole.onnx`,
-        size: "2.9 MB"
+        mode: "vector",
+        type: "cartpole",
+        size: "2.78 MB",
+        description: "Equilíbrio invertido amortizado em sub-milissegundo com derivadas temporais Δs_t."
+      },
+      acrobot: {
+        key: "acrobot",
+        name: "🤸 Acrobot-v1 (Braço Duplo)",
+        file: "s1_acrobot_v1.onnx",
+        mode: "vector",
+        type: "cartpole",
+        size: "2.78 MB",
+        description: "Sistema caótico não-linear de dois elos sob controle reflexivo amortizado."
+      },
+      mountaincar: {
+        key: "mountaincar",
+        name: "⛰️ MountainCar-v0 (Controle Clássico)",
+        file: "s1_mountaincar_v0.onnx",
+        mode: "vector",
+        type: "cartpole",
+        size: "2.78 MB",
+        description: "Acúmulo de energia potencial gravitacional via oscilação reflexiva de momento."
+      },
+      lunarlander: {
+        key: "lunarlander",
+        name: "🚀 LunarLander-v3 (Pouso Lunar Box2D)",
+        file: "s1_lunarlander_v3.onnx",
+        mode: "vector",
+        type: "cartpole",
+        size: "2.79 MB",
+        description: "Controle vetorial de empuxo e atitude em gravidade simulada."
+      },
+      ant_v5: {
+        key: "ant_v5",
+        name: "🐜 Ant-v5 (Robótica Contínua MuJoCo)",
+        file: "s1_ant_v5.onnx",
+        mode: "continuous",
+        type: "cartpole",
+        size: "2.91 MB",
+        description: "Locomoção quadrupedal contínua em alta dimensão com física MuJoCo v5."
       }
     };
 
-    let activeDemo = "rubiks";
+    const urlParams = new URLSearchParams(window.location.search);
+    let activeDemo = urlParams.get("env") || urlParams.get("model") || "rubiks_atomic";
     let sim = null;
     let agent = null;
     let isRunning = false;
     let animId = null;
+    let lastScore = 0.0;
+    let actionHistory = [];
 
     const canvas = document.getElementById('viewport-canvas');
 
+    // =====================================================================
+    // MOTOR DE VISUALIZAÇÃO 3D WEBGL (THREE.JS SPEEDCUBE)
+    // =====================================================================
+    let webCubeViewMode = "3d";
+    let threeScene = null;
+    let threeCamera = null;
+    let threeRenderer = null;
+    let cubeGroup = null;
+    let stickerMeshes = [];
+    let isThreeInitialized = false;
+    let isPointerDragging = false;
+    let pointerPrev = { x: 0, y: 0 };
+    let cubeAutoRotate = true;
+
+    const THREE_CUBE_PALETTE = {
+      0: 0xF8FAFC, // U: Branco puro
+      1: 0xFACC15, // D: Amarelo
+      2: 0x22C55E, // F: Verde
+      3: 0x3B82F6, // B: Azul
+      4: 0xEF4444, // R: Vermelho
+      5: 0xF97316  // L: Laranja
+    };
+
+    function initThreeCube() {
+      const container = document.getElementById('rubiks-3d-container');
+      if (!container || isThreeInitialized || typeof THREE === 'undefined') return;
+
+      const width = container.clientWidth || 480;
+      const height = container.clientHeight || 320;
+
+      threeScene = new THREE.Scene();
+      threeScene.background = new THREE.Color(0x07090E);
+
+      threeCamera = new THREE.PerspectiveCamera(38, width / height, 0.1, 100);
+      threeCamera.position.set(0, 0, 7.2);
+
+      threeRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      threeRenderer.setSize(width, height);
+      threeRenderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      container.appendChild(threeRenderer.domElement);
+
+      // Iluminação realista de estúdio
+      const ambientLight = new THREE.AmbientLight(0xffffff, 1.4);
+      threeScene.add(ambientLight);
+
+      const dirLight1 = new THREE.DirectionalLight(0xffffff, 1.2);
+      dirLight1.position.set(5, 8, 6);
+      threeScene.add(dirLight1);
+
+      const dirLight2 = new THREE.DirectionalLight(0x94a3b8, 0.8);
+      dirLight2.position.set(-5, -6, -5);
+      threeScene.add(dirLight2);
+
+      cubeGroup = new THREE.Group();
+      cubeGroup.rotation.x = 0.45;
+      cubeGroup.rotation.y = -0.55;
+      threeScene.add(cubeGroup);
+
+      // 1. Criar os 27 cubies pretos (núcleo plástico do speedcube)
+      const cubieGeo = new THREE.BoxGeometry(0.96, 0.96, 0.96);
+      const cubieMat = new THREE.MeshStandardMaterial({
+        color: 0x11141A,
+        roughness: 0.7,
+        metalness: 0.1
+      });
+
+      for (let x = -1; x <= 1; x++) {
+        for (let y = -1; y <= 1; y++) {
+          for (let z = -1; z <= 1; z++) {
+            const cubie = new THREE.Mesh(cubieGeo, cubieMat);
+            cubie.position.set(x, y, z);
+            cubeGroup.add(cubie);
+          }
+        }
+      }
+
+      // 2. Criar os 54 stickers coloridos mapeados rigorosamente para sim.state
+      const stickerGeo = new THREE.PlaneGeometry(0.86, 0.86);
+      stickerMeshes = new Array(54);
+
+      const stickerDefs = [];
+      // Face 0: U (y = 1, norm = [0, 1, 0])
+      for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
+        stickerDefs.push({
+          slot: 0 * 9 + (r * 3 + c),
+          pos: [c - 1, 1 + 0.485, 1 - r],
+          rot: [-Math.PI / 2, 0, 0]
+        });
+      }
+      // Face 1: D (y = -1, norm = [0, -1, 0])
+      for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
+        stickerDefs.push({
+          slot: 1 * 9 + (r * 3 + c),
+          pos: [c - 1, -1 - 0.485, r - 1],
+          rot: [Math.PI / 2, 0, 0]
+        });
+      }
+      // Face 2: F (z = 1, norm = [0, 0, 1])
+      for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
+        stickerDefs.push({
+          slot: 2 * 9 + (r * 3 + c),
+          pos: [c - 1, 1 - r, 1 + 0.485],
+          rot: [0, 0, 0]
+        });
+      }
+      // Face 3: B (z = -1, norm = [0, 0, -1])
+      for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
+        stickerDefs.push({
+          slot: 3 * 9 + (r * 3 + c),
+          pos: [1 - c, 1 - r, -1 - 0.485],
+          rot: [0, Math.PI, 0]
+        });
+      }
+      // Face 4: R (x = 1, norm = [1, 0, 0])
+      for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
+        stickerDefs.push({
+          slot: 4 * 9 + (r * 3 + c),
+          pos: [1 + 0.485, 1 - r, 1 - c],
+          rot: [0, Math.PI / 2, 0]
+        });
+      }
+      // Face 5: L (x = -1, norm = [-1, 0, 0])
+      for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
+        stickerDefs.push({
+          slot: 5 * 9 + (r * 3 + c),
+          pos: [-1 - 0.485, 1 - r, c - 1],
+          rot: [0, -Math.PI / 2, 0]
+        });
+      }
+
+      for (const def of stickerDefs) {
+        const mat = new THREE.MeshStandardMaterial({
+          color: 0xffffff,
+          roughness: 0.25,
+          metalness: 0.05,
+          side: THREE.DoubleSide
+        });
+        const mesh = new THREE.Mesh(stickerGeo, mat);
+        mesh.position.set(def.pos[0], def.pos[1], def.pos[2]);
+        mesh.rotation.set(def.rot[0], def.rot[1], def.rot[2]);
+        cubeGroup.add(mesh);
+        stickerMeshes[def.slot] = mesh;
+      }
+
+      // Drag Orbit e Rotação suave manual
+      container.addEventListener('pointerdown', (e) => {
+        isPointerDragging = true;
+        cubeAutoRotate = false;
+        pointerPrev = { x: e.clientX, y: e.clientY };
+        try { container.setPointerCapture(e.pointerId); } catch (_) {}
+      });
+
+      container.addEventListener('pointermove', (e) => {
+        if (!isPointerDragging) return;
+        const dx = e.clientX - pointerPrev.x;
+        const dy = e.clientY - pointerPrev.y;
+        cubeGroup.rotation.y += dx * 0.008;
+        cubeGroup.rotation.x += dy * 0.008;
+        pointerPrev = { x: e.clientX, y: e.clientY };
+      });
+
+      const onPointerEnd = (e) => {
+        isPointerDragging = false;
+        try { container.releasePointerCapture(e.pointerId); } catch (_) {}
+      };
+      container.addEventListener('pointerup', onPointerEnd);
+      container.addEventListener('pointercancel', onPointerEnd);
+      container.addEventListener('dblclick', () => {
+        cubeGroup.rotation.set(0.45, -0.55, 0);
+        cubeAutoRotate = true;
+      });
+
+      // Redimensionamento reativo
+      const resizeObserver = new ResizeObserver(() => {
+        if (!container || !threeRenderer || !threeCamera) return;
+        const w = container.clientWidth || 480;
+        const h = container.clientHeight || 320;
+        threeCamera.aspect = w / h;
+        threeCamera.updateProjectionMatrix();
+        threeRenderer.setSize(w, h);
+      });
+      resizeObserver.observe(container);
+
+      isThreeInitialized = true;
+    }
+
+    function updateCube3D(state) {
+      if (!isThreeInitialized || !state || !stickerMeshes.length) return;
+      for (let i = 0; i < 54; i++) {
+        const colorId = state[i];
+        const hex = THREE_CUBE_PALETTE[colorId] !== undefined ? THREE_CUBE_PALETTE[colorId] : 0xffffff;
+        if (stickerMeshes[i]) {
+          stickerMeshes[i].material.color.setHex(hex);
+        }
+      }
+    }
+
+    function renderThreeFrame() {
+      if (isThreeInitialized && cubeGroup && threeRenderer && threeScene && threeCamera) {
+        if (cubeAutoRotate && !isPointerDragging) {
+          cubeGroup.rotation.y += 0.003;
+        }
+        threeRenderer.render(threeScene, threeCamera);
+      }
+    }
+
+    function threeAnimationLoop() {
+      renderThreeFrame();
+      requestAnimationFrame(threeAnimationLoop);
+    }
+
+    function setWebCubeViewMode(mode) {
+      if (mode === '3d' && typeof THREE === 'undefined') {
+        console.warn("Three.js não carregado, mantendo modo 2D.");
+        mode = '2d';
+      }
+      webCubeViewMode = mode;
+      const btn3d = document.getElementById('btn-web-3d');
+      const btn2d = document.getElementById('btn-web-2d');
+      const canvasEl = document.getElementById('viewport-canvas');
+      const container3d = document.getElementById('rubiks-3d-container');
+
+      if (mode === '3d') {
+        if (btn3d) btn3d.className = 'px-2 py-0.5 rounded font-bold bg-indigo-600 text-white transition shadow-sm cursor-pointer';
+        if (btn2d) btn2d.className = 'px-2 py-0.5 rounded text-gray-400 hover:text-white transition cursor-pointer';
+        canvasEl.classList.add('hidden');
+        container3d.classList.remove('hidden');
+        if (!isThreeInitialized) initThreeCube();
+        if (sim && sim.state) updateCube3D(sim.state);
+      } else {
+        if (btn2d) btn2d.className = 'px-2 py-0.5 rounded font-bold bg-indigo-600 text-white transition shadow-sm cursor-pointer';
+        if (btn3d) btn3d.className = 'px-2 py-0.5 rounded text-gray-400 hover:text-white transition cursor-pointer';
+        container3d.classList.add('hidden');
+        canvasEl.classList.remove('hidden');
+        if (sim) sim.render(canvasEl);
+      }
+    }
+
+    function getScrambleDepth() {
+      const el = document.getElementById('select-scramble-depth');
+      return el ? parseInt(el.value, 10) || 3 : 3;
+    }
+
+    function onScrambleDepthChange() {
+      scrambleEnv();
+    }
+
+    let isAutoCalibrate = true;
+
+    function onWebCalibChange(val) {
+      isAutoCalibrate = false;
+      const v = parseFloat(val);
+      const label = document.getElementById('label-web-calib');
+      if (label) {
+        if (v === 0.0) label.innerText = "0.00 [Determinístico]";
+        else if (v === 1.0) label.innerText = "1.00 [Estocástico]";
+        else label.innerText = `${v.toFixed(2)} [Calibrado]`;
+      }
+    }
+
+    function setWebCalib(val) {
+      const rng = document.getElementById('select-web-calibration');
+      const label = document.getElementById('label-web-calib');
+      if (val === 'auto') {
+        isAutoCalibrate = true;
+        if (label) label.innerText = "⚡ Auto (Homeostase)";
+      } else {
+        isAutoCalibrate = false;
+        if (rng) rng.value = val;
+        onWebCalibChange(val);
+      }
+    }
+
+    async function syncWebModels() {
+      const badge = document.getElementById('badge-sync-status');
+      badge.innerText = "SINCRONIZANDO...";
+      badge.className = "text-[9px] text-amber-300 bg-amber-950/60 px-1.5 py-0.5 rounded border border-amber-800 animate-pulse";
+      try {
+        const resp = await fetch('/api/web_models/sync', { method: 'POST' });
+        if (resp.ok) {
+          const data = await resp.json();
+          await fetchManifest();
+          badge.innerText = "SINCRONIZADO ✓";
+          badge.className = "text-[9px] text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-800";
+          setTimeout(() => {
+            badge.innerText = "ONLINE";
+          }, 3000);
+          await loadModel(activeDemo);
+          return;
+        }
+      } catch (e) {
+        console.warn("Servidor local não respondeu a /api/web_models/sync, recarregando manifesto estático:", e);
+      }
+      await fetchManifest();
+      badge.innerText = "ESTÁTICO";
+      badge.className = "text-[9px] text-gray-400 bg-gray-900 px-1.5 py-0.5 rounded border border-gray-700";
+    }
+
+    async function fetchManifest() {
+      try {
+        // Tenta endpoint do servidor local HUD primeiro, depois o arquivo estático
+        let manifest = null;
+        try {
+          const r1 = await fetch(`/api/web_models?v=${Date.now()}`);
+          if (r1.ok) manifest = await r1.json();
+        } catch (_) {}
+
+        if (!manifest || !manifest.models) {
+          const r2 = await fetch(`./models/manifest.json?v=${Date.now()}`);
+          if (r2.ok) manifest = await r2.json();
+        }
+
+        if (manifest && manifest.models) {
+          const select = document.getElementById('select-demo');
+          const currentVal = select.value;
+          select.innerHTML = "";
+
+          for (const [key, m] of Object.entries(manifest.models)) {
+            MODELS[key] = {
+              key: key,
+              name: m.name || key,
+              file: m.file,
+              mode: m.mode || (key.includes("macro") ? "macro" : "atomic"),
+              type: m.type || (key.includes("rubik") ? "rubiks" : "cartpole"),
+              size: `${m.size_mb || 3.0} MB`,
+              mtime: m.mtime_str || "Recente",
+              description: m.description || ""
+            };
+
+            const opt = document.createElement("option");
+            opt.value = key;
+            opt.innerText = m.name || key;
+            if (key === activeDemo || (currentVal && key === currentVal) || (!activeDemo && !currentVal && key === "rubiks_atomic")) {
+              opt.selected = true;
+            }
+            select.appendChild(opt);
+          }
+        }
+      } catch (err) {
+        console.warn("Manifesto dinâmico não disponível, utilizando catálogo padrão em memória:", err);
+      }
+    }
+
     async function loadModel(demoKey) {
       document.getElementById('loader-overlay').classList.remove('hidden');
-      const cfg = MODELS[demoKey];
+      const cfg = MODELS[demoKey] || MODELS["rubiks_atomic"];
+      document.getElementById('model-file-label').innerText = cfg.file;
       document.getElementById('model-size-label').innerText = cfg.size;
+      document.getElementById('model-mtime-label').innerText = cfg.mtime || "Recente";
+      if (cfg.description) {
+        document.getElementById('model-desc-text').innerText = cfg.description;
+      }
+
+      // Adiciona timestamp para prevenção rigorosa de cache desatualizado
+      const localUrl = `./models/${cfg.file}?v=${Date.now()}`;
+      const cdnUrl = `https://cdn.jsdelivr.net/gh/${GITHUB_REPO}@master/web/models/${cfg.file}`;
 
       let session = null;
       try {
-        session = await ort.InferenceSession.create(cfg.url, { executionProviders: ['wasm'] });
+        session = await ort.InferenceSession.create(localUrl, { executionProviders: ['wasm'] });
+        console.log(`[ONNX] Modelo local carregado com sucesso: ${localUrl}`);
       } catch (err) {
         console.warn("Falha ao carregar modelo local, tentando CDN do GitHub...", err);
-        session = await ort.InferenceSession.create(cfg.cdnUrl, { executionProviders: ['wasm'] });
+        try {
+          session = await ort.InferenceSession.create(cdnUrl, { executionProviders: ['wasm'] });
+        } catch (cdnErr) {
+          console.error("Falha ao carregar modelo do CDN:", cdnErr);
+          alert(`Erro ao carregar os pesos de ${cfg.file}. Verifique a conexão ou execute a sincronização local.`);
+        }
       }
 
-      agent = new System1.System1AgentWeb(session);
+      if (session) {
+        agent = new System1.System1AgentWeb(session);
+      }
       document.getElementById('loader-overlay').classList.add('hidden');
     }
 
     function initSim(demoKey) {
-      if (demoKey === "rubiks") {
+      const cfg = MODELS[demoKey] || MODELS["rubiks_atomic"];
+      const isRubiks = cfg.type === "rubiks" || demoKey.startsWith("rubiks");
+      const scrambleControls = document.getElementById('scramble-controls');
+      const viewToggle = document.getElementById('rubiks-view-toggle');
+      const canvasEl = document.getElementById('viewport-canvas');
+      const container3d = document.getElementById('rubiks-3d-container');
+
+      if (isRubiks) {
         sim = new System1.RubiksCubeSim();
-        sim.scramble(2);
-        document.getElementById('btn-scramble').classList.remove('hidden');
+        const depth = getScrambleDepth();
+        const mode = cfg.mode === "macro" ? "macro" : "atomic";
+        const moves = sim.scramble(depth, mode);
+        lastScore = sim.getScore();
+        actionHistory = [];
+
+        scrambleControls.classList.remove('hidden');
+        if (viewToggle) viewToggle.classList.remove('hidden');
+        document.getElementById('status-desc').innerText = `Embaralhado (${moves.length} giros): ${moves.join(" ")}`;
+
+        if (webCubeViewMode === '3d') {
+          canvasEl.classList.add('hidden');
+          container3d.classList.remove('hidden');
+          if (!isThreeInitialized) initThreeCube();
+          updateCube3D(sim.state);
+        } else {
+          container3d.classList.add('hidden');
+          canvasEl.classList.remove('hidden');
+          sim.render(canvasEl);
+        }
       } else {
         sim = new System1.CartPoleSim();
-        document.getElementById('btn-scramble').classList.add('hidden');
+        scrambleControls.classList.add('hidden');
+        if (viewToggle) viewToggle.classList.add('hidden');
+        container3d.classList.add('hidden');
+        canvasEl.classList.remove('hidden');
+        document.getElementById('status-desc').innerText = "Pronto para avaliar";
+        sim.render(canvasEl);
       }
-      sim.render(canvas);
+
       if (agent) agent.resetMemory();
     }
 
     async function onDemoChange() {
       stopEvaluation();
       activeDemo = document.getElementById('select-demo').value;
-      document.getElementById('label-viewport').innerText = MODELS[activeDemo].name;
+      const cfg = MODELS[activeDemo] || MODELS["rubiks_atomic"];
+      document.getElementById('label-viewport').innerText = cfg.name;
       initSim(activeDemo);
       await loadModel(activeDemo);
     }
@@ -228,59 +735,141 @@
     }
 
     function scrambleEnv() {
-      if (activeDemo === "rubiks") {
-        sim.scramble(2);
+      const cfg = MODELS[activeDemo] || MODELS["rubiks_atomic"];
+      if (cfg.type === "rubiks" || activeDemo.startsWith("rubiks")) {
+        const depth = getScrambleDepth();
+        const mode = cfg.mode === "macro" ? "macro" : "atomic";
+        const moves = sim.scramble(depth, mode);
+        lastScore = sim.getScore();
+        actionHistory = [];
+        if (webCubeViewMode === '3d') {
+          updateCube3D(sim.state);
+        }
         sim.render(canvas);
         if (agent) agent.resetMemory();
+        document.getElementById('status-desc').innerText = `Embaralhado (${moves.length} giros): ${moves.join(" ")}`;
       }
     }
 
     function resetEnv() {
       sim.reset();
+      lastScore = sim.getScore ? sim.getScore() : 0.0;
+      actionHistory = [];
+      if (webCubeViewMode === '3d') {
+        updateCube3D(sim.state);
+      }
       sim.render(canvas);
       if (agent) agent.resetMemory();
+      document.getElementById('status-desc').innerText = "Estado resetado para inicial";
+    }
+
+    async function stepOnce() {
+      if (!agent || !sim) return;
+      await executeSingleStep();
+    }
+
+    async function executeSingleStep() {
+      const cfg = MODELS[activeDemo] || MODELS["rubiks_atomic"];
+      const isRubiks = cfg.type === "rubiks" || activeDemo.startsWith("rubiks");
+      const obs = isRubiks ? sim.getOneHot() : sim.getState();
+
+      // Causal Feedback: calcula o reward do passo anterior para alimentar a GRU
+      let stepReward = 0.0;
+      if (isRubiks) {
+        const curScore = sim.getScore();
+        const deltaScore = curScore - lastScore;
+        lastScore = curScore;
+        stepReward = (deltaScore * 8.0) - 0.02 + (sim.isSolved() ? 15.0 : 0.0);
+      }
+
+      // Prevenção inteligente de ciclos (Cycle Breaking):
+      // Se a mesma ação for repetida 3 vezes consecutivas sem avanço de alinhamento, força a 2ª melhor ação se em modo determinístico fixo
+      let avoidAct = undefined;
+      if (actionHistory.length >= 3) {
+        const last3 = actionHistory.slice(-3);
+        if (last3.every(a => a === last3[0])) {
+          avoidAct = last3[0];
+        }
+      }
+
+      const calibEl = document.getElementById('select-web-calibration');
+      const webCalib = calibEl ? parseFloat(calibEl.value) : 0.5;
+
+      const decision = await agent.actWithConfidence(obs, stepReward, { 
+        calibration: isAutoCalibrate ? 'auto' : webCalib,
+        autoCalibrate: isAutoCalibrate,
+        avoidAction: (!isAutoCalibrate && webCalib === 0.0) ? avoidAct : undefined 
+      });
+      actionHistory.push(decision.action);
+      if (actionHistory.length > 20) actionHistory.shift();
+
+      // Atualiza telemetria na UI
+      document.getElementById('metric-latency').innerText = `${decision.latencyMs.toFixed(2)} ms`;
+      document.getElementById('metric-confidence').innerText = `${(decision.confidence * 100).toFixed(1)}%`;
+      document.getElementById('metric-uncertainty').innerText = `${(decision.uncertainty * 100).toFixed(1)}%`;
+      const calibCard = document.getElementById('metric-calib');
+      if (calibCard && decision.calibration !== undefined) {
+        calibCard.innerText = decision.calibration.toFixed(2);
+        const calibSub = document.getElementById('metric-calib-sub');
+        if (calibSub) {
+          if (isAutoCalibrate) {
+            calibSub.innerText = decision.calibration > 0.05 ? "🔥 Inovando (Homeostase)" : "⚡ Foco (Determinístico)";
+          } else {
+            calibSub.innerText = decision.calibration > 0.05 ? "Estocástico" : "Determinístico";
+          }
+        }
+      }
+
+      if (isRubiks) {
+        if (cfg.mode === "macro") {
+          const macroName = System1.RubiksCubeSim.MACRO_NAMES[decision.action];
+          sim.applyMacro(macroName);
+          document.getElementById('status-desc').innerText = `Macro: ${macroName}`;
+        } else {
+          const atomicName = System1.RubiksCubeSim.ATOMIC_MOVES[decision.action];
+          sim.applyAtomic(atomicName);
+          document.getElementById('status-desc').innerText = `Giro Atômico: ${atomicName}`;
+        }
+
+        if (sim.isSolved()) {
+          stopEvaluation();
+          document.getElementById('status-desc').innerText = "🏆 CUBO RESOLVIDO!";
+        }
+      } else {
+        const res = sim.step(decision.action);
+        document.getElementById('status-desc').innerText = `Passos: ${res.steps}`;
+        if (res.done) sim.reset();
+      }
+
+      if (isRubiks && webCubeViewMode === '3d') {
+        updateCube3D(sim.state);
+      }
+      sim.render(canvas);
     }
 
     let lastStepTime = 0;
     async function stepLoop(timestamp) {
       if (!isRunning) return;
 
-      const interval = activeDemo === "rubiks" ? 250 : 25; // 4 Hz para Cubo (apreciação visual), 40 Hz para CartPole
+      const isRubiks = activeDemo.startsWith("rubiks");
+      const interval = isRubiks ? 250 : 25; // 4 Hz para Cubo (apreciação humana dos giros), 40 Hz para CartPole
       if (timestamp - lastStepTime >= interval) {
         lastStepTime = timestamp;
-
-        const obs = activeDemo === "rubiks" ? sim.getOneHot() : sim.getState();
-        const decision = await agent.actWithConfidence(obs);
-
-        // Atualiza telemetria na UI
-        document.getElementById('metric-latency').innerText = `${decision.latencyMs.toFixed(2)} ms`;
-        document.getElementById('metric-confidence').innerText = `${(decision.confidence * 100).toFixed(1)}%`;
-        document.getElementById('metric-uncertainty').innerText = `${(decision.uncertainty * 100).toFixed(1)}%`;
-
-        if (activeDemo === "rubiks") {
-          const macroName = System1.RubiksCubeSim.MACRO_NAMES[decision.action];
-          sim.applyMacro(macroName);
-          document.getElementById('status-desc').innerText = `Ação: ${macroName}`;
-          if (sim.isSolved()) {
-            stopEvaluation();
-            document.getElementById('status-desc').innerText = "🏆 CUBO RESOLVIDO!";
-          }
-        } else {
-          const res = sim.step(decision.action);
-          document.getElementById('status-desc').innerText = `Passos: ${res.steps}`;
-          if (res.done) sim.reset();
-        }
-
-        sim.render(canvas);
+        await executeSingleStep();
       }
 
-      animId = requestAnimationFrame(stepLoop);
+      if (isRunning) {
+        animId = requestAnimationFrame(stepLoop);
+      }
     }
 
     // Inicialização ao carregar
     window.addEventListener('DOMContentLoaded', async () => {
-      initSim("rubiks");
-      await loadModel("rubiks");
+      await fetchManifest();
+      initThreeCube();
+      threeAnimationLoop();
+      initSim(activeDemo);
+      await loadModel(activeDemo);
     });
   </script>
 </body>

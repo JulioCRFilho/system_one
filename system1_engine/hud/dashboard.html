@@ -178,6 +178,12 @@
       <span class="px-2 py-0.5 rounded text-[10px] bg-cyan-950 text-cyan-300 border border-cyan-800 font-bold tracking-widest uppercase">
         OPERATIONAL CONTROL HUD
       </span>
+      <a href="/web/" target="_blank" rel="noopener noreferrer" class="ml-2 px-2.5 py-1 rounded text-xs font-bold bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white border border-cyan-400/50 shadow flex items-center gap-1.5 transition" title="Abrir HUD Web Interativo no Navegador (ONNX WebAssembly)">
+        <span>🌐</span> HUD Web (ONNX) ↗
+      </a>
+      <button type="button" id="btn-sync-web-models" onclick="triggerWebModelSync()" class="px-2 py-1 rounded text-[11px] font-mono font-semibold bg-gray-900 hover:bg-gray-800 text-cyan-300 border border-cyan-700/60 shadow-sm flex items-center gap-1 transition cursor-pointer" title="Sincronizar checkpoints PyTorch (.pt) para modelos ONNX do HUD Web">
+        <span>🔄</span> Sincronizar ONNX
+      </button>
     </div>
 
     <!-- Indicador de Status Global -->
@@ -248,7 +254,7 @@
           </div>
           <div class="flex items-center justify-between text-[9px] text-gray-400 font-mono pt-0.5 border-t border-gray-800/80">
             <button type="button" onclick="quickLaunchRubiks('atomic', 'train')" class="text-gray-400 hover:text-amber-300 underline cursor-pointer">Modo Atômico (12 Giros)</button>
-            <span class="text-emerald-400 flex items-center gap-1"><span>●</span> Checkpoint s1_rubiks_macro_trained.pt</span>
+            <a href="/web/?env=rubiks_atomic" target="_blank" class="text-cyan-400 hover:text-cyan-300 underline cursor-pointer flex items-center gap-0.5">🌐 Ver no Web HUD ↗</a>
           </div>
         </div>
 
@@ -278,6 +284,7 @@
             <option value="Acrobot-v1">Acrobot-v1 (Vetor, 6D, 3 Ações)</option>
             <option value="Pendulum-v1">Pendulum-v1 (Vetor, Contínuo Box)</option>
             <option value="MountainCar-v0">MountainCar-v0 (Vetor, 2D)</option>
+            <option value="Ant-v5">🐜 Ant-v5 (MuJoCo, 105D, 8 Ações Contínuas)</option>
             <option value="vizdoom">ViZDoom (Nativo / Visual IMPALA)</option>
             <option value="custom">Outro (Customizado Gymnasium...)</option>
           </select>
@@ -391,10 +398,11 @@
                     <span class="tooltip-bubble"><strong>--freeze-trunk</strong>: Congelamento do Tronco.<br>Bloqueia a atualização de gradientes nos 18 tensores compartilhados. Apenas as novas cabeças de política/valor aprendem, garantindo 0% de interferência nos conhecimentos prévios.</span>
                   </span>
                 </div>
-                <span id="freeze-desc" class="text-[9px] text-gray-500">Zero Catastrophic Forgetting</span>
+                <span id="freeze-desc" class="text-[9px] text-amber-400">Fine-Tuning Ativo (Trunk adaptativo livre)</span>
               </div>
-              <input type="checkbox" id="cfg-freeze-trunk" checked onchange="onFreezeTrunkChange()" class="w-4 h-4 rounded bg-gray-900 border-gray-700 text-purple-500 focus:ring-0" />
+              <input type="checkbox" id="cfg-freeze-trunk" onchange="onFreezeTrunkChange()" class="w-4 h-4 rounded bg-gray-900 border-gray-700 text-purple-500 focus:ring-0" />
             </div>
+
           </div>
         </div>
 
@@ -529,6 +537,26 @@
               </div>
               <input type="number" id="cfg-entropy" value="0.005" step="0.001" min="0" max="0.1" class="hud-input" />
             </div>
+            <div>
+              <div class="flex justify-between items-center mb-0.5">
+                <div class="flex items-center gap-1">
+                  <span class="text-[10px] text-gray-400 block">Exploração Treino (0.05 a 1.0)</span>
+                  <span class="tooltip-wrap tooltip-left">
+                    <span class="tooltip-icon" title="Escala contínua de exploração dos rollouts no treino PPO (temperatura Boltzmann para ações discretas / ruído de variância σ para contínuas).">ⓘ</span>
+                    <span class="tooltip-bubble"><strong>Exploração no Treino</strong>:<br>• <strong>1.0 (Padrão)</strong>: Exploração estocástica completa do PPO.<br>• <strong>0.5 - 0.8</strong>: Exploração focada, temperando os logits discretos e variância contínua com razão surrogate exata.<br>• <strong>0.05</strong>: Quase-determinístico.</span>
+                  </span>
+                </div>
+                <div class="flex gap-0.5">
+                  <button type="button" onclick="setTrainCalibration(1.0)" class="badge-btn">1.0</button>
+                  <button type="button" onclick="setTrainCalibration(0.7)" class="badge-btn">0.7</button>
+                  <button type="button" onclick="setTrainCalibration(0.5)" class="badge-btn">0.5</button>
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <input type="range" id="cfg-train-calib-range" min="0.05" max="1.0" step="0.05" value="1.0" oninput="onTrainCalibRangeChange(this.value)" class="w-full accent-emerald-500 cursor-pointer" />
+                <input type="number" id="cfg-train-calibration" value="1.0" min="0.05" max="1.0" step="0.05" oninput="onTrainCalibNumChange(this.value)" class="hud-input w-16 text-center" />
+              </div>
+            </div>
           </div>
 
           <!-- BPTT Recorrente Chunking -->
@@ -601,6 +629,42 @@
               <option value="fast">act_fast() — Modo Reflexo Ultrarrápido Puro (~150 µs)</option>
             </select>
           </div>
+          <div>
+            <div class="flex items-center gap-1.5 mb-1">
+              <label class="text-[10px] text-gray-400 font-semibold">Perfil de Ação na Avaliação</label>
+              <span class="tooltip-wrap tooltip-left">
+                <span class="tooltip-icon" title="Controla a política de ação na avaliação. Em ambientes contínuos (como Ant-v5), 'Estocástica Calibrada' previne bloqueios em equilíbrios estáticos, garantindo locomoção contínua e fluida.">ⓘ</span>
+                <span class="tooltip-bubble"><strong>Perfil de Ação</strong>:<br>• <strong>Estocástica Calibrada (Recomendado)</strong>: Adiciona ruído suave (0.25σ) evitando bloqueios em equilíbrios estáticos da física MuJoCo.<br>• <strong>Determinística Pura</strong>: Ação puramente determinística (média μ da política contínua / argmax discreto).<br>• <strong>Estocástica de Treino</strong>: Amostragem completa da distribuição normal (1.0σ).</span>
+              </span>
+            </div>
+            <select id="cfg-eval-action-mode" onchange="onEvalActionModeChange(this.value)" class="hud-input">
+              <option value="auto" selected>⚡ Auto / Homeostase (Auto-Ajuste Termodinâmico S1 — Recomendado)</option>
+              <option value="calibrated">Estocástica Calibrada (Fluidez e Locomoção Suave)</option>
+              <option value="deterministic">Determinística Pura (Média μ / Argmax)</option>
+              <option value="stochastic">Estocástica Total (Exploração σ de Treino)</option>
+            </select>
+          </div>
+          <div>
+            <div class="flex justify-between items-center mb-0.5">
+              <div class="flex items-center gap-1">
+                <label class="text-[10px] text-gray-400 font-semibold">Calibração de Ação (0.0 a 1.0)</label>
+                <span class="tooltip-wrap tooltip-left">
+                  <span class="tooltip-icon" title="Calibração contínua de amostragem na avaliação. Interpola suavemente entre determinismo puro (0.0 = argmax/μ) e estocasticidade total (1.0 = Boltzmann T=1.0 / 1.0σ), prevenindo ciclos repetitivos e preservando fluidez ergodicamente.">ⓘ</span>
+                  <span class="tooltip-bubble"><strong>Calibração Contínua [0.0, 1.0]</strong>:<br>• <strong>⚡ Auto</strong>: Homeostase termodinâmica S1: eleva temperatura quando estagnado e resfria com recompensa.<br>• <strong>0.0 (Determinístico)</strong>: Argmax para ações discretas / Média μ para contínuas.<br>• <strong>0.25 - 0.5 (Calibrado)</strong>: Temperatura suave fixa.<br>• <strong>1.0 (Estocástico Total)</strong>: Distribuição raw completa da política neural.</span>
+                </span>
+              </div>
+              <div class="flex gap-0.5">
+                <button type="button" onclick="setEvalCalibration('auto')" class="badge-btn">⚡ Auto</button>
+                <button type="button" onclick="setEvalCalibration(0.0)" class="badge-btn">0.0 [Det]</button>
+                <button type="button" onclick="setEvalCalibration(0.5)" class="badge-btn">0.5 [Calib]</button>
+                <button type="button" onclick="setEvalCalibration(1.0)" class="badge-btn">1.0 [Estoc]</button>
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <input type="range" id="cfg-eval-calib-range" min="0.0" max="1.0" step="0.05" value="0.5" oninput="onEvalCalibRangeChange(this.value)" class="w-full accent-cyan-500 cursor-pointer" />
+              <input type="text" id="cfg-eval-calibration" value="auto" oninput="onEvalCalibNumChange(this.value)" class="hud-input w-16 text-center font-mono text-[11px]" />
+            </div>
+          </div>
         </div>
 
         <!-- Botões de Execução -->
@@ -627,8 +691,28 @@
             <span id="feed-status" class="px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-400 font-mono">STANDBY</span>
           </div>
           <div class="flex items-center gap-2">
-            <button type="button" onclick="refreshVideoFeed()" class="px-1.5 py-0.5 rounded text-[9px] bg-gray-800 hover:bg-gray-700 text-gray-300 font-mono transition" title="Reconectar stream MJPEG">↻ Reconectar</button>
-            <span class="text-[10px] text-gray-500 font-mono">MJPEG stream</span>
+            <select id="sel-viewport-engine" onchange="onViewportEngineChange()" class="px-1.5 py-0.5 rounded text-[9px] bg-gray-900 border border-gray-700 text-gray-300 font-mono cursor-pointer" title="Motor de renderização de vídeo no HUD">
+              <option value="auto">⚡ Auto (Resiliente)</option>
+              <option value="direct">🔥 Direct Frame (Anti-Freeze)</option>
+              <option value="mjpeg">📼 MJPEG Stream</option>
+            </select>
+            <button type="button" onclick="refreshVideoFeed(true)" class="px-1.5 py-0.5 rounded text-[9px] bg-gray-800 hover:bg-gray-700 text-gray-300 font-mono transition" title="Reconectar ou forçar atualização">↻ Reconectar</button>
+          </div>
+        </div>
+
+
+        <!-- Seletor de Perspectiva 3D / 2D para Cubo Mágico -->
+        <div id="rubiks-view-controls" class="mb-2 py-1.5 px-2.5 rounded bg-indigo-950/40 border border-indigo-700/50 flex items-center justify-between transition hidden">
+          <span class="text-[10px] font-bold text-indigo-300 flex items-center gap-1">
+            <span>🎲</span> Visualização Cubo:
+          </span>
+          <div class="flex items-center gap-1">
+            <button type="button" id="btn-cube-view-3d" onclick="setCubeViewMode('3d')" class="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-600 text-white border border-indigo-400 shadow-sm transition">
+              🎲 3D Isometric
+            </button>
+            <button type="button" id="btn-cube-view-2d" onclick="setCubeViewMode('2d')" class="px-2 py-0.5 rounded text-[10px] font-bold bg-gray-900 text-gray-400 border border-gray-800 hover:bg-gray-800 transition">
+              🗺️ 2D Net
+            </button>
           </div>
         </div>
 
@@ -847,28 +931,90 @@
       };
     }
 
-    // Gerenciamento e Resiliência do Stream de Vídeo MJPEG
+    // Gerenciamento e Resiliência Avançada do Viewport de Vídeo
+    let _viewportEngine = 'auto'; // 'auto', 'direct', 'mjpeg'
+    let _lastServerFrameCount = -1;
+    let _lastRenderedFrameCount = -1;
+    let _isFetchingFrame = false;
+    let _lastBlobUrl = null;
     let _feedReconnectTimer = null;
-    function refreshVideoFeed() {
+    let _lastFrameUpdateTs = Date.now();
+    let _isWebKit = /AppleWebKit/i.test(navigator.userAgent) && !/Chrome/i.test(navigator.userAgent);
+
+    function onViewportEngineChange() {
+      const sel = document.getElementById('sel-viewport-engine');
+      if (sel) {
+        _viewportEngine = sel.value;
+        refreshVideoFeed(true);
+      }
+    }
+
+    function isDirectEngineActive() {
+      if (_viewportEngine === 'direct') return true;
+      if (_viewportEngine === 'mjpeg') return false;
+      // Em modo 'auto', ativa Direct Fetch para Safari, WKWebView nativo ou dispositivos Apple (0 travamentos)
+      return _isWebKit;
+    }
+
+    async function fetchLatestFrameDirect() {
+      if (_isFetchingFrame) return;
+      _isFetchingFrame = true;
+      try {
+        const tokenParam = s1AuthToken ? `?token=${encodeURIComponent(s1AuthToken)}` : '';
+        const res = await fetch(`/api/frame${tokenParam}`);
+        if (res.ok) {
+          const countHdr = res.headers.get('X-Frame-Count');
+          const count = countHdr ? parseInt(countHdr, 10) : Date.now();
+          if (count !== _lastRenderedFrameCount) {
+            const blob = await res.blob();
+            const newUrl = URL.createObjectURL(blob);
+            const gameFeed = document.getElementById('game-feed');
+            if (gameFeed) {
+              gameFeed.src = newUrl;
+            }
+            if (_lastBlobUrl) {
+              URL.revokeObjectURL(_lastBlobUrl);
+            }
+            _lastBlobUrl = newUrl;
+            _lastRenderedFrameCount = count;
+            _lastFrameUpdateTs = Date.now();
+          }
+        }
+      } catch (err) {
+        // Silencioso em caso de transição de rota
+      } finally {
+        _isFetchingFrame = false;
+      }
+    }
+
+    function refreshVideoFeed(force = false) {
       const gameFeed = document.getElementById('game-feed');
       if (!gameFeed) return;
+
+      if (isDirectEngineActive()) {
+        fetchLatestFrameDirect();
+        return;
+      }
+
       const tokenParam = s1AuthToken ? `&token=${encodeURIComponent(s1AuthToken)}` : '';
       const feedUrl = `/video_feed?_t=${Date.now()}${tokenParam}`;
       gameFeed.src = feedUrl;
+      _lastFrameUpdateTs = Date.now();
     }
 
     function handleVideoFeedError() {
-      console.warn('Conexão do stream de vídeo interrompida. Tentando reconectar em 1.5s...');
+      console.warn('Conexão do stream de vídeo interrompida. Tentando reconectar...');
       if (_feedReconnectTimer) clearTimeout(_feedReconnectTimer);
       _feedReconnectTimer = setTimeout(() => {
-        refreshVideoFeed();
-      }, 1500);
+        refreshVideoFeed(true);
+      }, 1000);
     }
 
-    // Sincroniza feed no carregamento inicial (anexa token se houver)
-    if (s1AuthToken) {
-      window.addEventListener('DOMContentLoaded', refreshVideoFeed);
-    }
+    // Sincroniza feed no carregamento inicial
+    window.addEventListener('DOMContentLoaded', () => {
+      refreshVideoFeed(true);
+    });
+
 
     let activeMode = 'train';
     let availableCheckpoints = [];
@@ -913,6 +1059,37 @@
           btn.className = 'py-1 px-1 rounded text-[10px] font-semibold tracking-tight transition flex items-center justify-center gap-1 bg-gray-900 hover:bg-gray-800 text-gray-400 border border-gray-800';
         }
       });
+    }
+
+    // Controle de Modo de Visualização do Cubo Mágico (3D Isometric vs 2D Net)
+    let currentCubeViewMode = '3d';
+
+    async function setCubeViewMode(mode) {
+      currentCubeViewMode = mode;
+      updateCubeViewModeButtons(mode);
+      try {
+        await fetch('/api/action', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'set_cube_view_mode', mode: mode })
+        });
+      } catch (err) {
+        console.error('Falha ao alternar modo de visualização do cubo:', err);
+      }
+    }
+
+    function updateCubeViewModeButtons(mode) {
+      const btn3d = document.getElementById('btn-cube-view-3d');
+      const btn2d = document.getElementById('btn-cube-view-2d');
+      if (btn3d && btn2d) {
+        if (mode === '3d') {
+          btn3d.className = 'px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-600 text-white border border-indigo-400 shadow-sm transition';
+          btn2d.className = 'px-2 py-0.5 rounded text-[10px] font-bold bg-gray-900 text-gray-400 border border-gray-800 hover:bg-gray-800 transition';
+        } else {
+          btn2d.className = 'px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-600 text-white border border-indigo-400 shadow-sm transition';
+          btn3d.className = 'px-2 py-0.5 rounded text-[10px] font-bold bg-gray-900 text-gray-400 border border-gray-800 hover:bg-gray-800 transition';
+        }
+      }
     }
 
     // Controle do Catálogo de Jogos do Gymnasium
@@ -1170,40 +1347,78 @@
 
     function onEnvChange() {
       const env = document.getElementById('cfg-env').value;
+      const actualEnv = env === 'custom' ? (document.getElementById('cfg-custom-env').value || '').trim() : env;
       document.getElementById('cfg-custom-env').classList.toggle('hidden', env !== 'custom');
       const customSug = document.getElementById('custom-env-suggestions');
       if (customSug) customSug.classList.toggle('hidden', env !== 'custom');
       document.getElementById('group-vizdoom-scenario').classList.toggle('hidden', env !== 'vizdoom');
-      document.getElementById('overlay-env').innerText = env === 'custom' ? (document.getElementById('cfg-custom-env').value || 'Custom') : env;
+      document.getElementById('overlay-env').innerText = actualEnv || 'Custom';
+      
+      const isRubiks = actualEnv.toLowerCase().includes('rubik');
+      const rubiksCtrl = document.getElementById('rubiks-view-controls');
+      if (rubiksCtrl) {
+        rubiksCtrl.classList.toggle('hidden', !isRubiks);
+      }
       
       // Ajusta target return e hiperparâmetros padrão de acordo com o ambiente
-      if (env === 'CartPole-v1') {
-        setTargetReturn(475.0); setEntropy(0.005);
+      if (actualEnv === 'CartPole-v1') {
+        setTargetReturn(475.0); setEntropy(0.005); setSteps(40000);
         document.getElementById('cfg-chunk-length').value = 16;
         document.getElementById('cfg-rollout-steps').value = 1024;
       }
-      else if (env === 'Acrobot-v1') {
-        setTargetReturn(-100.0); setEntropy(0.01);
+      else if (actualEnv === 'Acrobot-v1') {
+        setTargetReturn(-100.0); setEntropy(0.01); setSteps(50000);
         document.getElementById('cfg-chunk-length').value = 16;
         document.getElementById('cfg-rollout-steps').value = 1024;
       }
-      else if (env === 'Pendulum-v1') {
-        setTargetReturn(-200.0); setEntropy(0.005);
+      else if (actualEnv === 'Pendulum-v1') {
+        setTargetReturn(-200.0); setEntropy(0.005); setSteps(60000);
         document.getElementById('cfg-chunk-length').value = 16;
         document.getElementById('cfg-rollout-steps').value = 1024;
       }
-      else if (env === 'MountainCar-v0') {
-        setTargetReturn(-110.0); setEntropy(0.03);
+      else if (actualEnv === 'MountainCar-v0') {
+        setTargetReturn(-110.0); setEntropy(0.03); setSteps(80000);
         document.getElementById('cfg-chunk-length').value = 32;
         document.getElementById('cfg-rollout-steps').value = 2048;
       }
-      else if (env === 'RubiksCubeMacro-v0') {
-        setTargetReturn(12.0); setEntropy(0.01);
+      else if (actualEnv === 'RubiksCubeMacro-v0') {
+        setTargetReturn(12.0); setEntropy(0.01); setSteps(30000);
         document.getElementById('cfg-chunk-length').value = 16;
         document.getElementById('cfg-rollout-steps').value = 1024;
       }
-      else if (env === 'RubiksCube-v0') {
-        setTargetReturn(10.0); setEntropy(0.01);
+      else if (actualEnv === 'RubiksCube-v0') {
+        setTargetReturn(10.0); setEntropy(0.01); setSteps(50000);
+        document.getElementById('cfg-chunk-length').value = 16;
+        document.getElementById('cfg-rollout-steps').value = 1024;
+      }
+      else if (actualEnv === 'Ant-v5' || actualEnv === 'Ant-v4') {
+        setTargetReturn(4000.0); setEntropy(0.005); setSteps(300000);
+        document.getElementById('cfg-chunk-length').value = 16;
+        document.getElementById('cfg-rollout-steps').value = 1024;
+        const evalAct = document.getElementById('cfg-eval-action-mode');
+        if (evalAct) evalAct.value = 'calibrated';
+      }
+      else if (actualEnv === 'HalfCheetah-v5' || actualEnv === 'HalfCheetah-v4') {
+        setTargetReturn(4000.0); setEntropy(0.005); setSteps(300000);
+        document.getElementById('cfg-chunk-length').value = 16;
+        document.getElementById('cfg-rollout-steps').value = 1024;
+        const evalAct = document.getElementById('cfg-eval-action-mode');
+        if (evalAct) evalAct.value = 'calibrated';
+      }
+      else if (actualEnv === 'BipedalWalker-v3') {
+        setTargetReturn(300.0); setEntropy(0.01); setSteps(200000);
+        document.getElementById('cfg-chunk-length').value = 16;
+        document.getElementById('cfg-rollout-steps').value = 1024;
+        const evalAct = document.getElementById('cfg-eval-action-mode');
+        if (evalAct) evalAct.value = 'calibrated';
+      }
+      else if (actualEnv === 'LunarLander-v3' || actualEnv === 'LunarLander-v2') {
+        setTargetReturn(200.0); setEntropy(0.01); setSteps(100000);
+        document.getElementById('cfg-chunk-length').value = 16;
+        document.getElementById('cfg-rollout-steps').value = 1024;
+      }
+      else if (actualEnv === 'FrozenLake-v1') {
+        setTargetReturn(0.9); setEntropy(0.02); setSteps(30000);
         document.getElementById('cfg-chunk-length').value = 16;
         document.getElementById('cfg-rollout-steps').value = 1024;
       }
@@ -1238,10 +1453,7 @@
     }
 
     function onCustomEnvInput() {
-      const val = document.getElementById('cfg-custom-env').value || 'Custom';
-      document.getElementById('overlay-env').innerText = val;
-      suggestCheckpointName();
-      validateCheckpointCompatibility();
+      onEnvChange();
     }
 
     function onScenarioPresetChange() {
@@ -1487,7 +1699,7 @@
     function switchToTransfer(path) {
       setMode('train');
       document.getElementById('cfg-transfer').value = path;
-      document.getElementById('cfg-freeze-trunk').checked = true;
+      document.getElementById('cfg-freeze-trunk').checked = false;
       onFreezeTrunkChange();
     }
 
@@ -1495,13 +1707,14 @@
       const frozen = document.getElementById('cfg-freeze-trunk').checked;
       const descEl = document.getElementById('freeze-desc');
       if (frozen) {
-        descEl.innerText = 'Zero Catastrophic Forgetting (Trunk congelado)';
+        descEl.innerText = 'Trunk Congelado (Apenas cabeças aprendem)';
         descEl.className = 'text-[9px] text-purple-400';
       } else {
         descEl.innerText = 'Fine-Tuning Ativo (Trunk adaptativo livre)';
         descEl.className = 'text-[9px] text-amber-400';
       }
     }
+
 
     // Dispositivo de Execução
     function onDeviceChange() {
@@ -1526,6 +1739,68 @@
     function setLR(val) { document.getElementById('cfg-lr').value = val; }
     function setEpisodes(val) { document.getElementById('cfg-episodes').value = val; }
     function setEntropy(val) { document.getElementById('cfg-entropy').value = val; }
+
+    function setEvalCalibration(val) {
+      const numEl = document.getElementById('cfg-eval-calibration');
+      const rngEl = document.getElementById('cfg-eval-calib-range');
+      const modeSel = document.getElementById('cfg-eval-action-mode');
+      if (val === 'auto') {
+        if (numEl) numEl.value = 'auto';
+        if (rngEl) rngEl.value = 0.5;
+        if (modeSel) modeSel.value = 'auto';
+      } else {
+        const fVal = typeof val === 'number' ? val : parseFloat(val);
+        if (numEl) numEl.value = fVal.toFixed(2);
+        if (rngEl) rngEl.value = fVal;
+        syncEvalActionModeFromCalib(fVal);
+      }
+    }
+    function onEvalCalibRangeChange(val) {
+      const numEl = document.getElementById('cfg-eval-calibration');
+      const fVal = parseFloat(val);
+      if (numEl) numEl.value = fVal.toFixed(2);
+      syncEvalActionModeFromCalib(fVal);
+    }
+    function onEvalCalibNumChange(val) {
+      if (val === 'auto') {
+        syncEvalActionModeFromCalib('auto');
+        return;
+      }
+      const fVal = parseFloat(val);
+      if (!isNaN(fVal)) {
+        const rngEl = document.getElementById('cfg-eval-calib-range');
+        if (rngEl) rngEl.value = Math.min(1.0, Math.max(0.0, fVal));
+        syncEvalActionModeFromCalib(fVal);
+      }
+    }
+    function syncEvalActionModeFromCalib(calib) {
+      const modeSel = document.getElementById('cfg-eval-action-mode');
+      if (!modeSel) return;
+      if (calib === 'auto') modeSel.value = 'auto';
+      else if (calib === 0.0) modeSel.value = 'deterministic';
+      else if (calib === 1.0) modeSel.value = 'stochastic';
+      else modeSel.value = 'calibrated';
+    }
+    function onEvalActionModeChange(mode) {
+      if (mode === 'auto') setEvalCalibration('auto');
+      else if (mode === 'deterministic') setEvalCalibration(0.0);
+      else if (mode === 'stochastic') setEvalCalibration(1.0);
+      else setEvalCalibration(0.5);
+    }
+    function setTrainCalibration(val) {
+      const numEl = document.getElementById('cfg-train-calibration');
+      const rngEl = document.getElementById('cfg-train-calib-range');
+      if (numEl) numEl.value = val;
+      if (rngEl) rngEl.value = val;
+    }
+    function onTrainCalibRangeChange(val) {
+      const numEl = document.getElementById('cfg-train-calibration');
+      if (numEl) numEl.value = val;
+    }
+    function onTrainCalibNumChange(val) {
+      const rngEl = document.getElementById('cfg-train-calib-range');
+      if (rngEl) rngEl.value = val;
+    }
 
     function pushDataPoint(chart, datasetIdx, val) {
       const dataArr = chart.data.datasets[datasetIdx].data;
@@ -1578,9 +1853,36 @@
 
       evt.onmessage = (e) => {
         const payload = JSON.parse(e.data);
-        const { telemetry, runner, new_logs } = payload;
+        const { telemetry, runner, new_logs, frame_count } = payload;
 
         updateRunnerStatus(runner);
+
+        if (payload.cube_view_mode && payload.cube_view_mode !== currentCubeViewMode) {
+          currentCubeViewMode = payload.cube_view_mode;
+          updateCubeViewModeButtons(currentCubeViewMode);
+        }
+
+        // Sincronização inteligente e contínua do viewport de vídeo
+        if (frame_count !== undefined && frame_count !== null) {
+          if (frame_count !== _lastServerFrameCount) {
+            _lastServerFrameCount = frame_count;
+            if (isDirectEngineActive() && runner && runner.is_running) {
+              fetchLatestFrameDirect();
+            }
+          }
+        }
+
+        // Watchdog anti-congelamento: se a tarefa estiver rodando e os frames pararem de atualizar por > 1.2s
+        if (runner && runner.is_running) {
+          const now = Date.now();
+          if (now - _lastFrameUpdateTs > 1200) {
+            fetchLatestFrameDirect();
+            _lastFrameUpdateTs = now;
+          }
+        } else if (runner && !runner.is_running && _lastRenderedFrameCount === -1) {
+          fetchLatestFrameDirect();
+        }
+
 
         if (new_logs && new_logs.length > 0) {
           new_logs.forEach(appendLog);
@@ -1665,10 +1967,15 @@
         btnStart.className = 'w-full py-2.5 px-4 rounded bg-emerald-600 hover:bg-emerald-500 font-bold text-white text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition shadow-lg shadow-emerald-950 cursor-pointer';
         btnStop.disabled = true;
         btnStop.className = 'w-full py-2.5 px-4 rounded bg-rose-900/40 text-gray-500 font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 border border-rose-900/60 transition cursor-not-allowed';
+        if (feedStatus.innerText === 'STREAMING') {
+          setTimeout(fetchLatestFrameDirect, 300);
+        }
+
         feedStatus.innerText = 'STANDBY';
         feedStatus.className = 'px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-400 font-mono';
       }
     }
+
 
     // Atualização Dinâmica da Lista de Checkpoints
     async function refreshCheckpoints() {
@@ -1771,9 +2078,10 @@
     function selectCheckpointForTransfer(path) {
       setMode('train');
       document.getElementById('cfg-transfer').value = path;
-      document.getElementById('cfg-freeze-trunk').checked = true;
+      document.getElementById('cfg-freeze-trunk').checked = false;
       onFreezeTrunkChange();
     }
+
 
     // Carregamento de Estado Inicial
     async function loadInitialState() {
@@ -1806,6 +2114,11 @@
           currentVisionMode = data.vision_mode;
           updateVisionModeButtons(currentVisionMode);
         }
+
+        if (data.cube_view_mode) {
+          currentCubeViewMode = data.cube_view_mode;
+          updateCubeViewModeButtons(currentCubeViewMode);
+        }
       } catch (err) {
         console.error('Falha ao obter estado inicial:', err);
       }
@@ -1824,6 +2137,7 @@
         scenario: document.getElementById('cfg-scenario').value,
         device: document.getElementById('cfg-device').value,
         vision_mode: currentVisionMode,
+        cube_view_mode: currentCubeViewMode,
         load: document.getElementById('cfg-load').value || null,
         transfer_from: document.getElementById('cfg-transfer').value || null,
         freeze_trunk: document.getElementById('cfg-freeze-trunk').checked,
@@ -1839,7 +2153,10 @@
         chunk_length: parseInt(document.getElementById('cfg-chunk-length').value) || 16,
         chunk_batch_size: parseInt(document.getElementById('cfg-chunk-batch').value) || 16,
         episodes: parseInt(document.getElementById('cfg-episodes').value) || 5,
-        inference_mode: document.getElementById('cfg-inference-mode').value
+        inference_mode: document.getElementById('cfg-inference-mode').value,
+        eval_action_mode: document.getElementById('cfg-eval-action-mode') ? document.getElementById('cfg-eval-action-mode').value : 'auto',
+        eval_calibration: (document.getElementById('cfg-eval-calibration')?.value === 'auto' || document.getElementById('cfg-eval-action-mode')?.value === 'auto') ? 'auto' : (parseFloat(document.getElementById('cfg-eval-calibration')?.value) || 0.5),
+        train_calibration: document.getElementById('cfg-train-calibration') ? parseFloat(document.getElementById('cfg-train-calibration').value) : 1.0
       };
 
       if (activeMode === 'run' && payload.load) {
@@ -1867,7 +2184,7 @@
         });
         const resp = await res.json();
         if (resp.success) {
-          refreshVideoFeed();
+          refreshVideoFeed(true);
         } else {
           alert('Erro ao iniciar: ' + resp.message);
         }
@@ -1884,9 +2201,36 @@
           body: JSON.stringify({ action: 'stop' })
         });
         const resp = await res.json();
-        setTimeout(refreshVideoFeed, 400);
+        setTimeout(() => refreshVideoFeed(true), 300);
       } catch (e) {
         alert('Erro ao solicitar parada: ' + e);
+      }
+    }
+
+
+    async function triggerWebModelSync() {
+      const btn = document.getElementById('btn-sync-web-models');
+      const originalText = btn ? btn.innerHTML : '';
+      try {
+        if (btn) {
+          btn.disabled = true;
+          btn.innerHTML = '<span>⏳</span> Sincronizando...';
+        }
+        const res = await fetch('/api/web_models/sync', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+          alert(`✅ Sincronização concluída com sucesso!\n${data.synced.length} modelos exportados para ONNX:\n\n` + 
+                data.synced.map(s => `• ${s.env_id}: ${s.filename}`).join('\n'));
+        } else {
+          alert('⚠️ Erro ao sincronizar modelos: ' + (data.error || 'Erro desconhecido'));
+        }
+      } catch (e) {
+        alert('Erro ao conectar ao servidor para sincronização: ' + e);
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = originalText;
+        }
       }
     }
 

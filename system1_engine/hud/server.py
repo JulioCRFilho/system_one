@@ -64,6 +64,7 @@ class HUDServer:
             "grad_norms": {"FrontEnd": 0.0, "Trunk": 0.0, "PolicyHead": 0.0},
         }
         self.vision_mode: str = "normal"
+        self.cube_view_mode: str = "3d"
 
         self.server: Optional[ThreadedTCPServer] = None
         self.thread: Optional[threading.Thread] = None
@@ -391,6 +392,7 @@ class HUDServer:
                     self.send_response(200)
                     self.send_header("Content-Type", "image/jpeg")
                     self.send_header("Content-Length", str(len(frame)))
+                    self.send_header("X-Frame-Count", str(frame_buffer.get_frame_count()))
                     self.send_header("Cache-Control", "no-cache, no-store, must-revalidate, max-age=0")
                     self.send_header("Pragma", "no-cache")
                     self.send_header("Expires", "0")
@@ -418,6 +420,8 @@ class HUDServer:
                                 "telemetry": snap,
                                 "runner": runner_state,
                                 "new_logs": new_logs,
+                                "frame_count": frame_buffer.get_frame_count(),
+                                "cube_view_mode": server_instance.cube_view_mode,
                             }
 
                             data_line = f"data: {json.dumps(payload)}\n\n"
@@ -427,6 +431,7 @@ class HUDServer:
                     except (BrokenPipeError, ConnectionResetError, OSError):
                         pass
 
+
                 elif clean_path == "/api/state":
                     resp = {
                         "runner": runner.get_state(),
@@ -435,6 +440,7 @@ class HUDServer:
                         "checkpoints_detailed": server_instance.scan_checkpoints_detailed(),
                         "telemetry": server_instance.get_telemetry_snapshot(),
                         "vision_mode": server_instance.vision_mode,
+                        "cube_view_mode": server_instance.cube_view_mode,
                     }
                     encoded_resp = json.dumps(resp).encode("utf-8")
                     self.send_response(200)
@@ -466,6 +472,78 @@ class HUDServer:
                     self.send_response(200)
                     self.send_header("Content-Type", "application/json")
                     self.send_header("Content-Length", str(len(encoded_resp)))
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.end_headers()
+                    self.wfile.write(encoded_resp)
+
+                elif clean_path in ("/web", "/web/", "/web/index.html"):
+                    # Web HUD (ONNX WebAssembly Standalone Evaluation)
+                    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+                    web_html_path = os.path.join(project_root, "web", "index.html")
+                    if os.path.exists(web_html_path):
+                        with open(web_html_path, "rb") as f:
+                            web_bytes = f.read()
+                        self.send_response(200)
+                        self.send_header("Content-Type", "text/html; charset=utf-8")
+                        self.send_header("Content-Length", str(len(web_bytes)))
+                        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+                        self.send_header("Access-Control-Allow-Origin", "*")
+                        self.end_headers()
+                        self.wfile.write(web_bytes)
+                    else:
+                        self.send_response(404)
+                        self.send_header("Content-Length", "0")
+                        self.end_headers()
+
+                elif clean_path in ("/web/system1-eval.js", "/system1-eval.js"):
+                    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+                    js_path = os.path.join(project_root, "web", "system1-eval.js")
+                    if os.path.exists(js_path):
+                        with open(js_path, "rb") as f:
+                            js_bytes = f.read()
+                        self.send_response(200)
+                        self.send_header("Content-Type", "application/javascript; charset=utf-8")
+                        self.send_header("Content-Length", str(len(js_bytes)))
+                        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+                        self.send_header("Access-Control-Allow-Origin", "*")
+                        self.end_headers()
+                        self.wfile.write(js_bytes)
+                    else:
+                        self.send_response(404)
+                        self.send_header("Content-Length", "0")
+                        self.end_headers()
+
+                elif clean_path.startswith("/models/") or clean_path.startswith("/web/models/"):
+                    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+                    model_file = os.path.basename(clean_path)
+                    target_file = os.path.join(project_root, "web", "models", model_file)
+                    if os.path.exists(target_file) and os.path.isfile(target_file):
+                        with open(target_file, "rb") as f:
+                            file_bytes = f.read()
+                        content_type = "application/json; charset=utf-8" if model_file.endswith(".json") else "application/octet-stream"
+                        self.send_response(200)
+                        self.send_header("Content-Type", content_type)
+                        self.send_header("Content-Length", str(len(file_bytes)))
+                        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+                        self.send_header("Access-Control-Allow-Origin", "*")
+                        self.end_headers()
+                        self.wfile.write(file_bytes)
+                    else:
+                        self.send_response(404)
+                        self.send_header("Content-Length", "0")
+                        self.end_headers()
+
+                elif clean_path == "/api/web_models":
+                    try:
+                        from system1_engine.core.onnx_exporter import generate_web_manifest
+                        manifest = generate_web_manifest()
+                    except Exception as err:
+                        manifest = {"error": str(err), "models": {}}
+                    encoded_resp = json.dumps(manifest).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(encoded_resp)))
+                    self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
                     self.send_header("Access-Control-Allow-Origin", "*")
                     self.end_headers()
                     self.wfile.write(encoded_resp)
@@ -505,9 +583,15 @@ class HUDServer:
                             cfg = data.get("config", {})
                             if "vision_mode" in cfg:
                                 server_instance.vision_mode = cfg["vision_mode"]
+                            if "cube_view_mode" in cfg:
+                                server_instance.cube_view_mode = cfg["cube_view_mode"]
+                            mode_label = cfg.get("mode", "run").upper()
+                            env_name = cfg.get("env", "Ambiente")
+                            frame_buffer.reset_placeholder("⚡ SYSTEM 1 ENGINE", f"INICIANDO {env_name} [{mode_label}]...")
                             url = f"http://{server_instance.host}:{server_instance.port}"
                             success, msg = runner.start(cfg, url)
                             resp = {"success": success, "message": msg}
+
                         elif action == "stop":
                             success, msg = runner.stop()
                             frame_buffer.reset_placeholder("⚡ SYSTEM 1 ENGINE", "TAREFA INTERROMPIDA PELO USUÁRIO")
@@ -516,6 +600,10 @@ class HUDServer:
                             mode = data.get("mode", "normal")
                             server_instance.vision_mode = mode
                             resp = {"success": True, "vision_mode": mode}
+                        elif action == "set_cube_view_mode":
+                            mode = data.get("mode", "3d")
+                            server_instance.cube_view_mode = mode
+                            resp = {"success": True, "cube_view_mode": mode}
                         else:
                             resp = {"success": False, "message": f"Ação desconhecida: {action}"}
                     except Exception as err:
@@ -533,7 +621,10 @@ class HUDServer:
                     try:
                         data = json.loads(body.decode("utf-8"))
                         server_instance.update_telemetry(data)
-                        resp_body = json.dumps({"vision_mode": server_instance.vision_mode}).encode("utf-8")
+                        resp_body = json.dumps({
+                            "vision_mode": server_instance.vision_mode,
+                            "cube_view_mode": server_instance.cube_view_mode,
+                        }).encode("utf-8")
                         self.send_response(200)
                         self.send_header("Content-Type", "application/json")
                         self.send_header("Content-Length", str(len(resp_body)))
@@ -546,12 +637,31 @@ class HUDServer:
 
                 elif clean_path == "/api/internal/frame":
                     frame_buffer.update_frame(body)
-                    resp_body = json.dumps({"vision_mode": server_instance.vision_mode}).encode("utf-8")
+                    resp_body = json.dumps({
+                        "vision_mode": server_instance.vision_mode,
+                        "cube_view_mode": server_instance.cube_view_mode,
+                    }).encode("utf-8")
                     self.send_response(200)
                     self.send_header("Content-Type", "application/json")
                     self.send_header("Content-Length", str(len(resp_body)))
                     self.end_headers()
                     self.wfile.write(resp_body)
+
+                elif clean_path == "/api/web_models/sync":
+                    try:
+                        from system1_engine.core.onnx_exporter import sync_all_web_models, generate_web_manifest
+                        sync_all_web_models()
+                        manifest = generate_web_manifest()
+                        resp = {"success": True, "message": "Modelos web sincronizados com sucesso", "manifest": manifest}
+                    except Exception as err:
+                        resp = {"success": False, "message": f"Erro na sincronização: {err}"}
+                    encoded_resp = json.dumps(resp).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(encoded_resp)))
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.end_headers()
+                    self.wfile.write(encoded_resp)
 
                 else:
                     self.send_response(404)

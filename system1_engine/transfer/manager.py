@@ -123,6 +123,8 @@ class KnowledgeTransferManager:
             # Extract action dimension
             if "policy_head.linear.weight" in state_dict:
                 info["act_dim"] = int(state_dict["policy_head.linear.weight"].shape[0])
+            elif "policy_head.mu_net.weight" in state_dict:
+                info["act_dim"] = int(state_dict["policy_head.mu_net.weight"].shape[0])
 
             # Deduce env_id from filename if not in metadata
             if not info["env_id"]:

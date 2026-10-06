@@ -116,6 +116,34 @@ def test_hud_server_lifecycle_and_endpoints():
         assert res.getheader("Content-Type") == "image/jpeg"
         assert res.read() == dummy_frame
 
+        # 4.2 Test GET /api/web_models
+        conn.request("GET", "/api/web_models")
+        res = conn.getresponse()
+        assert res.status == 200
+        web_models_resp = json.loads(res.read().decode("utf-8"))
+        assert "models" in web_models_resp
+        assert "rubiks_atomic" in web_models_resp["models"]
+
+        # 4.3 Test GET /web and /web/system1-eval.js
+        conn.request("GET", "/web")
+        res = conn.getresponse()
+        assert res.status == 200
+        web_html = res.read().decode("utf-8")
+        assert "System 1 Engine" in web_html
+        assert "LIVE EVALUATION" in web_html
+
+        conn.request("GET", "/web/system1-eval.js")
+        res = conn.getresponse()
+        assert res.status == 200
+        res.read()
+
+        # 4.4 Test POST /api/web_models/sync
+        conn.request("POST", "/api/web_models/sync")
+        res = conn.getresponse()
+        assert res.status == 200
+        sync_resp = json.loads(res.read().decode("utf-8"))
+        assert sync_resp["success"] is True
+
         # 5. Test POST /api/action stop
         action_payload = json.dumps({"action": "stop"}).encode("utf-8")
         conn.request("POST", "/api/action", action_payload, {"Content-Type": "application/json"})
@@ -408,6 +436,36 @@ def test_hud_frozenlake_training():
         assert count > 0
         assert not any("AssertionError" in line for line in logs)
         assert any("FrozenLake-v1" in line for line in logs)
+
+
+def test_hud_ant_evaluation_with_eval_action_mode():
+    """Verify that evaluating Ant-v5 with eval_action_mode='calibrated' runs without errors."""
+    server = HUDServer(host="127.0.0.1", port=9004, open_browser=False)
+    with server:
+        config = {
+            "mode": "run",
+            "env": "Ant-v5",
+            "episodes": 1,
+            "fps": 0.0,
+            "render_mode": "none",
+            "eval_action_mode": "calibrated",
+            "inference_mode": "fast",
+        }
+        success, msg = server.runner.start(config, "http://127.0.0.1:9004")
+        assert success is True
+
+        t0 = time.time()
+        while server.runner.is_running() and (time.time() - t0 < 8.0):
+            time.sleep(0.1)
+
+        # Stop cleanly if still running
+        server.runner.stop()
+
+        logs, count = server.runner.get_logs(0)
+        assert count > 0
+        assert any("Ant-v5" in line for line in logs)
+        assert any("Estocástica Calibrada" in line for line in logs)
+
 
 
 

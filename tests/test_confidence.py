@@ -168,3 +168,205 @@ def test_act_fast_latency_with_confidence():
 
     avg_ms = float(np.mean(latencies))
     assert avg_ms <= 0.80, f"Latência de {avg_ms:.4f} ms excedeu orçamento de 0.8 ms"
+
+
+def test_act_fast_stochastic_sampling_continuous():
+    """Valida que act_fast e act_with_confidence suportam modos determinístico e estocástico contínuo."""
+    raw_env = gym.make("Pendulum-v1")
+    env = UniversalS1Wrapper(raw_env)
+
+    agent = UniversalS1Agent(obs_space=env.observation_space, action_space=env.action_space)
+    agent.eval()
+
+    obs_dict, _ = env.reset(seed=42)
+
+    # 1. Determinístico: chamadas repetidas produzem exatamente a mesma ação
+    agent.reset_memory()
+    act_det1 = agent.act_fast(obs_dict, deterministic=True)
+    agent.reset_memory()
+    act_det2 = agent.act_fast(obs_dict, deterministic=True)
+    np.testing.assert_allclose(act_det1, act_det2, rtol=1e-5, atol=1e-5)
+
+    # 2. Estocástico (ruído calibrado noise_scale=0.25): chamadas produzem ações ligeiramente diferentes
+    agent.reset_memory()
+    act_stoch1 = agent.act_fast(obs_dict, deterministic=False, noise_scale=0.25)
+    agent.reset_memory()
+    act_stoch2 = agent.act_fast(obs_dict, deterministic=False, noise_scale=0.25)
+    assert not np.allclose(act_stoch1, act_stoch2)
+
+    # 3. act_with_confidence com noise_scale
+    agent.reset_memory()
+    dec_det = agent.act_with_confidence(obs_dict, deterministic=True)
+    agent.reset_memory()
+    dec_stoch = agent.act_with_confidence(obs_dict, deterministic=False, noise_scale=0.5)
+    assert isinstance(dec_det, ReflexDecision)
+    assert isinstance(dec_stoch, ReflexDecision)
+    assert not np.allclose(dec_det.action, dec_stoch.action)
+
+
+def test_act_fast_stochastic_sampling_discrete():
+    """Valida que act_fast suporta amostragem discreta categórica."""
+    raw_env = gym.make("CartPole-v1")
+    env = UniversalS1Wrapper(raw_env)
+
+    agent = UniversalS1Agent(obs_space=env.observation_space, action_space=env.action_space)
+    agent.eval()
+
+    obs_dict, _ = env.reset(seed=42)
+
+    act_det = agent.act_fast(obs_dict, deterministic=True)
+    assert act_det in [0, 1]
+
+    act_stoch = agent.act_fast(obs_dict, deterministic=False)
+    assert act_stoch in [0, 1]
+
+
+def test_calibration_continuous():
+    """Valida calibração contínua de 0.0 a 1.0 para ações contínuas."""
+    raw_env = gym.make("Pendulum-v1")
+    env = UniversalS1Wrapper(raw_env)
+    agent = UniversalS1Agent(obs_space=env.observation_space, action_space=env.action_space)
+    agent.eval()
+    obs_dict, _ = env.reset(seed=42)
+
+    # 1. Calibração 0.0 é estritamente determinística
+    agent.reset_memory()
+    act0_a = agent.act_fast(obs_dict, calibration=0.0)
+    agent.reset_memory()
+    act0_b = agent.act_fast(obs_dict, calibration=0.0)
+    np.testing.assert_allclose(act0_a, act0_b, rtol=1e-5, atol=1e-5)
+
+    # 2. Calibração > 0.0 varia estocasticamente proporcional à calibração
+    agent.reset_memory()
+    act_calib_a = agent.act_fast(obs_dict, calibration=0.5)
+    agent.reset_memory()
+    act_calib_b = agent.act_fast(obs_dict, calibration=0.5)
+    assert not np.allclose(act_calib_a, act_calib_b)
+
+    # 3. act_with_confidence respeita calibration
+    agent.reset_memory()
+    dec0 = agent.act_with_confidence(obs_dict, calibration=0.0)
+    agent.reset_memory()
+    dec1 = agent.act_with_confidence(obs_dict, calibration=1.0)
+    assert isinstance(dec0, ReflexDecision)
+    assert isinstance(dec1, ReflexDecision)
+    np.testing.assert_allclose(dec0.action, act0_a, rtol=1e-5, atol=1e-5)
+
+
+def test_calibration_discrete():
+    """Valida calibração contínua de 0.0 a 1.0 para ações discretas."""
+    raw_env = gym.make("CartPole-v1")
+    env = UniversalS1Wrapper(raw_env)
+    agent = UniversalS1Agent(obs_space=env.observation_space, action_space=env.action_space)
+    agent.eval()
+    obs_dict, _ = env.reset(seed=42)
+
+    # 1. Calibração 0.0 é estritamente argmax
+    agent.reset_memory()
+    act0_a = agent.act_fast(obs_dict, calibration=0.0)
+    agent.reset_memory()
+    act0_b = agent.act_fast(obs_dict, calibration=0.0)
+    assert act0_a == act0_b
+
+    # 2. Amostragem repetida com calibração intermediária (0.5) e total (1.0)
+    actions_calib = []
+    for _ in range(30):
+        agent.reset_memory()
+        actions_calib.append(agent.act_fast(obs_dict, calibration=0.5))
+    assert all(a in [0, 1] for a in actions_calib)
+
+    # 3. act_with_confidence com calibration
+    agent.reset_memory()
+    dec0 = agent.act_with_confidence(obs_dict, calibration=0.0)
+    assert dec0.action == act0_a
+    assert 0.0 <= dec0.confidence <= 1.0
+
+
+def test_ppo_exploration_scale_training():
+    """Valida que o PPO respeita exploration_scale tanto na coleta de rollouts quanto no treino."""
+    from system1_engine.training.ppo import RecurrentPPOTrainer
+    raw_env = gym.make("CartPole-v1")
+    env = UniversalS1Wrapper(raw_env)
+    agent = UniversalS1Agent(obs_space=env.observation_space, action_space=env.action_space)
+
+    trainer = RecurrentPPOTrainer(
+        agent=agent,
+        env=env,
+        rollout_steps=64,
+        chunk_length=8,
+        chunk_batch_size=4,
+        exploration_scale=0.5,
+    )
+    assert trainer.exploration_scale == 0.5
+
+    obs_dict, _ = env.reset(seed=42)
+    obs_dict, hx, ep_start, ret = trainer.collect_rollouts(
+        current_obs_dict=obs_dict,
+        current_hx=None,
+        episode_start=True,
+    )
+    assert len(trainer.buffer.rewards) == 64
+
+    # Treina uma época com a escala de exploração calibrada
+    metrics = trainer.train_epoch()
+    assert "policy_loss" in metrics
+    assert "value_loss" in metrics
+    assert not np.isnan(metrics["policy_loss"])
+
+
+def test_auto_calibration_homeostasis():
+    """Valida a homeostase neuromoduladora do System 1 (auto-calibração termodinâmica).
+    - Quando estagnado (recompensa nula/baixa), aquece a calibração para inovar.
+    - Quando obtém progresso (recompensa positiva), resfria para foco determinístico.
+    """
+    raw_env = gym.make("CartPole-v1")
+    env = UniversalS1Wrapper(raw_env)
+    agent = UniversalS1Agent(obs_space=env.observation_space, action_space=env.action_space)
+    agent.eval()
+
+    obs_dict, _ = env.reset(seed=42)
+    agent.reset_memory()
+
+    # 1. Estado inicial é calibração mínima (0.0)
+    assert agent._adaptive_calibration == 0.0
+    assert agent._stagnation_count == 0
+
+    # 2. Passos estagnados (prev_reward = 0.0)
+    obs_zero = dict(obs_dict)
+    obs_zero["prev_reward"] = np.array([0.0], dtype=np.float32)
+    dec1 = agent.act_with_confidence(obs_zero, auto_calibrate=True)
+    assert dec1.calibration == 0.0  # Ainda não atingiu o limiar de 2 passos de estagnação
+
+    # Passos seguintes com estagnação aumentam a temperatura adaptativa
+    calibs = []
+    for _ in range(6):
+        dec = agent.act_with_confidence(obs_zero, auto_calibrate=True)
+        calibs.append(dec.calibration)
+
+    # A temperatura deve ter aumentado monotonicamente até o cap (0.80)
+    assert calibs[-1] > 0.0, f"Calibração deveria ter aquecido sob estagnação, obtido {calibs[-1]}"
+    assert calibs[-1] <= 0.80
+
+    # 3. Alívio de estagnação / Sucesso (prev_reward = +1.0)
+    obs_reward = dict(obs_dict)
+    obs_reward["prev_reward"] = np.array([1.0], dtype=np.float32)
+
+    dec_relief1 = agent.act_with_confidence(obs_reward, auto_calibrate=True)
+    assert agent._stagnation_count == 0
+    # Deve ter resfriado
+    assert dec_relief1.calibration < calibs[-1]
+
+    # Mais passos com alta recompensa devem resfriar até 0.0
+    for _ in range(5):
+        dec_relief = agent.act_with_confidence(obs_reward, auto_calibrate=True)
+
+    assert dec_relief.calibration == 0.0, f"Esperado resfriamento a 0.0, obtido {dec_relief.calibration}"
+
+    # 4. Também suporta act_fast(auto_calibrate=True) ou calibration='auto'
+    agent.reset_memory()
+    act = agent.act_fast(obs_zero, calibration="auto")
+    assert act in [0, 1]
+    assert 0.0 <= agent._adaptive_calibration <= 0.80
+
+
+

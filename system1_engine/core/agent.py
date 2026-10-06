@@ -19,9 +19,10 @@ class ReflexDecision:
     confidence: float          # [0.0, 1.0] - Probabilidade da ação escolhida
     uncertainty: float         # [0.0, 1.0] - Entropia normalizada
     margin: float              # [0.0, 1.0] - Diferença entre as duas maiores probabilidades
-    is_uncertain: bool         # Gatilho de invocação para o System 2
+    is_uncertain: bool         # Indicador de incerteza do reflexo
     entropy: float             # Entropia bruta de Shannon
     latent_value: Optional[float] = None  # Valor estimado V(s) se solicitado
+    calibration: float = 0.0   # [0.0, 1.0] - Nível de calibração / temperatura aplicada
 
 
 class UniversalS1Agent(nn.Module):
@@ -99,8 +100,11 @@ class UniversalS1Agent(nn.Module):
 
         self.value_head = ValueHead(in_features=256)
 
-        # Runtime hidden state for act_fast inference
+        # Runtime hidden state for act_fast inference and homeostatic auto-calibration
         self.hx: Optional[torch.Tensor] = None
+        self._adaptive_calibration: float = 0.0
+        self._reward_ema: float = 0.0
+        self._stagnation_count: int = 0
 
     @property
     def device(self) -> torch.device:
@@ -111,8 +115,11 @@ class UniversalS1Agent(nn.Module):
             return torch.device("cpu")
 
     def reset_memory(self, batch_size: int = 1, device: Optional[torch.device] = None) -> None:
-        """Resets the persistent internal hidden state."""
+        """Resets the persistent internal hidden state and homeostatic adaptive calibration."""
         self.hx = None
+        self._adaptive_calibration = 0.0
+        self._reward_ema = 0.0
+        self._stagnation_count = 0
 
     def extract_features(
         self,
@@ -158,16 +165,38 @@ class UniversalS1Agent(nn.Module):
         obs_dict: Dict[str, Any],
         hx: Optional[torch.Tensor] = None,
         deterministic: bool = False,
+        calibration: Optional[float] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Rollout step returning (action, log_prob, value, next_hx)."""
         dist, value, next_hx = self.forward(obs_dict, hx=hx, dones=None)
-        if deterministic:
+        if calibration is not None:
+            calib = float(np.clip(calibration, 0.0, 1.0))
+            is_det = (calib <= 0.0)
+            eff_temp = max(0.05, calib)
+            eff_scale = calib
+        else:
+            is_det = deterministic
+            eff_temp = 1.0
+            eff_scale = 1.0
+
+        if is_det:
             if self.is_discrete:
                 action = torch.argmax(dist.logits, dim=-1)
             else:
                 action = dist.mean
         else:
-            action = dist.sample()
+            if self.is_discrete:
+                if eff_temp != 1.0:
+                    scaled_dist = torch.distributions.Categorical(logits=dist.logits / eff_temp)
+                    action = scaled_dist.sample()
+                else:
+                    action = dist.sample()
+            else:
+                if eff_scale != 1.0:
+                    scaled_dist = torch.distributions.Normal(loc=dist.mean, scale=dist.scale * eff_scale)
+                    action = scaled_dist.sample()
+                else:
+                    action = dist.sample()
 
         if self.is_discrete:
             log_prob = dist.log_prob(action)
@@ -184,11 +213,17 @@ class UniversalS1Agent(nn.Module):
         uncertainty_threshold: float = 0.70,
         confidence_threshold: float = 0.50,
         return_value: bool = False,
+        deterministic: bool = True,
+        noise_scale: float = 0.0,
+        calibration: Optional[Union[float, str]] = None,
+        auto_calibrate: bool = False,
     ) -> Union[int, np.ndarray, ReflexDecision]:
-        """Ultra-fast deterministic single-forward reflex inference.
+        """Ultra-fast single-forward reflex inference.
 
         Optimized for zero autograd overhead, minimal allocation, and <= 0.8ms latency on CPU.
-        If return_decision=True, returns ReflexDecision with uncertainty gating signals.
+        Supports deterministic (mean/argmax), calibrated sampling (0.0 to 1.0), and homeostatic
+        auto-calibration (auto_calibrate=True or calibration='auto') based on reward momentum.
+        If return_decision=True, returns ReflexDecision with uncertainty gating signals and active calibration.
         """
         raw_obs = obs_dict["obs"]
         raw_action = obs_dict["prev_action"]
@@ -228,9 +263,9 @@ class UniversalS1Agent(nn.Module):
                 t_act = torch.from_numpy(np.asarray(raw_action, dtype=np.float32)).view(1, 1, -1)
 
             if isinstance(raw_reward, torch.Tensor):
-                t_rew = raw_reward
+                t_rew = raw_reward.view(1, 1, 1)
             else:
-                t_rew = torch.tensor([[[float(raw_reward)]]], dtype=torch.float32)
+                t_rew = torch.as_tensor(raw_reward, dtype=torch.float32).view(1, 1, 1)
 
             if to_dev:
                 t_obs = t_obs.to(dev)
@@ -262,9 +297,9 @@ class UniversalS1Agent(nn.Module):
                 t_act = torch.from_numpy(np.asarray(raw_action, dtype=np.float32)).view(1, 1, -1)
 
             if isinstance(raw_reward, torch.Tensor):
-                t_rew = raw_reward
+                t_rew = raw_reward.view(1, 1, 1)
             else:
-                t_rew = torch.tensor([[[float(raw_reward)]]], dtype=torch.float32)
+                t_rew = torch.as_tensor(raw_reward, dtype=torch.float32).view(1, 1, 1)
 
             if to_dev:
                 t_obs = t_obs.to(dev)
@@ -282,16 +317,58 @@ class UniversalS1Agent(nn.Module):
         # Recurrent pass through trunk with internal persistent memory
         h, self.hx = self.trunk(z_in, hx=self.hx, dones=None)
 
+        # Resolve sampling parameters based on homeostatic auto-calibration, fixed calibration, or legacy flags
+        is_auto_calib = auto_calibrate or (
+            isinstance(calibration, str) and calibration.lower() in ("auto", "adaptive", "homeostatic")
+        )
+        if is_auto_calib:
+            rew_val = float(np.asarray(raw_reward).flat[0])
+            delta_rew = rew_val - self._reward_ema
+            self._reward_ema = 0.9 * self._reward_ema + 0.1 * rew_val
+
+            # Se houve recompensa positiva ou delta positivo perceptível: progresso / alívio
+            if rew_val > 0.01 or delta_rew > 0.01:
+                self._stagnation_count = 0
+                self._adaptive_calibration = max(0.0, self._adaptive_calibration - 0.20)
+            else:
+                # Estagnação ou recompensa nula/negativa: frustração acumulada eleva temperatura
+                self._stagnation_count += 1
+                if self._stagnation_count >= 2:
+                    self._adaptive_calibration = min(0.80, self._adaptive_calibration + 0.10)
+
+            calib = float(self._adaptive_calibration)
+            is_deterministic_mode = (calib <= 0.01)
+            eff_temp = max(0.05, calib)
+            eff_scale = calib
+        elif calibration is not None:
+            calib = float(np.clip(float(calibration), 0.0, 1.0))
+            is_deterministic_mode = (calib <= 0.0)
+            eff_temp = max(0.05, calib)
+            eff_scale = calib
+        else:
+            is_deterministic_mode = deterministic
+            eff_temp = 1.0
+            eff_scale = noise_scale if noise_scale > 0.0 else 1.0
+            calib = 0.0 if deterministic else (noise_scale if noise_scale > 0.0 else 1.0)
+
         # Policy decision
         if self.is_discrete:
-            logits = self.policy_head.linear(h)
+            logits_sq = self.policy_head.linear(h).squeeze(0).squeeze(0)
+            probs = torch.softmax(logits_sq, dim=-1)
+
+            if not is_deterministic_mode:
+                if eff_temp != 1.0:
+                    probs_sampled = torch.softmax(logits_sq / eff_temp, dim=-1)
+                else:
+                    probs_sampled = probs
+                action = int(torch.multinomial(probs_sampled, num_samples=1).item())
+            else:
+                action = int(torch.argmax(probs, dim=-1).item())
+
             if not return_decision:
-                action = int(torch.argmax(logits, dim=-1).item())
                 return action
 
-            # Cálculo de incerteza e gatilho do System 2
-            probs = torch.softmax(logits.squeeze(0).squeeze(0), dim=-1)
-            action = int(torch.argmax(probs, dim=-1).item())
+            # Cálculo de incerteza do reflexo
             n_acts = probs.shape[0]
 
             if n_acts > 1:
@@ -318,32 +395,33 @@ class UniversalS1Agent(nn.Module):
                 is_uncertain=is_uncertain,
                 entropy=entropy,
                 latent_value=latent_val,
+                calibration=calib,
             )
         else:
             mu = self.policy_head.mu_net(h)
             action_np = mu.squeeze(0).squeeze(0).cpu().numpy()
-            if not return_decision:
-                return action_np
 
             # Clamping defensivo de log_std / std para evitar underflow numérico e instabilidade
             log_std_clamped = torch.clamp(self.policy_head.log_std, min=-20.0, max=2.0)
             std = torch.exp(log_std_clamped).cpu().numpy()
             std = np.clip(std, a_min=1e-6, a_max=100.0)
 
+            # Aplicação de amostragem estocástica ou ruído calibrado (ex: avaliação de locomoção fluida)
+            if not is_deterministic_mode or (noise_scale > 0.0 and calibration is None and not is_auto_calib):
+                action_np = action_np + eff_scale * std * np.random.randn(*action_np.shape)
+
+            if hasattr(self, "action_space") and isinstance(self.action_space, gym.spaces.Box):
+                action_np = np.clip(action_np, self.action_space.low, self.action_space.high)
+            if not return_decision:
+                return action_np
+
             # Entropia diferencial contínua H = 0.5 * sum(1 + ln(2*pi*sigma^2))
-            # Nota: para sigma < 1 / sqrt(2*pi*e) (~0.24197), H assume valores negativos legítimos
             entropy = float(0.5 * np.sum(1.0 + np.log(2.0 * np.pi * (std ** 2))))
 
             # Variância média das ações contínuas
             var = float(np.mean(std ** 2))
 
             # Normalização estrita para [0.0, 1.0] via sigmoide na variância
-            # f(var) = 2.0 / (1.0 + exp(-var / var_scale)) - 1.0
-            # Garante ausência de underflow para sigma < 0.242 e gatilho calibrado:
-            # - sigma -> 0: uncertainty -> 0.0, confidence -> 1.0 (sem underflow negativo)
-            # - sigma = 0.05: uncertainty = 0.25%, confidence = 99.75%
-            # - sigma = 0.242 (fronteira H=0): uncertainty = 5.85%, confidence = 94.15%
-            # - sigma = 1.0 (exploração inicial padrão): uncertainty = 76.16%, confidence = 23.84% (Gatilho Ativado)
             var_scale = 0.5
             uncertainty = float(np.clip(2.0 / (1.0 + np.exp(-var / var_scale)) - 1.0, 0.0, 1.0))
             confidence = float(np.clip(1.0 - uncertainty, 0.0, 1.0))
@@ -359,6 +437,7 @@ class UniversalS1Agent(nn.Module):
                 is_uncertain=is_uncertain,
                 entropy=entropy,
                 latent_value=latent_val,
+                calibration=calib,
             )
 
     @torch.no_grad()
@@ -368,14 +447,22 @@ class UniversalS1Agent(nn.Module):
         uncertainty_threshold: float = 0.70,
         confidence_threshold: float = 0.50,
         return_value: bool = False,
+        deterministic: bool = True,
+        noise_scale: float = 0.0,
+        calibration: Optional[Union[float, str]] = None,
+        auto_calibrate: bool = False,
     ) -> ReflexDecision:
-        """Executa a decisão reflexiva retornando a estrutura ReflexDecision com o sinal de gatilho."""
+        """Executa a decisão reflexiva retornando a estrutura ReflexDecision com telemetria e calibração."""
         decision = self.act_fast(
             obs_dict=obs_dict,
             return_decision=True,
             uncertainty_threshold=uncertainty_threshold,
             confidence_threshold=confidence_threshold,
             return_value=return_value,
+            deterministic=deterministic,
+            noise_scale=noise_scale,
+            calibration=calibration,
+            auto_calibrate=auto_calibrate,
         )
         assert isinstance(decision, ReflexDecision)
         return decision

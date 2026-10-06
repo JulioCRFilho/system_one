@@ -112,7 +112,11 @@ def auto_sync_web_model(
 
         dummy_obs = torch.zeros(1, 1, obs_dim, dtype=torch.float32)
         dummy_delta = torch.zeros(1, 1, obs_dim, dtype=torch.float32)
-        dummy_act = torch.zeros(1, 1, dtype=torch.long if agent.is_discrete else torch.float32)
+        if agent.is_discrete:
+            dummy_act = torch.zeros(1, 1, dtype=torch.long)
+        else:
+            act_dim = getattr(agent.policy_head, "act_dim", 1)
+            dummy_act = torch.zeros(1, 1, act_dim, dtype=torch.float32)
         dummy_rew = torch.zeros(1, 1, 1, dtype=torch.float32)
         dummy_hx = torch.zeros(1, 1, 256, dtype=torch.float32)
 
@@ -143,6 +147,9 @@ def auto_sync_web_model(
                 shutil.copy2(primary_onnx_path, dest)
                 synced_targets.append(str(dest))
 
+        # 4. Atualiza o manifest.json unificado de modelos web
+        generate_web_manifest(web_models_dir)
+
         file_size_mb = primary_onnx_path.stat().st_size / (1024 * 1024)
         print(f"\n🌐 [Auto-Sync Web] Pesos ONNX sincronizados com sucesso ({file_size_mb:.2f} MB):")
         for t in synced_targets:
@@ -152,3 +159,263 @@ def auto_sync_web_model(
     except Exception as e:
         print(f"⚠️ [Auto-Sync Web] Falha na auto-exportação ONNX (não-bloqueante): {e}")
         return None
+
+
+def generate_web_manifest(web_models_dir: Optional[Path] = None) -> Dict[str, Any]:
+    """Varre os modelos ONNX disponíveis e constrói o manifesto dinâmico manifest.json."""
+    import json
+    import time
+
+    project_root = Path(__file__).resolve().parent.parent.parent
+    if web_models_dir is None:
+        web_models_dir = project_root / "web" / "models"
+    web_models_dir.mkdir(parents=True, exist_ok=True)
+
+    metadata_catalog = {
+        "s1_rubiks_atomic.onnx": {
+            "key": "rubiks_atomic",
+            "name": "🎲 Cubo Mágico 3x3 (Atômico - 12 Giros)",
+            "env_id": "RubiksCube-v0",
+            "type": "rubiks",
+            "mode": "atomic",
+            "obs_dim": 324,
+            "act_dim": 12,
+            "discrete": True,
+            "description": "12 giros atômicos elementares com física e permutação 3D exatas. 100% de resolução reflexiva.",
+            "default": True,
+        },
+        "s1_rubiks_macro.onnx": {
+            "key": "rubiks_macro",
+            "name": "🧩 Cubo Mágico 3x3 (Macro / CFOP)",
+            "env_id": "RubiksCubeMacro-v0",
+            "type": "rubiks",
+            "mode": "macro",
+            "obs_dim": 324,
+            "act_dim": 12,
+            "discrete": True,
+            "description": "Hierarchical RL com algoritmos CFOP (Sune, Sexy Move, T-Perm, Insert Edge).",
+        },
+        "s1_cartpole.onnx": {
+            "key": "cartpole",
+            "name": "⚖️ CartPole-v1 (Controle Clássico)",
+            "env_id": "CartPole-v1",
+            "type": "classic_control",
+            "mode": "vector",
+            "obs_dim": 4,
+            "act_dim": 2,
+            "discrete": True,
+            "description": "Equilíbrio invertido amortizado em sub-milissegundo com reflexos ultra-estáveis.",
+        },
+        "s1_acrobot_v1.onnx": {
+            "key": "acrobot",
+            "name": "🤸 Acrobot-v1 (Braço Duplo)",
+            "env_id": "Acrobot-v1",
+            "type": "classic_control",
+            "mode": "vector",
+            "obs_dim": 6,
+            "act_dim": 3,
+            "discrete": True,
+            "description": "Sistema caótico não-linear de dois elos sob controle reflexivo amortizado.",
+        },
+        "s1_mountaincar_v0.onnx": {
+            "key": "mountaincar",
+            "name": "⛰️ MountainCar-v0 (Controle Clássico)",
+            "env_id": "MountainCar-v0",
+            "type": "classic_control",
+            "mode": "vector",
+            "obs_dim": 2,
+            "act_dim": 3,
+            "discrete": True,
+            "description": "Acúmulo de energia potencial gravitacional via oscilação de momento.",
+        },
+        "s1_lunarlander_v3.onnx": {
+            "key": "lunarlander",
+            "name": "🚀 LunarLander-v3 (Pouso Lunar Box2D)",
+            "env_id": "LunarLander-v3",
+            "type": "box2d",
+            "mode": "vector",
+            "obs_dim": 8,
+            "act_dim": 4,
+            "discrete": True,
+            "description": "Controle vetorial de empuxo e atitude em gravidade simulada.",
+        },
+        "s1_ant_v5.onnx": {
+            "key": "ant_v5",
+            "name": "🐜 Ant-v5 (Robótica Contínua MuJoCo)",
+            "env_id": "Ant-v5",
+            "type": "mujoco",
+            "mode": "continuous",
+            "obs_dim": 27,
+            "act_dim": 8,
+            "discrete": False,
+            "description": "Locomoção quadrupedal contínua em alta dimensão com física MuJoCo.",
+        },
+        "s1_ant_v4.onnx": {
+            "key": "ant_v4",
+            "name": "🐜 Ant-v4 (Robótica Contínua MuJoCo)",
+            "env_id": "Ant-v4",
+            "type": "mujoco",
+            "mode": "continuous",
+            "obs_dim": 27,
+            "act_dim": 8,
+            "discrete": False,
+            "description": "Locomoção quadrupedal contínua em alta dimensão com física MuJoCo v4.",
+        },
+    }
+
+    models_dict = {}
+    for onnx_path in sorted(web_models_dir.glob("*.onnx")):
+        filename = onnx_path.name
+        stat = onnx_path.stat()
+        size_mb = round(stat.st_size / (1024 * 1024), 2)
+        meta = dict(metadata_catalog.get(filename, {
+            "key": onnx_path.stem,
+            "name": onnx_path.stem.replace("_", " ").title(),
+            "env_id": onnx_path.stem,
+            "type": "custom",
+            "mode": "vector",
+            "discrete": True,
+            "description": "Modelo ONNX exportado do System 1 Engine."
+        }))
+        meta["file"] = filename
+        meta["size_mb"] = size_mb
+        meta["size_bytes"] = stat.st_size
+        meta["mtime"] = stat.st_mtime
+        meta["mtime_str"] = time.strftime("%d/%m/%Y %H:%M:%S", time.localtime(stat.st_mtime))
+        key = meta.get("key", onnx_path.stem)
+        models_dict[key] = meta
+
+    manifest_data = {
+        "version": "1.0",
+        "updated_at": time.time(),
+        "updated_at_str": time.strftime("%d/%m/%Y %H:%M:%S"),
+        "models": models_dict,
+    }
+
+    manifest_path = web_models_dir / "manifest.json"
+    with open(manifest_path, "w", encoding="utf-8") as f:
+        json.dump(manifest_data, f, indent=2, ensure_ascii=False)
+
+    # Replica para os diretórios do portfólio caso existam
+    portfolio_candidates = [
+        project_root.parent / "portfolio" / "public" / "models" / "manifest.json",
+        project_root.parent / "portfolio" / "dist" / "models" / "manifest.json",
+    ]
+    for p_path in portfolio_candidates:
+        if p_path.parent.exists():
+            try:
+                shutil.copy2(manifest_path, p_path)
+            except Exception:
+                pass
+
+    return manifest_data
+
+
+def export_checkpoint_to_onnx(
+    checkpoint_path: str,
+    output_path: Optional[str] = None,
+    env_id: Optional[str] = None,
+    sync_portfolio: bool = True,
+) -> Optional[str]:
+    """Converte qualquer arquivo de checkpoint .pt existente no projeto para formato ONNX."""
+    import gymnasium as gym
+    from system1_engine.env.wrapper import UniversalS1Wrapper
+    from system1_engine.env.adapters.rubiks import RubiksCubeMacroEnv, RubiksCubeEnv
+
+    if not os.path.exists(checkpoint_path):
+        print(f"⚠️ Checkpoint não encontrado: {checkpoint_path}")
+        return None
+
+    # Inspeciona o checkpoint para inferir env_id se não fornecido
+    ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    info = ckpt.get("extra_info", {}) if isinstance(ckpt, dict) else {}
+    target_env = env_id or info.get("env_id") or os.path.basename(checkpoint_path)
+
+    # Cria o ambiente apropriado
+    env_lower = target_env.lower().replace("_", "-")
+    try:
+        if "atomic" in env_lower or "rubikscube-v0" in env_lower:
+            raw_env = RubiksCubeEnv()
+            resolved_env_id = "RubiksCube-v0"
+        elif "rubik" in env_lower:
+            raw_env = RubiksCubeMacroEnv()
+            resolved_env_id = "RubiksCubeMacro-v0"
+        else:
+            raw_env = gym.make(target_env)
+            resolved_env_id = target_env
+    except Exception:
+        # Fallback para ambiente com base no nome do checkpoint
+        if "cartpole" in checkpoint_path.lower():
+            raw_env = gym.make("CartPole-v1")
+            resolved_env_id = "CartPole-v1"
+        elif "acrobot" in checkpoint_path.lower():
+            raw_env = gym.make("Acrobot-v1")
+            resolved_env_id = "Acrobot-v1"
+        elif "mountaincar" in checkpoint_path.lower():
+            raw_env = gym.make("MountainCar-v0")
+            resolved_env_id = "MountainCar-v0"
+        elif "lunarlander" in checkpoint_path.lower():
+            raw_env = gym.make("LunarLander-v3")
+            resolved_env_id = "LunarLander-v3"
+        elif "ant" in checkpoint_path.lower():
+            raw_env = gym.make("Ant-v5")
+            resolved_env_id = "Ant-v5"
+        else:
+            print(f"⚠️ Não foi possível instanciar ambiente para {checkpoint_path}")
+            return None
+
+    wrapped_env = UniversalS1Wrapper(raw_env)
+    agent = UniversalS1Agent(obs_space=wrapped_env.observation_space, action_space=wrapped_env.action_space)
+
+    state_dict = ckpt["state_dict"] if isinstance(ckpt, dict) and "state_dict" in ckpt else ckpt
+    agent.load_state_dict(state_dict, strict=False)
+
+    return auto_sync_web_model(agent, checkpoint_path=checkpoint_path, extra_info={"env_id": resolved_env_id})
+
+
+def sync_all_web_models(sync_portfolio: bool = True) -> List[str]:
+    """Varre todos os checkpoints treinados do repositório e sincroniza para a pasta web/models/."""
+    import glob
+
+    project_root = Path(__file__).resolve().parent.parent.parent
+    checkpoints = sorted(glob.glob(str(project_root / "*.pt")) + glob.glob(str(project_root / "**" / "*.pt"), recursive=True))
+
+    # Mapeia os melhores checkpoints prioritários para cada ambiente
+    priority_map = {
+        "RubiksCube-v0": ["s1_rubikscube_v0_trained.pt"],
+        "RubiksCubeMacro-v0": ["s1_rubikscubemacro_v0_trained_v3.pt", "s1_rubikscubemacro_v0_trained_v2.pt", "s1_rubikscube_v0_trained.pt"],
+        "CartPole-v1": ["s1_cartpole.pt"],
+        "Acrobot-v1": ["s1_acrobot_v1_trained.pt", "s1_acrobot_v1_checkpoint.pt", "s1_acrobot.pt"],
+        "MountainCar-v0": ["s1_mountaincar_v0_trained.pt"],
+        "LunarLander-v3": ["s1_lunarlander_v3_trained.pt"],
+        "Ant-v5": ["s1_ant_v5_trained_v3.pt", "s1_ant_v5_trained_v2.pt", "s1_ant_v5_trained.pt"],
+        "Ant-v4": ["s1_ant_v4_trained.pt"],
+    }
+
+    synced = []
+    print("\n" + "=" * 70)
+    print("🚀 SINCRONIZANDO TODOS OS MODELOS E PESOS PARA O WEB HUD")
+    print("=" * 70)
+
+    for env_id, candidate_files in priority_map.items():
+        chosen_ckpt = None
+        for cand in candidate_files:
+            cand_path = project_root / cand
+            if cand_path.exists():
+                chosen_ckpt = str(cand_path)
+                break
+
+        if chosen_ckpt:
+            res = export_checkpoint_to_onnx(chosen_ckpt, env_id=env_id, sync_portfolio=sync_portfolio)
+            if res:
+                synced.append(res)
+
+    # Gera o manifesto consolidado
+    manifest = generate_web_manifest()
+    print(f"\n✅ Sincronização concluída: {len(synced)} modelos ONNX ativos no manifesto web.")
+    print("=" * 70 + "\n")
+    return synced
+
+
+if __name__ == "__main__":
+    sync_all_web_models()

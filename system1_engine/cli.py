@@ -125,6 +125,7 @@ def train_mode(args: argparse.Namespace) -> None:
         web_server.start()
 
     try:
+        train_calib = getattr(args, "train_calibration", 1.0)
         trainer = RecurrentPPOTrainer(
             agent=agent,
             env=env,
@@ -135,6 +136,7 @@ def train_mode(args: argparse.Namespace) -> None:
             entropy_coef=args.entropy_coef,
             tracker=tracker,
             device=device,
+            exploration_scale=train_calib,
         )
 
         def train_callback(steps: int, mean_ret: float) -> None:
@@ -242,6 +244,7 @@ def run_mode(args: argparse.Namespace) -> None:
     dt_target = (1.0 / target_fps) if target_fps > 0 else 0.0
 
     try:
+        eval_calib = getattr(args, "calibration", None)
         def execute_eval_loop() -> None:
             for ep in range(args.episodes):
                 obs_dict, _ = env.reset()
@@ -254,7 +257,7 @@ def run_mode(args: argparse.Namespace) -> None:
                     t_step_start = time.perf_counter()
                     if tracker is not None:
                         t0 = time.perf_counter_ns()
-                        decision = agent.act_with_confidence(obs_dict)
+                        decision = agent.act_with_confidence(obs_dict, calibration=eval_calib)
                         lat_us = (time.perf_counter_ns() - t0) / 1000.0
 
                         tracker.record_inference(
@@ -265,7 +268,7 @@ def run_mode(args: argparse.Namespace) -> None:
                         )
                         action = decision.action
                     else:
-                        action = agent.act_fast(obs_dict)
+                        action = agent.act_fast(obs_dict, calibration=eval_calib)
 
                     obs_dict, reward, terminated, truncated, _ = env.step(action)
                     done = terminated or truncated
@@ -402,6 +405,22 @@ def main() -> None:
         help="Freeze trunk parameters during transfer (use --no-freeze-trunk to fine-tune the trunk)",
     )
     parser.add_argument("--entropy-coef", type=float, default=0.005, help="Entropy coefficient for PPO exploration (default: 0.005)")
+    parser.add_argument(
+        "--calibration",
+        "--eval-calibration",
+        type=float,
+        default=None,
+        dest="calibration",
+        help="Calibração contínua da amostragem na avaliação [0.0 = determinístico puro, 1.0 = estocástico] (padrão: None)",
+    )
+    parser.add_argument(
+        "--train-calibration",
+        "--exploration-scale",
+        type=float,
+        default=1.0,
+        dest="train_calibration",
+        help="Escala de exploração / calibração durante o treino PPO [0.05 a 1.0] (padrão: 1.0)",
+    )
     parser.add_argument("--episodes", type=int, default=5, help="Number of episodes for run mode")
     parser.add_argument("--lr", type=float, default=7e-4, help="Learning rate")
     parser.add_argument(

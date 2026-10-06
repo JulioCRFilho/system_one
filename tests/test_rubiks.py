@@ -131,6 +131,35 @@ class TestRubiksGymEnvironments:
         assert frame is not None
         assert frame.shape == (320, 480, 3)
 
+    def test_render_3d_and_view_mode_toggle(self):
+        """Valida que renderização 3D isométrica e alternância dinâmica de view_mode funcionam perfeitamente."""
+        env = RubiksCubeMacroEnv(scramble_depth=2)
+        env.reset(seed=123)
+
+        # 1. Teste de renderização no modo 3D (padrão)
+        env.set_view_mode("3d")
+        frame_3d = env.render()
+        assert frame_3d is not None
+        assert frame_3d.shape == (320, 480, 3)
+        assert frame_3d.dtype == np.uint8
+
+        # 2. Teste de alternância para modo 2D Net
+        env.set_view_mode("2d")
+        frame_2d = env.render()
+        assert frame_2d is not None
+        assert frame_2d.shape == (320, 480, 3)
+        assert frame_2d.dtype == np.uint8
+
+        # Os dois frames devem ter conteúdo visual substancialmente diferente devido à perspectiva
+        assert not np.array_equal(frame_3d, frame_2d)
+
+        # 3. Teste direto em RubiksCubeCore
+        core = RubiksCubeCore()
+        f3d = core.render_3d()
+        f2d = core.render_net()
+        assert f3d.shape == (320, 480, 3)
+        assert f2d.shape == (320, 480, 3)
+
     def test_gym_registry_integration(self):
         """Garante que os ambientes podem ser criados via gym.make()."""
         raw_atomic = gym.make("RubiksCube-v0")

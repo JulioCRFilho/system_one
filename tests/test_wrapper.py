@@ -133,3 +133,24 @@ def test_wrapper_discrete_and_structured_observation_spaces():
     assert np.all(bj_obs0["delta_obs"] == 0.0)
     bj_env.close()
 
+
+def test_wrapper_continuous_action_clipping():
+    """Verify that continuous actions exceeding Box limits are defensively clipped."""
+    raw_env = gym.make("Pendulum-v1")  # action_space: Box(-2.0, 2.0, (1,))
+    env = UniversalS1Wrapper(raw_env)
+    env.reset()
+
+    # Pass an excessively large action
+    excess_action = np.array([100.0], dtype=np.float32)
+    obs_dict, _, _, _, _ = env.step(excess_action)
+
+    # Action recorded and passed must be clipped to high (+2.0)
+    assert obs_dict["prev_action"][0] == pytest.approx(2.0)
+
+    # Pass an excessively negative action
+    excess_neg = np.array([-999.0], dtype=np.float32)
+    obs_dict, _, _, _, _ = env.step(excess_neg)
+    assert obs_dict["prev_action"][0] == pytest.approx(-2.0)
+    env.close()
+
+

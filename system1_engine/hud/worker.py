@@ -31,6 +31,7 @@ class HUDClient:
         self.port = parsed.port or 8050
         self._conn: Optional[http.client.HTTPConnection] = None
         self._vision_mode: str = initial_vision_mode
+        self._cube_view_mode: str = "3d"
 
         # Sincronização assíncrona para zero overhead no loop principal de treino
         self._lock = threading.Lock()
@@ -71,6 +72,11 @@ class HUDClient:
         """Retorna o modo de atenção visual atualmente selecionado no HUD."""
         with self._lock:
             return self._vision_mode
+
+    def get_cube_view_mode(self) -> str:
+        """Retorna o modo de visualização 3D/2D para Cubo Mágico."""
+        with self._lock:
+            return self._cube_view_mode
 
     def _worker_loop(self) -> None:
         """Loop de fundo para processamento offloaded de telemetria e compressão/envio de vídeo."""
@@ -118,6 +124,9 @@ class HUDClient:
                         if "vision_mode" in resp_data:
                             with self._lock:
                                 self._vision_mode = resp_data["vision_mode"]
+                        if "cube_view_mode" in resp_data:
+                            with self._lock:
+                                self._cube_view_mode = resp_data["cube_view_mode"]
                     except Exception:
                         pass
                 return
@@ -158,6 +167,9 @@ class HUDClient:
                             if "vision_mode" in resp_data:
                                 with self._lock:
                                     self._vision_mode = resp_data["vision_mode"]
+                            if "cube_view_mode" in resp_data:
+                                with self._lock:
+                                    self._cube_view_mode = resp_data["cube_view_mode"]
                         except Exception:
                             pass
                     return
@@ -314,6 +326,9 @@ def run_worker_train(config: Dict[str, Any], hud_client: HUDClient) -> None:
     last_telemetry_ts = 0.0
     last_frame_ts = 0.0
 
+    train_calib_cfg = config.get("train_calibration", config.get("exploration_scale", 1.0))
+    train_calibration = float(np.clip(float(train_calib_cfg), 0.05, 1.0))
+
     trainer = RecurrentPPOTrainer(
         agent=agent,
         env=env,
@@ -324,6 +339,7 @@ def run_worker_train(config: Dict[str, Any], hud_client: HUDClient) -> None:
         entropy_coef=entropy_coef,
         tracker=tracker,
         device=device,
+        exploration_scale=train_calibration,
     )
 
     explainer = GradCAMExplainer(agent)
@@ -351,6 +367,9 @@ def run_worker_train(config: Dict[str, Any], hud_client: HUDClient) -> None:
         # eliminando completamente qualquer bloqueio ou perda de throughput no treino!
         if render_mode == "in_browser" and (now - last_frame_ts >= 0.08) and hud_client.is_ready_for_frame():
             try:
+                cube_vmode = hud_client.get_cube_view_mode()
+                if hasattr(env.unwrapped, "set_view_mode"):
+                    env.unwrapped.set_view_mode(cube_vmode)
                 frame = env.render()
                 if frame is not None:
                     try:
@@ -415,11 +434,6 @@ def run_worker_eval(config: Dict[str, Any], hud_client: HUDClient) -> None:
 
     device = resolve_compute_device(device_pref, is_training=False)
 
-    mode_desc = "act_fast() [Reflexo Puro]" if use_fast else "act_with_confidence() [Gating]"
-    print(f"=== [HUD Worker] Modo de Avaliação Iniciado no Ambiente: {env_id} ===")
-    print(f"Dispositivo de Execução: {device.type.upper()} (Preferência: {device_pref})")
-    print(f"Episódios: {episodes} | Decisão: {mode_desc} | FPS Alvo: {fps_target} | Renderização: {render_mode}")
-
     env = build_hud_env(
         env_id,
         scenario=config.get("scenario"),
@@ -431,6 +445,66 @@ def run_worker_eval(config: Dict[str, Any], hud_client: HUDClient) -> None:
         obs_space=env.observation_space,
         action_space=env.action_space,
     ).to(device)
+
+    eval_calib_cfg = config.get("eval_calibration", config.get("calibration"))
+    eval_action_mode = config.get("eval_action_mode")
+    is_continuous = isinstance(env.action_space, gym.spaces.Box)
+
+    if str(eval_calib_cfg).lower() in ("auto", "adaptive", "homeostatic") or eval_action_mode == "auto":
+        eval_calibration = "auto"
+        eval_det = False
+        noise_scale = 0.0
+        mode_action_desc = "Auto-Calibração Homeostática (Momentum de Recompensa)"
+    elif eval_calib_cfg is not None:
+        eval_calibration = float(np.clip(float(eval_calib_cfg), 0.0, 1.0))
+        if eval_calibration == 0.0:
+            eval_det = True
+            noise_scale = 0.0
+            mode_action_desc = "Determinística Pura (0.0 — argmax/μ)"
+        elif eval_calibration == 1.0:
+            eval_det = False
+            noise_scale = 1.0
+            mode_action_desc = "Estocástica Total (1.0 — Boltzmann T=1.0 / 1.0σ)"
+        else:
+            eval_det = False
+            noise_scale = eval_calibration
+            mode_action_desc = f"Estocástica Calibrada ({eval_calibration:.2f} — Boltzmann T={max(0.05, eval_calibration):.2f} / {eval_calibration:.2f}σ)"
+    else:
+        if eval_action_mode is None:
+            if config.get("stochastic", False):
+                eval_action_mode = "stochastic"
+            elif is_continuous:
+                # Em ambientes contínuos (como Ant-v5, HalfCheetah), usa amostragem calibrada por padrão
+                # para evitar deadlocks de equilíbrios estáticos em políticas ainda não totalmente convergidas
+                eval_action_mode = "calibrated"
+            else:
+                eval_action_mode = "deterministic"
+
+        if eval_action_mode == "deterministic":
+            eval_calibration = 0.0
+            eval_det = True
+            noise_scale = 0.0
+            mode_action_desc = "Determinística Pura (0.0 — argmax/μ)"
+        elif eval_action_mode == "calibrated":
+            eval_calibration = 0.25 if is_continuous else 0.5
+            eval_det = False
+            noise_scale = 0.25
+            mode_action_desc = f"Estocástica Calibrada ({eval_calibration:.2f}σ)"
+        else:  # "stochastic"
+            eval_calibration = 1.0
+            eval_det = False
+            noise_scale = 1.0
+            mode_action_desc = "Estocástica Total (1.0 — Exploração σ)"
+
+    is_locomotion = any(
+        kw in env_id.lower()
+        for kw in ("ant", "halfcheetah", "cheetah", "hopper", "walker", "humanoid")
+    )
+
+    mode_desc = "act_fast() [Reflexo Puro]" if use_fast else "act_with_confidence() [Gating]"
+    print(f"=== [HUD Worker] Modo de Avaliação Iniciado no Ambiente: {env_id} ===")
+    print(f"Dispositivo de Execução: {device.type.upper()} (Preferência: {device_pref})")
+    print(f"Episódios: {episodes} | Decisão: {mode_desc} | Ação: {mode_action_desc} | FPS Alvo: {fps_target} | Renderização: {render_mode}")
 
     if load_path:
         checkpoint = torch.load(load_path, map_location="cpu", weights_only=False)
@@ -450,6 +524,7 @@ def run_worker_eval(config: Dict[str, Any], hud_client: HUDClient) -> None:
     explainer = GradCAMExplainer(agent)
     tracker = LiveStatsTracker()
     last_telemetry_ts = 0.0
+    last_frame_ts = 0.0
 
     try:
         for ep in range(episodes):
@@ -457,6 +532,7 @@ def run_worker_eval(config: Dict[str, Any], hud_client: HUDClient) -> None:
             agent.reset_memory()
             ep_reward = 0.0
             steps = 0
+            standstill_steps = 0
             done = False
 
             while not done:
@@ -464,16 +540,13 @@ def run_worker_eval(config: Dict[str, Any], hud_client: HUDClient) -> None:
 
                 t0 = time.perf_counter_ns()
                 if use_fast:
-                    action = agent.act_fast(obs_dict)
-                    lat_us = (time.perf_counter_ns() - t0) / 1000.0
-                    tracker.record_inference(
-                        latency_us=lat_us,
-                        uncertainty=0.0,
-                        confidence=1.0,
-                        entropy=0.0,
+                    decision = agent.act_fast(
+                        obs_dict,
+                        return_decision=True,
+                        deterministic=eval_det,
+                        noise_scale=noise_scale,
+                        calibration=eval_calibration,
                     )
-                else:
-                    decision = agent.act_with_confidence(obs_dict)
                     lat_us = (time.perf_counter_ns() - t0) / 1000.0
                     action = decision.action
                     tracker.record_inference(
@@ -481,6 +554,23 @@ def run_worker_eval(config: Dict[str, Any], hud_client: HUDClient) -> None:
                         uncertainty=decision.uncertainty,
                         confidence=decision.confidence,
                         entropy=decision.entropy,
+                        calibration=decision.calibration,
+                    )
+                else:
+                    decision = agent.act_with_confidence(
+                        obs_dict,
+                        deterministic=eval_det,
+                        noise_scale=noise_scale,
+                        calibration=eval_calibration,
+                    )
+                    lat_us = (time.perf_counter_ns() - t0) / 1000.0
+                    action = decision.action
+                    tracker.record_inference(
+                        latency_us=lat_us,
+                        uncertainty=decision.uncertainty,
+                        confidence=decision.confidence,
+                        entropy=decision.entropy,
+                        calibration=decision.calibration,
                     )
 
                 obs_dict, reward, terminated, truncated, _ = env.step(action)
@@ -489,9 +579,47 @@ def run_worker_eval(config: Dict[str, Any], hud_client: HUDClient) -> None:
                 steps += 1
                 tracker.record_env_step(reward=reward, done=done)
 
-                # Renderização in-browser com indicador de disparo e mapas de atenção visual (Grad-CAM)
+                # Standstill Watchdog para ambientes de locomoção contínua (ex: Ant-v5)
+                # Se o agente ficar imóvel / travado por muitos passos consecutivos, encerra o episódio
+                # imediatamente em vez de ficar 950 frames congelado até o step 1000!
+                if is_locomotion and not done and steps > 20:
+                    speed = 1.0
+                    unwrapped_env = getattr(env, "unwrapped", env)
+                    if hasattr(unwrapped_env, "data") and hasattr(unwrapped_env.data, "qvel"):
+                        try:
+                            xy_vel = unwrapped_env.data.qvel[:2]
+                            speed = float(np.linalg.norm(xy_vel))
+                        except Exception:
+                            speed = 1.0
+                    else:
+                        delta = obs_dict.get("delta_obs")
+                        if delta is not None:
+                            speed = float(np.linalg.norm(delta))
+
+                    if speed < 0.02:
+                        standstill_steps += 1
+                        if standstill_steps >= 40:  # ~0.8s a 50 FPS sem nenhum movimento
+                            print(f"[Watchdog Locomoção] Deadlock estático detectado no passo {steps} (velocidade = {speed:.4f} m/s). Reiniciando próximo episódio...")
+                            done = True
+                    else:
+                        standstill_steps = 0
+
+                # Renderização in-browser com taxa adaptativa e zero-overhead
+                now = time.time()
+                should_render_frame = False
                 if render_mode == "in_browser":
+                    if dt_target > 0:
+                        if (now - last_frame_ts >= max(0.016, dt_target * 0.8)) and hud_client.is_ready_for_frame():
+                            should_render_frame = True
+                    else:
+                        if (now - last_frame_ts >= 0.033) and hud_client.is_ready_for_frame():
+                            should_render_frame = True
+
+                if should_render_frame:
                     try:
+                        cube_vmode = hud_client.get_cube_view_mode()
+                        if hasattr(env.unwrapped, "set_view_mode"):
+                            env.unwrapped.set_view_mode(cube_vmode)
                         frame = env.render()
                         if frame is not None:
                             try:
@@ -523,15 +651,16 @@ def run_worker_eval(config: Dict[str, Any], hud_client: HUDClient) -> None:
                                 pass
 
                             hud_client.send_frame(frame)
+                            last_frame_ts = now
                     except Exception:
                         pass
 
                 # Atualização periódica de telemetria a cada ~50 ms
-                now = time.time()
                 if now - last_telemetry_ts >= 0.05:
                     snap = tracker.snapshot()
                     hud_client.send_telemetry(snap)
                     last_telemetry_ts = now
+
 
                 # Pacing da simulação para suavidade visual no HUD
                 if dt_target > 0:

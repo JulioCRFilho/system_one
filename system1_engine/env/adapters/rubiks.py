@@ -10,6 +10,7 @@ Implementa:
 from __future__ import annotations
 
 import io
+import math
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import gymnasium as gym
@@ -179,6 +180,29 @@ class RubiksCubeCore:
         1: (164, 198),  # D
     }
 
+    INVERSE_ATOMIC = {
+        "U": "U_prime", "U_prime": "U",
+        "D": "D_prime", "D_prime": "D",
+        "F": "F_prime", "F_prime": "F",
+        "B": "B_prime", "B_prime": "B",
+        "R": "R_prime", "R_prime": "R",
+        "L": "L_prime", "L_prime": "L",
+    }
+    INVERSE_MACROS = {
+        "SUNE": "ANTI_SUNE", "ANTI_SUNE": "SUNE",
+        "U_TURN": "U_PRIME_TURN", "U_PRIME_TURN": "U_TURN",
+        "ROTATE_Y": "ROTATE_Y_PRIME", "ROTATE_Y_PRIME": "ROTATE_Y",
+    }
+    # Macro-ações que efetivamente desalinham e embaralham peças (exclui rotações globais do cubo Y e Y')
+    SCRAMBLE_MACRO_NAMES = [
+        "SEXY_MOVE_R", "SEXY_MOVE_L",
+        "SUNE", "ANTI_SUNE",
+        "T_PERM",
+        "INSERT_EDGE_R", "INSERT_EDGE_L",
+        "YELLOW_CROSS",
+        "U_TURN", "U_PRIME_TURN",
+    ]
+
     def __init__(self) -> None:
         # Estado resolvido: 6 faces x 9 facetas com a cor da face (0..5)
         self.state = np.repeat(np.arange(6, dtype=np.int32), 9)
@@ -199,23 +223,31 @@ class RubiksCubeCore:
                 self.apply_atomic(m)
 
     def scramble(self, depth: int = 4, use_macros: bool = False, rng: Optional[np.random.Generator] = None) -> List[str]:
-        """Embaralha o cubo a partir do estado resolvido com uma profundidade definida."""
+        """Embaralha o cubo a partir do estado resolvido com uma profundidade definida, garantindo não-cancelamento."""
         self.reset()
         if rng is None:
             rng = np.random.default_rng()
         applied = []
+        target_depth = max(1, depth)
+        last_act = None
+        attempts = 0
+
         if use_macros:
-            choices = self.MACRO_NAMES
-            for _ in range(depth):
+            while (len(applied) < target_depth or self.is_solved()) and attempts < 60:
+                attempts += 1
+                choices = [m for m in self.SCRAMBLE_MACRO_NAMES if m != self.INVERSE_MACROS.get(last_act)]
                 act = str(rng.choice(choices))
                 self.apply_macro(act)
                 applied.append(act)
+                last_act = act
         else:
-            choices = self.ATOMIC_MOVES
-            for _ in range(depth):
+            while (len(applied) < target_depth or self.is_solved()) and attempts < 60:
+                attempts += 1
+                choices = [m for m in self.ATOMIC_MOVES if m != self.INVERSE_ATOMIC.get(last_act)]
                 act = str(rng.choice(choices))
                 self.apply_atomic(act)
                 applied.append(act)
+                last_act = act
         return applied
 
     def get_aligned_count(self) -> int:
@@ -284,6 +316,243 @@ class RubiksCubeCore:
 
         return np.array(img, dtype=np.uint8)
 
+    def render_3d(
+        self,
+        width: int = 480,
+        height: int = 320,
+        last_action: str = "INITIAL",
+        steps: int = 0,
+    ) -> np.ndarray:
+        """Renderiza o Cubo Mágico em projeção Isométrica 3D fotorrealista com visão dupla."""
+        img = Image.new("RGB", (width, height), color=(7, 9, 14))
+        draw = ImageDraw.Draw(img)
+
+        # Moldura estética Cyber-Dark
+        draw.rectangle([6, 6, width - 7, height - 7], outline=(30, 41, 59), width=2)
+        draw.rectangle([10, 10, width - 11, height - 11], outline=(17, 24, 39), width=1)
+
+        cx = 160
+        cy = 175
+        scale = 32.0
+        cos30 = math.cos(math.radians(30))
+        sin30 = math.sin(math.radians(30))
+
+        def project(x, y, z):
+            sx = cx + scale * (x * cos30 - z * cos30)
+            sy = cy + scale * (x * sin30 + z * sin30 - y)
+            return (sx, sy)
+
+        # Sombra sob o cubo principal
+        shadow_pts = [
+            project(-1.6, -1.6, 1.6),
+            project(1.6, -1.6, 1.6),
+            project(1.6, -1.6, -1.6),
+            project(-1.6, -1.6, -1.6),
+        ]
+        draw.polygon([(p[0], p[1] + 14) for p in shadow_pts], fill=(12, 16, 24))
+
+        # ================= CUBO PRINCIPAL (Faces: U=0, F=2, R=4) =================
+        # Face U (Cima, Face 0, y = 1.5)
+        for r in range(3):
+            for c in range(3):
+                x_min = -1.5 + c * 1.0 + 0.08
+                x_max = x_min + 0.84
+                z_min = -1.5 + r * 1.0 + 0.08
+                z_max = z_min + 0.84
+                y_val = 1.5
+
+                p_box = [
+                    project(-1.5 + c, 1.5, -1.5 + r),
+                    project(-1.5 + c + 1, 1.5, -1.5 + r),
+                    project(-1.5 + c + 1, 1.5, -1.5 + r + 1),
+                    project(-1.5 + c, 1.5, -1.5 + r + 1),
+                ]
+                draw.polygon(p_box, fill=(15, 18, 26), outline=(25, 30, 42))
+
+                pts = [
+                    project(x_min, y_val, z_min),
+                    project(x_max, y_val, z_min),
+                    project(x_max, y_val, z_max),
+                    project(x_min, y_val, z_max),
+                ]
+                st_idx = 0 * 9 + (r * 3 + c)
+                col_id = int(self.state[st_idx])
+                col = self.PALETTE.get(col_id, (255, 255, 255))
+                shaded = tuple(min(255, int(v * 1.02)) for v in col)
+                draw.polygon(pts, fill=shaded, outline=(10, 12, 18))
+
+        # Face F (Frente, Face 2, z = 1.5)
+        for r in range(3):
+            for c in range(3):
+                x_min = -1.5 + c * 1.0 + 0.08
+                x_max = x_min + 0.84
+                y_max = 1.5 - r * 1.0 - 0.08
+                y_min = y_max - 0.84
+                z_val = 1.5
+
+                p_box = [
+                    project(-1.5 + c, 1.5 - r, 1.5),
+                    project(-1.5 + c + 1, 1.5 - r, 1.5),
+                    project(-1.5 + c + 1, 1.5 - r - 1, 1.5),
+                    project(-1.5 + c, 1.5 - r - 1, 1.5),
+                ]
+                draw.polygon(p_box, fill=(15, 18, 26), outline=(25, 30, 42))
+
+                pts = [
+                    project(x_min, y_max, z_val),
+                    project(x_max, y_max, z_val),
+                    project(x_max, y_min, z_val),
+                    project(x_min, y_min, z_val),
+                ]
+                st_idx = 2 * 9 + (r * 3 + c)
+                col_id = int(self.state[st_idx])
+                col = self.PALETTE.get(col_id, (255, 255, 255))
+                shaded = tuple(int(v * 0.92) for v in col)
+                draw.polygon(pts, fill=shaded, outline=(10, 12, 18))
+
+        # Face R (Direita, Face 4, x = 1.5)
+        for r in range(3):
+            for c in range(3):
+                z_max = 1.5 - c * 1.0 - 0.08
+                z_min = z_max - 0.84
+                y_max = 1.5 - r * 1.0 - 0.08
+                y_min = y_max - 0.84
+                x_val = 1.5
+
+                p_box = [
+                    project(1.5, 1.5 - r, 1.5 - c),
+                    project(1.5, 1.5 - r, 1.5 - c - 1),
+                    project(1.5, 1.5 - r - 1, 1.5 - c - 1),
+                    project(1.5, 1.5 - r - 1, 1.5 - c),
+                ]
+                draw.polygon(p_box, fill=(15, 18, 26), outline=(25, 30, 42))
+
+                pts = [
+                    project(x_val, y_max, z_max),
+                    project(x_val, y_max, z_min),
+                    project(x_val, y_min, z_min),
+                    project(x_val, y_min, z_max),
+                ]
+                st_idx = 4 * 9 + (r * 3 + c)
+                col_id = int(self.state[st_idx])
+                col = self.PALETTE.get(col_id, (255, 255, 255))
+                shaded = tuple(int(v * 0.78) for v in col)
+                draw.polygon(pts, fill=shaded, outline=(10, 12, 18))
+
+        # Rótulos do cubo principal
+        draw.text((cx - 15, cy - 85), "U (Cima)", fill=(200, 210, 225))
+        draw.text((cx - 90, cy + 45), "F (Frente)", fill=(34, 197, 94))
+        draw.text((cx + 55, cy + 45), "R (Direita)", fill=(239, 68, 68))
+
+        # ================= INSET 3D REVERSO (Faces: D=1, L=5, B=3) =================
+        rx_box = width - 170
+        ry_box = 48
+        rw_box = 150
+        rh_box = 184
+        draw.rectangle([rx_box, ry_box, rx_box + rw_box, ry_box + rh_box], fill=(11, 15, 23), outline=(30, 41, 59))
+        draw.text((rx_box + 12, ry_box + 8), "REVERSE 3D (D, L, B)", fill=(148, 163, 184))
+
+        rcx = rx_box + rw_box // 2
+        rcy = ry_box + rh_box // 2 + 12
+        rscale = 17.0
+
+        def rproject(x, y, z):
+            sx = rcx + rscale * (x * cos30 - z * cos30)
+            sy = rcy + rscale * (x * sin30 + z * sin30 - y)
+            return (sx, sy)
+
+        # Face D (Base, Face 1) no topo do inset reverso
+        for r in range(3):
+            for c in range(3):
+                x_min = -1.5 + c * 1.0 + 0.08
+                x_max = x_min + 0.84
+                z_min = -1.5 + r * 1.0 + 0.08
+                z_max = z_min + 0.84
+                y_val = 1.5
+
+                pts = [
+                    rproject(x_min, y_val, z_min),
+                    rproject(x_max, y_val, z_min),
+                    rproject(x_max, y_val, z_max),
+                    rproject(x_min, y_val, z_max),
+                ]
+                st_idx = 1 * 9 + (r * 3 + c)
+                col_id = int(self.state[st_idx])
+                col = self.PALETTE.get(col_id, (255, 255, 255))
+                shaded = tuple(min(255, int(v * 1.02)) for v in col)
+                draw.polygon(pts, fill=shaded, outline=(10, 12, 18))
+
+        # Face L (Esquerda, Face 5) na frente-esquerda do inset
+        for r in range(3):
+            for c in range(3):
+                x_min = -1.5 + c * 1.0 + 0.08
+                x_max = x_min + 0.84
+                y_max = 1.5 - r * 1.0 - 0.08
+                y_min = y_max - 0.84
+                z_val = 1.5
+
+                pts = [
+                    rproject(x_min, y_max, z_val),
+                    rproject(x_max, y_max, z_val),
+                    rproject(x_max, y_min, z_val),
+                    rproject(x_min, y_min, z_val),
+                ]
+                st_idx = 5 * 9 + (r * 3 + c)
+                col_id = int(self.state[st_idx])
+                col = self.PALETTE.get(col_id, (255, 255, 255))
+                shaded = tuple(int(v * 0.92) for v in col)
+                draw.polygon(pts, fill=shaded, outline=(10, 12, 18))
+
+        # Face B (Atrás, Face 3) na frente-direita do inset
+        for r in range(3):
+            for c in range(3):
+                z_max = 1.5 - c * 1.0 - 0.08
+                z_min = z_max - 0.84
+                y_max = 1.5 - r * 1.0 - 0.08
+                y_min = y_max - 0.84
+                x_val = 1.5
+
+                pts = [
+                    rproject(x_val, y_max, z_max),
+                    rproject(x_val, y_max, z_min),
+                    rproject(x_val, y_min, z_min),
+                    rproject(x_val, y_min, z_max),
+                ]
+                st_idx = 3 * 9 + (r * 3 + c)
+                col_id = int(self.state[st_idx])
+                col = self.PALETTE.get(col_id, (255, 255, 255))
+                shaded = tuple(int(v * 0.78) for v in col)
+                draw.polygon(pts, fill=shaded, outline=(10, 12, 18))
+
+        draw.text((rcx - 12, rcy - 50), "D (Base)", fill=(250, 204, 21))
+        draw.text((rcx - 55, rcy + 25), "L (Esq)", fill=(249, 115, 22))
+        draw.text((rcx + 30, rcy + 25), "B (Tras)", fill=(59, 130, 246))
+
+        # Cabeçalho e Rodapé HUD
+        aligned = self.get_aligned_count()
+        score = self.get_score() * 100.0
+        draw.text((20, 16), "⚡ SYSTEM 1 HUD | 3D VIEW (ISOMETRIC)", fill=(56, 189, 248))
+        draw.text((20, 30), f"Passos: {steps} | Alinhamento: {aligned}/54 ({score:.1f}%)", fill=(148, 163, 184))
+
+        action_color = (74, 222, 128) if self.is_solved() else (226, 232, 240)
+        footer_label = "STATUS: RESOLVIDO 🏆" if self.is_solved() else f"AÇÃO ATIVA: {last_action}"
+        draw.text((20, height - 28), footer_label, fill=action_color)
+
+        return np.array(img, dtype=np.uint8)
+
+    def render(
+        self,
+        view_mode: str = "3d",
+        width: int = 480,
+        height: int = 320,
+        last_action: str = "INITIAL",
+        steps: int = 0,
+    ) -> np.ndarray:
+        """Renderiza o cubo no modo especificado ('3d' ou '2d')."""
+        if str(view_mode).lower() in ("2d", "net", "flat"):
+            return self.render_net(width, height, last_action, steps)
+        return self.render_3d(width, height, last_action, steps)
+
 
 # =====================================================================
 # AMBIENTES GYMNASIUM
@@ -311,10 +580,14 @@ class RubiksCubeEnv(gym.Env):
         # 54 facetas x 6 cores = 324 floats em [0, 1]
         self.observation_space = gym.spaces.Box(low=0.0, high=1.0, shape=(324,), dtype=np.float32)
 
+        self.view_mode = "3d"
         self._steps = 0
         self._last_action_name = "NONE"
         self._prev_score = 0.0
         self.rng = np.random.default_rng()
+
+    def set_view_mode(self, mode: str) -> None:
+        self.view_mode = str(mode).lower()
 
     def reset(
         self,
@@ -327,6 +600,8 @@ class RubiksCubeEnv(gym.Env):
             self.rng = np.random.default_rng(seed)
 
         depth = options.get("scramble_depth", self.scramble_depth) if options else self.scramble_depth
+        if options and "view_mode" in options:
+            self.set_view_mode(options["view_mode"])
         self.core.scramble(depth=depth, use_macros=False, rng=self.rng)
         self._steps = 0
         self._last_action_name = "RESET"
@@ -374,7 +649,8 @@ class RubiksCubeEnv(gym.Env):
 
     def render(self) -> Optional[np.ndarray]:
         if self.render_mode == "rgb_array":
-            return self.core.render_net(
+            return self.core.render(
+                view_mode=self.view_mode,
                 last_action=self._last_action_name,
                 steps=self._steps,
             )
@@ -418,10 +694,14 @@ class RubiksCubeMacroEnv(gym.Env):
         # 54 facetas x 6 cores = 324 floats em [0, 1]
         self.observation_space = gym.spaces.Box(low=0.0, high=1.0, shape=(324,), dtype=np.float32)
 
+        self.view_mode = "3d"
         self._steps = 0
         self._last_action_name = "NONE"
         self._prev_score = 0.0
         self.rng = np.random.default_rng()
+
+    def set_view_mode(self, mode: str) -> None:
+        self.view_mode = str(mode).lower()
 
     def reset(
         self,
@@ -434,6 +714,8 @@ class RubiksCubeMacroEnv(gym.Env):
             self.rng = np.random.default_rng(seed)
 
         depth = options.get("scramble_depth", self.scramble_depth) if options else self.scramble_depth
+        if options and "view_mode" in options:
+            self.set_view_mode(options["view_mode"])
         self.core.scramble(depth=depth, use_macros=True, rng=self.rng)
         self._steps = 0
         self._last_action_name = "RESET"
@@ -478,7 +760,8 @@ class RubiksCubeMacroEnv(gym.Env):
 
     def render(self) -> Optional[np.ndarray]:
         if self.render_mode == "rgb_array":
-            return self.core.render_net(
+            return self.core.render(
+                view_mode=self.view_mode,
                 last_action=self._last_action_name,
                 steps=self._steps,
             )

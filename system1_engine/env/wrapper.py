@@ -260,6 +260,8 @@ class UniversalS1Wrapper(gym.Wrapper):
     ) -> tuple[S1Observation, float, bool, bool, dict[str, Any]]:
         """Takes an environment step and computes temporal differential state."""
         assert self.prev_obs is not None, "step() called before reset()"
+        if isinstance(self.action_space, gym.spaces.Box):
+            action = np.clip(np.asarray(action, dtype=np.float32), self.action_space.low, self.action_space.high)
         next_obs, reward, terminated, truncated, info = self.env.step(action)
         reward_float = float(reward)
 

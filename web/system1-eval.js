@@ -35,6 +35,30 @@ class RubiksCubeSim {
   };
   static MACRO_NAMES = Object.keys(RubiksCubeSim.MACRO_ACTIONS);
 
+  static INVERSE_ATOMIC = {
+    "U": "U_prime", "U_prime": "U",
+    "D": "D_prime", "D_prime": "D",
+    "F": "F_prime", "F_prime": "F",
+    "B": "B_prime", "B_prime": "B",
+    "R": "R_prime", "R_prime": "R",
+    "L": "L_prime", "L_prime": "L"
+  };
+
+  static INVERSE_MACROS = {
+    "SUNE": "ANTI_SUNE", "ANTI_SUNE": "SUNE",
+    "U_TURN": "U_PRIME_TURN", "U_PRIME_TURN": "U_TURN",
+    "ROTATE_Y": "ROTATE_Y_PRIME", "ROTATE_Y_PRIME": "ROTATE_Y"
+  };
+
+  static SCRAMBLE_MACRO_NAMES = [
+    "SEXY_MOVE_R", "SEXY_MOVE_L",
+    "SUNE", "ANTI_SUNE",
+    "T_PERM",
+    "INSERT_EDGE_R", "INSERT_EDGE_L",
+    "YELLOW_CROSS",
+    "U_TURN", "U_PRIME_TURN"
+  ];
+
   static PALETTE = {
     0: "#F5F5FA", // U: Branco
     1: "#FACC15", // D: Amarelo
@@ -55,6 +79,7 @@ class RubiksCubeSim {
 
   constructor() {
     this.permutations = this._initPermutations();
+    this.scrambleSequence = [];
     this.reset();
   }
 
@@ -139,6 +164,7 @@ class RubiksCubeSim {
       for (let i = 0; i < 9; i++) this.state[f * 9 + i] = f;
     }
     this.lastAction = "RESET";
+    this.scrambleSequence = [];
     this.steps = 0;
   }
 
@@ -158,14 +184,51 @@ class RubiksCubeSim {
     this.steps++;
   }
 
-  scramble(depth = 2) {
+  scrambleAtomic(depth = 3) {
     this.reset();
-    for (let i = 0; i < depth; i++) {
-      const act = RubiksCubeSim.MACRO_NAMES[Math.floor(Math.random() * RubiksCubeSim.MACRO_NAMES.length)];
-      this.applyMacro(act);
+    const applied = [];
+    let lastMove = null;
+    let attempts = 0;
+    const targetDepth = Math.max(1, depth);
+    while ((applied.length < targetDepth || this.isSolved()) && attempts < 60) {
+      attempts++;
+      const candidates = RubiksCubeSim.ATOMIC_MOVES.filter(m => m !== RubiksCubeSim.INVERSE_ATOMIC[lastMove]);
+      const move = candidates[Math.floor(Math.random() * candidates.length)];
+      this.applyAtomic(move);
+      applied.push(move);
+      lastMove = move;
     }
-    this.lastAction = "SCRAMBLED";
+    this.lastAction = "EMBARALHADO";
+    this.scrambleSequence = applied;
     this.steps = 0;
+    return applied;
+  }
+
+  scrambleMacro(depth = 2) {
+    this.reset();
+    const applied = [];
+    let lastMove = null;
+    let attempts = 0;
+    const targetDepth = Math.max(1, depth);
+    while ((applied.length < targetDepth || this.isSolved()) && attempts < 60) {
+      attempts++;
+      const candidates = RubiksCubeSim.SCRAMBLE_MACRO_NAMES.filter(m => m !== RubiksCubeSim.INVERSE_MACROS[lastMove]);
+      const move = candidates[Math.floor(Math.random() * candidates.length)];
+      this.applyMacro(move);
+      applied.push(move);
+      lastMove = move;
+    }
+    this.lastAction = "EMBARALHADO";
+    this.scrambleSequence = applied;
+    this.steps = 0;
+    return applied;
+  }
+
+  scramble(depth = 3, mode = "atomic") {
+    if (mode === "macro") {
+      return this.scrambleMacro(depth || 2);
+    }
+    return this.scrambleAtomic(depth || 3);
   }
 
   getAlignedCount() {
@@ -177,6 +240,11 @@ class RubiksCubeSim {
       }
     }
     return count;
+  }
+
+  getScore() {
+    const aligned = this.getAlignedCount();
+    return Math.max(0.0, Math.min(1.0, (aligned - 6) / 48.0));
   }
 
   isSolved() {
@@ -215,7 +283,11 @@ class RubiksCubeSim {
 
     ctx.fillStyle = '#94A3B8';
     ctx.font = '11px monospace';
-    ctx.fillText(`Passos: ${this.steps} | Alinhamento: ${aligned}/54 (${scorePct}%)`, 20, 42);
+    let statusLine = `Passos: ${this.steps} | Alinhamento: ${aligned}/54 (${scorePct}%)`;
+    if (this.scrambleSequence && this.scrambleSequence.length > 0 && this.steps === 0) {
+      statusLine += ` | Scramble: ${this.scrambleSequence.join(" ")}`;
+    }
+    ctx.fillText(statusLine, 20, 42);
 
     // Desenho das 6 faces em Cruz
     for (const [fIdxStr, { x: fx, y: fy }] of Object.entries(RubiksCubeSim.FACE_LAYOUT)) {
@@ -350,6 +422,9 @@ class System1AgentWeb {
     this.prevObs = null;
     this.prevAction = 0;
     this.prevReward = 0.0;
+    this.dynamicCalibration = 0.0;
+    this.stagnationCount = 0;
+    this.rewardEma = 0.0;
   }
 
   resetMemory() {
@@ -357,15 +432,19 @@ class System1AgentWeb {
     this.prevObs = null;
     this.prevAction = 0;
     this.prevReward = 0.0;
+    this.dynamicCalibration = 0.0;
+    this.stagnationCount = 0;
+    this.rewardEma = 0.0;
   }
 
-  async actWithConfidence(obsArr) {
+  async actWithConfidence(obsArr, prevReward = 0.0, options = {}) {
     const obsDim = obsArr.length;
     let deltaArr = new Float32Array(obsDim);
     if (this.prevObs) {
       for (let i = 0; i < obsDim; i++) deltaArr[i] = obsArr[i] - this.prevObs[i];
     }
     this.prevObs = new Float32Array(obsArr);
+    this.prevReward = typeof prevReward === 'number' ? prevReward : 0.0;
 
     const t0 = performance.now();
 
@@ -389,9 +468,11 @@ class System1AgentWeb {
     const logits = results.logits.data;
     this.hx.set(results.next_hx.data);
 
-    // Softmax & Entropia de Shannon (Gating)
+    // Softmax & Entropia de Shannon (Gating nos logits originais)
     let maxLogit = -Infinity;
-    for (let i = 0; i < logits.length; i++) if (logits[i] > maxLogit) maxLogit = logits[i];
+    for (let i = 0; i < logits.length; i++) {
+      if (logits[i] > maxLogit) maxLogit = logits[i];
+    }
 
     let sumExp = 0;
     const probs = new Float32Array(logits.length);
@@ -403,24 +484,84 @@ class System1AgentWeb {
     let entropy = 0;
     let bestAction = 0;
     let maxProb = 0;
+    const ranked = [];
     for (let i = 0; i < probs.length; i++) {
       probs[i] /= sumExp;
+      ranked.push({ action: i, prob: probs[i], logit: logits[i] });
       if (probs[i] > maxProb) { maxProb = probs[i]; bestAction = i; }
       if (probs[i] > 1e-9) entropy -= probs[i] * Math.log(probs[i]);
+    }
+    ranked.sort((a, b) => b.prob - a.prob);
+
+    // Calibração Contínua de Ação [0.0 = Determinístico/argmax, 1.0 = Estocástico Total] ou Auto-Calibração Homeostática
+    let calib = 0.5;
+    if (options.autoCalibrate || options.calibration === 'auto') {
+      const r = this.prevReward;
+      const deltaR = r - this.rewardEma;
+      this.rewardEma = 0.9 * this.rewardEma + 0.1 * r;
+
+      if (r > 0.01 || deltaR > 0.01) {
+        this.stagnationCount = 0;
+        this.dynamicCalibration = Math.max(0.0, this.dynamicCalibration - 0.20);
+      } else {
+        this.stagnationCount++;
+        if (this.stagnationCount >= 2) {
+          this.dynamicCalibration = Math.min(0.80, this.dynamicCalibration + 0.10);
+        }
+      }
+      calib = this.dynamicCalibration;
+    } else {
+      const calibration = options.calibration !== undefined 
+        ? options.calibration 
+        : (options.temperature !== undefined ? options.temperature : (options.deterministic ? 0.0 : 0.5));
+      calib = Math.min(1.0, Math.max(0.0, typeof calibration === 'number' ? calibration : 0.5));
+    }
+
+    let chosenAction = bestAction;
+    if (calib > 0.01) {
+      const T = Math.max(0.05, calib);
+      let maxScaled = -Infinity;
+      for (let i = 0; i < logits.length; i++) {
+        if (logits[i] / T > maxScaled) maxScaled = logits[i] / T;
+      }
+      let sumExpT = 0;
+      const sampledProbs = new Float32Array(logits.length);
+      for (let i = 0; i < logits.length; i++) {
+        sampledProbs[i] = Math.exp((logits[i] / T) - maxScaled);
+        sumExpT += sampledProbs[i];
+      }
+      for (let i = 0; i < logits.length; i++) sampledProbs[i] /= sumExpT;
+
+      const r = Math.random();
+      let cum = 0;
+      for (let i = 0; i < sampledProbs.length; i++) {
+        cum += sampledProbs[i];
+        if (r <= cum || i === sampledProbs.length - 1) {
+          chosenAction = i;
+          break;
+        }
+      }
+    }
+
+    // Fallback defensivo de cycle breaking se avoidAction for especificado explicitamente
+    if (options.avoidAction !== undefined && options.avoidAction === chosenAction && ranked.length > 1) {
+      chosenAction = ranked[1].action;
     }
 
     const maxEntropy = Math.log(logits.length);
     const uncertainty = Math.min(1.0, Math.max(0.0, entropy / maxEntropy));
 
-    this.prevAction = bestAction;
-    this.prevReward = 0.0;
+    this.prevAction = chosenAction;
 
     return {
-      action: bestAction,
+      action: chosenAction,
       confidence: maxProb,
       uncertainty: uncertainty,
-      isUncertain: uncertainty > 0.75,
-      latencyMs: latencyMs
+      calibration: calib,
+      isUncertain: uncertainty > 0.70 || maxProb < 0.50,
+      latencyMs: latencyMs,
+      ranked: ranked,
+      value: results.value ? results.value.data[0] : 0.0
     };
   }
 }
