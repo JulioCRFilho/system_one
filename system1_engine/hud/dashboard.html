@@ -350,7 +350,7 @@
               <button type="button" onclick="suggestCheckpointName(true)" class="badge-btn" title="Gera ou incrementa um nome de arquivo .pt contextualizado com o ambiente e cenário selecionados">🪄 Sugerir Nome</button>
             </div>
             <div id="save-input-container" class="flex flex-col gap-1">
-              <input type="text" id="cfg-save" placeholder="ex: s1_cartpole.pt" value="s1_cartpole.pt" class="hud-input" oninput="checkSaveConflict()" />
+              <input type="text" id="cfg-save" placeholder="ex: s1_cartpole_trained.pt" value="s1_cartpole_trained.pt" class="hud-input" oninput="checkSaveConflict()" />
               <div id="save-status-msg" class="text-[10px] text-gray-500 font-mono"></div>
               <label class="flex items-center gap-1.5 cursor-pointer text-[10px] text-emerald-400 font-mono mt-0.5 select-none" title="Converte automaticamente para formato ONNX e sincroniza com web/models e o portfólio oficial">
                 <input type="checkbox" id="chk-auto-sync-web" checked class="w-3 h-3 rounded bg-gray-900 border-gray-700 text-emerald-500 focus:ring-0 cursor-pointer" />
@@ -1511,7 +1511,7 @@
 
     function getBaseCheckpointStem() {
       const { envVal, envClean, scenarioClean } = getContextualEnvAndScenario();
-      const suffix = activeMode === 'train' ? 'trained' : 'checkpoint';
+      const suffix = 'trained';
 
       if (envVal === 'vizdoom') {
         if (scenarioClean && scenarioClean !== 'vizdoom') {

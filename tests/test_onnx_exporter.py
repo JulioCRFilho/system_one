@@ -20,6 +20,23 @@ def test_resolve_web_model_filename():
     assert resolve_web_model_filename("RubiksCube-v0") == "s1_rubiks_atomic.onnx"
     assert resolve_web_model_filename(checkpoint_path="s1_rubiks_macro_trained.pt") == "s1_rubiks_macro.onnx"
     assert resolve_web_model_filename(checkpoint_path="s1_cartpole.pt") == "s1_cartpole.onnx"
+    assert resolve_web_model_filename(checkpoint_path="s1_cartpole_trained.pt") == "s1_cartpole.onnx"
+    assert resolve_web_model_filename(checkpoint_path="s1_lunarlander_v3_trained.pt") == "s1_lunarlander_v3.onnx"
+    assert resolve_web_model_filename(checkpoint_path="s1_ant_v5_trained_v3.pt") == "s1_ant_v5.onnx"
+    assert resolve_web_model_filename(checkpoint_path="s1_mountaincar_v0_trained.pt") == "s1_mountaincar_v0.onnx"
+
+
+def test_find_latest_trained_checkpoint():
+    from pathlib import Path
+    from system1_engine.core.onnx_exporter import find_latest_trained_checkpoint
+    project_root = Path(__file__).resolve().parent.parent
+
+    # Deve encontrar o checkpoint treinado com 'trained' no nome para cada ambiente mandatório
+    for env in ("CartPole-v1", "Acrobot-v1", "MountainCar-v0", "LunarLander-v3", "Ant-v5", "RubiksCube-v0"):
+        ckpt = find_latest_trained_checkpoint(env, project_root)
+        assert ckpt is not None, f"Nenhum checkpoint encontrado para {env}"
+        assert "trained" in os.path.basename(ckpt).lower(), f"Checkpoint {ckpt} não contém 'trained' no nome"
+
 
 
 def test_auto_sync_web_model_vector():

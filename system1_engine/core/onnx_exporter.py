@@ -57,6 +57,7 @@ class S1OnnxExportWrapper(nn.Module):
 
 def resolve_web_model_filename(env_id: Optional[str] = None, checkpoint_path: Optional[str] = None) -> str:
     """Mapeia o ambiente ou caminho de checkpoint para o nome canônico usado no HUD Web."""
+    import re
     combined = f"{env_id or ''} {checkpoint_path or ''}".lower()
     if "rubiks_atomic" in combined or "rubikscube-v0" in combined:
         return "s1_rubiks_atomic.onnx"
@@ -70,7 +71,11 @@ def resolve_web_model_filename(env_id: Optional[str] = None, checkpoint_path: Op
     if checkpoint_path:
         base = os.path.basename(checkpoint_path)
         name_only = os.path.splitext(base)[0]
-        return f"{name_only}.onnx"
+        # Remove sufixos como _trained, _trained_v2, _v2 para obter o nome canônico do modelo ONNX
+        clean_name = re.sub(r'_trained(?:_v\d+)?$', '', name_only, flags=re.IGNORECASE)
+        if not clean_name.startswith("s1_"):
+            clean_name = f"s1_{clean_name}"
+        return f"{clean_name}.onnx"
     return "s1_model.onnx"
 
 
@@ -161,9 +166,83 @@ def auto_sync_web_model(
         return None
 
 
-def generate_web_manifest(web_models_dir: Optional[Path] = None) -> Dict[str, Any]:
+def find_latest_trained_checkpoint(env_id: str, project_root: Optional[Path] = None) -> Optional[str]:
+    """Localiza o checkpoint .pt mais recente e de maior versão treinado para um determinado ambiente.
+
+    Convenção do projeto: checkpoints neurais contêm 'trained' no nome (ex: s1_<env>_trained_v<N>.pt).
+    Prioriza arquivos contendo 'trained', ordenando pela versão numérica final (_vN) e timestamp mtime.
+    """
+    import glob
+    import re
+
+    if project_root is None:
+        project_root = Path(__file__).resolve().parent.parent.parent
+
+    all_pts = [
+        Path(p)
+        for p in (glob.glob(str(project_root / "*.pt")) + glob.glob(str(project_root / "**" / "*.pt"), recursive=True))
+    ]
+    # Filtra pastas virtuais, git e caches
+    pts = [p for p in all_pts if not any(part.startswith(".") or part in (".venv", "build", "__pycache__") for part in p.parts)]
+
+    env_clean = env_id.lower().replace("-", "_").replace(" ", "_")
+
+    def env_filter(name: str) -> bool:
+        n = name.lower()
+        if "rubikscube-v0" in env_id or "rubiks_atomic" in env_id:
+            return "rubik" in n and "macro" not in n
+        if "rubik" in env_id:
+            return "rubik" in n and "macro" in n
+        if "cartpole" in env_clean:
+            return "cartpole" in n
+        if "acrobot" in env_clean:
+            return "acrobot" in n
+        if "mountaincar" in env_clean:
+            return "mountaincar" in n
+        if "lunarlander" in env_clean:
+            return "lunarlander" in n
+        if "ant_v5" in env_clean:
+            return "ant_v5" in n
+        if "ant_v4" in env_clean:
+            return "ant_v4" in n
+        if "bipedalwalker" in env_clean:
+            return "bipedalwalker" in n
+        if "carracing" in env_clean:
+            return "carracing" in n
+        if "frozenlake" in env_clean:
+            return "frozenlake" in n
+        if "pendulum" in env_clean:
+            return "pendulum" in n
+        if "vizdoom" in env_clean:
+            return "vizdoom" in n
+        return env_clean in n
+
+    matching = [p for p in pts if env_filter(p.name)]
+    if not matching:
+        return None
+
+    def sort_key(p: Path):
+        name = p.stem.lower()
+        has_trained = 1 if "trained" in name else 0
+        m = re.search(r"_v(\d+)$", name)
+        ver = int(m.group(1)) if m else (1 if has_trained else 0)
+        try:
+            mtime = p.stat().st_mtime
+        except OSError:
+            mtime = 0.0
+        return (has_trained, ver, mtime)
+
+    matching.sort(key=sort_key, reverse=True)
+    return str(matching[0])
+
+
+def generate_web_manifest(
+    web_models_dir: Optional[Path] = None,
+    ckpt_sources: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
     """Varre os modelos ONNX disponíveis e constrói o manifesto dinâmico manifest.json."""
     import json
+    import re
     import time
 
     project_root = Path(__file__).resolve().parent.parent.parent
@@ -282,6 +361,19 @@ def generate_web_manifest(web_models_dir: Optional[Path] = None) -> Dict[str, An
         meta["size_bytes"] = stat.st_size
         meta["mtime"] = stat.st_mtime
         meta["mtime_str"] = time.strftime("%d/%m/%Y %H:%M:%S", time.localtime(stat.st_mtime))
+
+        # Vincula o checkpoint PyTorch (.pt) de origem, sempre seguindo a convenção 'trained'
+        source_ckpt = (ckpt_sources or {}).get(filename)
+        if not source_ckpt:
+            target_env = meta.get("env_id", "")
+            found = find_latest_trained_checkpoint(target_env, project_root)
+            if found:
+                source_ckpt = os.path.basename(found)
+        if source_ckpt:
+            meta["checkpoint_source"] = source_ckpt
+            m_ver = re.search(r"_v(\d+)$", Path(source_ckpt).stem)
+            meta["checkpoint_version"] = f"v{m_ver.group(1)}" if m_ver else "v1"
+
         key = meta.get("key", onnx_path.stem)
         models_dict[key] = meta
 
@@ -375,16 +467,25 @@ def export_checkpoint_to_onnx(
 
 def sync_all_web_models(sync_portfolio: bool = True) -> List[str]:
     """Varre todos os checkpoints treinados do repositório e sincroniza para a pasta web/models/."""
-    import glob
-
     project_root = Path(__file__).resolve().parent.parent.parent
-    checkpoints = sorted(glob.glob(str(project_root / "*.pt")) + glob.glob(str(project_root / "**" / "*.pt"), recursive=True))
 
-    # Mapeia os melhores checkpoints prioritários para cada ambiente
+    # Ambientes alvo do catálogo web
+    target_envs = [
+        "RubiksCube-v0",
+        "RubiksCubeMacro-v0",
+        "CartPole-v1",
+        "Acrobot-v1",
+        "MountainCar-v0",
+        "LunarLander-v3",
+        "Ant-v5",
+        "Ant-v4",
+    ]
+
+    # Mapeia checkpoints prioritários de fallback para cada ambiente
     priority_map = {
         "RubiksCube-v0": ["s1_rubikscube_v0_trained.pt"],
-        "RubiksCubeMacro-v0": ["s1_rubikscubemacro_v0_trained_v3.pt", "s1_rubikscubemacro_v0_trained_v2.pt", "s1_rubikscube_v0_trained.pt"],
-        "CartPole-v1": ["s1_cartpole.pt"],
+        "RubiksCubeMacro-v0": ["s1_rubikscubemacro_v0_trained_v3.pt", "s1_rubiks_macro_trained.pt"],
+        "CartPole-v1": ["s1_cartpole_trained.pt", "s1_cartpole.pt"],
         "Acrobot-v1": ["s1_acrobot_v1_trained.pt", "s1_acrobot_v1_checkpoint.pt", "s1_acrobot.pt"],
         "MountainCar-v0": ["s1_mountaincar_v0_trained.pt"],
         "LunarLander-v3": ["s1_lunarlander_v3_trained.pt"],
@@ -393,25 +494,29 @@ def sync_all_web_models(sync_portfolio: bool = True) -> List[str]:
     }
 
     synced = []
+    ckpt_source_map = {}
     print("\n" + "=" * 70)
     print("🚀 SINCRONIZANDO TODOS OS MODELOS E PESOS PARA O WEB HUD")
     print("=" * 70)
 
-    for env_id, candidate_files in priority_map.items():
-        chosen_ckpt = None
-        for cand in candidate_files:
-            cand_path = project_root / cand
-            if cand_path.exists():
-                chosen_ckpt = str(cand_path)
-                break
+    for env_id in target_envs:
+        chosen_ckpt = find_latest_trained_checkpoint(env_id, project_root)
+        if not chosen_ckpt:
+            for cand in priority_map.get(env_id, []):
+                cand_path = project_root / cand
+                if cand_path.exists():
+                    chosen_ckpt = str(cand_path)
+                    break
 
         if chosen_ckpt:
             res = export_checkpoint_to_onnx(chosen_ckpt, env_id=env_id, sync_portfolio=sync_portfolio)
             if res:
                 synced.append(res)
+                onnx_name = os.path.basename(res)
+                ckpt_source_map[onnx_name] = os.path.basename(chosen_ckpt)
 
-    # Gera o manifesto consolidado
-    manifest = generate_web_manifest()
+    # Gera o manifesto consolidado com metadados da origem do checkpoint
+    manifest = generate_web_manifest(ckpt_sources=ckpt_source_map)
     print(f"\n✅ Sincronização concluída: {len(synced)} modelos ONNX ativos no manifesto web.")
     print("=" * 70 + "\n")
     return synced

@@ -32,6 +32,14 @@ class TelemetrySpec:
     required_fields: tuple = ("latency", "confidence", "uncertainty", "calibration")
 
 
+@dataclass(frozen=True)
+class CheckpointSpec:
+    """Convenção oficial de nomenclatura e auto-resolução de checkpoints do System 1."""
+    required_keyword: str = "trained"
+    pattern: str = r"^s1_.+_trained(?:_v\d+)?\.pt$"
+    description: str = "Checkpoints PyTorch (.pt) salvos e treinados devem conter 'trained' no nome."
+
+
 class HUDWebParityContract:
     """Contrato formal de paridade entre o HUD Python e o Web Hub."""
 
@@ -39,6 +47,7 @@ class HUDWebParityContract:
 
     HOMEOSTASIS = HomeostasisSpec()
     TELEMETRY = TelemetrySpec()
+    CHECKPOINT = CheckpointSpec()
 
     ACTION_MODES = {
         "auto": "Auto-calibração homeostática por momentum de recompensa",
@@ -114,3 +123,10 @@ class HUDWebParityContract:
                 errors.append(f"Arquivo ONNX {filename} não existe em {models_dir}.")
 
         return errors
+
+    @classmethod
+    def validate_checkpoint_convention(cls, checkpoint_filename: str) -> bool:
+        """Valida se o nome do arquivo de checkpoint segue a convenção de conter 'trained'."""
+        fn = Path(checkpoint_filename).name.lower()
+        return cls.CHECKPOINT.required_keyword in fn and fn.endswith(".pt")
+

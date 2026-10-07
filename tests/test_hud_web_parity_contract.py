@@ -91,3 +91,33 @@ def test_contract_manifest_and_models_parity():
     manifest_path = PROJECT_ROOT / "web" / "models" / "manifest.json"
     errors = HUDWebParityContract.validate_manifest(manifest_path)
     assert not errors, f"Violações do contrato no manifesto de modelos: {errors}"
+
+
+def test_contract_checkpoint_naming_convention():
+    """Garante que a convenção formal exige 'trained' no nome de todos os checkpoints."""
+    # 1. Regra de validação formal do contrato
+    assert HUDWebParityContract.validate_checkpoint_convention("s1_cartpole_trained.pt")
+    assert HUDWebParityContract.validate_checkpoint_convention("s1_ant_v5_trained_v3.pt")
+    assert not HUDWebParityContract.validate_checkpoint_convention("s1_cartpole.pt")
+    assert not HUDWebParityContract.validate_checkpoint_convention("s1_cartpole_checkpoint.pt")
+
+    # 2. HUD Python (dashboard.html) deve sugerir estritamente nomes com 'trained'
+    dashboard_html = (PROJECT_ROOT / "system1_engine" / "hud" / "dashboard.html").read_text(encoding="utf-8")
+    assert "s1_cartpole_trained.pt" in dashboard_html
+    assert "const suffix = 'trained';" in dashboard_html
+
+    # 3. Web Hub (index.html) deve exibir o checkpoint de origem PyTorch
+    web_html = (PROJECT_ROOT / "web" / "index.html").read_text(encoding="utf-8")
+    assert "active-ckpt-source" in web_html
+    assert "Origem PyTorch (.pt)" in web_html
+
+    # 4. Manifesto de modelos web deve vincular checkpoints de origem contendo 'trained'
+    manifest_path = PROJECT_ROOT / "web" / "models" / "manifest.json"
+    import json
+    with open(manifest_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    for key, model_info in data.get("models", {}).items():
+        source = model_info.get("checkpoint_source")
+        assert source, f"Modelo {key} não declara checkpoint_source"
+        assert "trained" in source.lower(), f"Checkpoint de origem {source} para {key} não possui 'trained'"
+

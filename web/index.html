@@ -488,12 +488,16 @@
 
         <div class="bg-[#050811] p-2.5 rounded border border-gray-900 font-mono text-[11px] flex flex-col gap-1.5">
           <div class="flex items-center justify-between">
+            <span class="text-gray-400">Origem PyTorch (.pt):</span>
+            <span id="active-ckpt-source" class="font-bold text-emerald-400 truncate max-w-[190px]">s1_rubikscube_v0_trained.pt</span>
+          </div>
+          <div class="flex items-center justify-between">
             <span class="text-gray-400">Arquivo ONNX:</span>
             <span id="active-ckpt-file" class="font-bold text-cyan-300">s1_rubiks_atomic.onnx</span>
           </div>
           <div class="flex items-center justify-between">
             <span class="text-gray-400">Atualizado em:</span>
-            <span id="active-ckpt-mtime" class="text-emerald-400">07/10/2026 09:56:13</span>
+            <span id="active-ckpt-mtime" class="text-gray-200">Recente</span>
           </div>
           <div class="flex items-center justify-between">
             <span class="text-gray-400">Dimensões & Arquitetura:</span>
@@ -599,6 +603,8 @@
         mode: "macro",
         type: "rubiks",
         size: "3.18 MB",
+        checkpoint_source: "s1_rubikscubemacro_v0_trained_v3.pt",
+        checkpoint_version: "v3",
         description: "Hierarchical RL com macro-ações CFOP pré-definidas (Sune, Anti-Sune, Sexy Move, T-Perm, Insert Edge)."
       },
       rubiks_atomic: {
@@ -609,6 +615,8 @@
         mode: "atomic",
         type: "rubiks",
         size: "3.18 MB",
+        checkpoint_source: "s1_rubikscube_v0_trained.pt",
+        checkpoint_version: "v1",
         description: "12 giros atômicos elementares (U, D, F, B, R, L) com física e permutação 3D exatas. Taxa de resolução reflexiva comprovada de até 100%."
       },
       cartpole: {
@@ -618,7 +626,9 @@
         file: "s1_cartpole.onnx",
         mode: "vector",
         type: "cartpole",
-        size: "2.77 MB",
+        size: "2.78 MB",
+        checkpoint_source: "s1_cartpole_trained.pt",
+        checkpoint_version: "v1",
         description: "Equilíbrio invertido amortizado em sub-milissegundo com derivadas temporais Δs_t."
       },
       acrobot: {
@@ -629,6 +639,8 @@
         mode: "vector",
         type: "acrobot",
         size: "2.78 MB",
+        checkpoint_source: "s1_acrobot_v1_trained.pt",
+        checkpoint_version: "v1",
         description: "Sistema caótico não-linear de dois elos sob controle reflexivo amortizado."
       },
       mountaincar: {
@@ -639,6 +651,8 @@
         mode: "vector",
         type: "mountaincar",
         size: "2.78 MB",
+        checkpoint_source: "s1_mountaincar_v0_trained.pt",
+        checkpoint_version: "v1",
         description: "Acúmulo de energia potencial gravitacional via oscilação reflexiva de momento."
       },
       lunarlander: {
@@ -649,6 +663,8 @@
         mode: "vector",
         type: "lunarlander",
         size: "2.79 MB",
+        checkpoint_source: "s1_lunarlander_v3_trained.pt",
+        checkpoint_version: "v1",
         description: "Controle vetorial de empuxo e atitude em gravidade simulada."
       },
       ant_v5: {
@@ -659,6 +675,8 @@
         mode: "continuous",
         type: "ant",
         size: "2.91 MB",
+        checkpoint_source: "s1_ant_v5_trained_v3.pt",
+        checkpoint_version: "v3",
         description: "Locomoção quadrupedal contínua em alta dimensão com física MuJoCo v5."
       }
     };
@@ -1077,7 +1095,9 @@
               size: `${m.size_mb || 3.0} MB`,
               mtime: m.mtime_str || "Recente",
               mtime_ts: m.mtime || 0,
-              description: m.description || ""
+              description: m.description || "",
+              checkpoint_source: m.checkpoint_source || `${m.file.replace('.onnx', '')}_trained.pt`,
+              checkpoint_version: m.checkpoint_version || "v1"
             };
 
             const opt = document.createElement("option");
@@ -1097,11 +1117,13 @@
 
     function updateActiveCheckpointCard(demoKey) {
       const cfg = MODELS[demoKey] || MODELS["rubiks_atomic"];
+      const sourceEl = document.getElementById('active-ckpt-source');
       const fileEl = document.getElementById('active-ckpt-file');
       const mtimeEl = document.getElementById('active-ckpt-mtime');
       const dimsEl = document.getElementById('active-ckpt-dims');
       const sizeEl = document.getElementById('active-ckpt-size');
 
+      if (sourceEl) sourceEl.innerText = cfg.checkpoint_source || `${cfg.file.replace('.onnx', '')}_trained.pt`;
       if (fileEl) fileEl.innerText = cfg.file;
       if (mtimeEl) mtimeEl.innerText = cfg.mtime;
       if (sizeEl) sizeEl.innerText = cfg.size;
