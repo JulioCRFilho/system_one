@@ -1,7 +1,7 @@
 {
   "version": "1.0",
-  "updated_at": 1791342131.1899369,
-  "updated_at_str": "07/10/2026 00:02:11",
+  "updated_at": 1791377773.615463,
+  "updated_at_str": "07/10/2026 09:56:13",
   "models": {
     "acrobot": {
       "key": "acrobot",
@@ -15,9 +15,9 @@
       "description": "Sistema caótico não-linear de dois elos sob controle reflexivo amortizado.",
       "file": "s1_acrobot_v1.onnx",
       "size_mb": 2.78,
-      "size_bytes": 2912657,
-      "mtime": 1791342131.1879663,
-      "mtime_str": "07/10/2026 00:02:11"
+      "size_bytes": 2919165,
+      "mtime": 1791377773.1393497,
+      "mtime_str": "07/10/2026 09:56:13"
     },
     "ant_v4": {
       "key": "ant_v4",
@@ -32,8 +32,8 @@
       "file": "s1_ant_v4.onnx",
       "size_mb": 2.82,
       "size_bytes": 2951758,
-      "mtime": 1791342113.5483878,
-      "mtime_str": "07/10/2026 00:01:53"
+      "mtime": 1791377773.6115267,
+      "mtime_str": "07/10/2026 09:56:13"
     },
     "ant_v5": {
       "key": "ant_v5",
@@ -48,8 +48,8 @@
       "file": "s1_ant_v5.onnx",
       "size_mb": 2.91,
       "size_bytes": 3051600,
-      "mtime": 1791342113.514294,
-      "mtime_str": "07/10/2026 00:01:53"
+      "mtime": 1791377773.5707536,
+      "mtime_str": "07/10/2026 09:56:13"
     },
     "cartpole": {
       "key": "cartpole",
@@ -62,10 +62,10 @@
       "discrete": true,
       "description": "Equilíbrio invertido amortizado em sub-milissegundo com reflexos ultra-estáveis.",
       "file": "s1_cartpole.onnx",
-      "size_mb": 2.77,
-      "size_bytes": 2909005,
-      "mtime": 1791342115.5778098,
-      "mtime_str": "07/10/2026 00:01:55"
+      "size_mb": 2.78,
+      "size_bytes": 2915513,
+      "mtime": 1791377773.1006052,
+      "mtime_str": "07/10/2026 09:56:13"
     },
     "lunarlander": {
       "key": "lunarlander",
@@ -80,8 +80,8 @@
       "file": "s1_lunarlander_v3.onnx",
       "size_mb": 2.79,
       "size_bytes": 2922817,
-      "mtime": 1791342113.3290372,
-      "mtime_str": "07/10/2026 00:01:53"
+      "mtime": 1791377773.344075,
+      "mtime_str": "07/10/2026 09:56:13"
     },
     "mountaincar": {
       "key": "mountaincar",
@@ -96,8 +96,8 @@
       "file": "s1_mountaincar_v0.onnx",
       "size_mb": 2.78,
       "size_bytes": 2914045,
-      "mtime": 1791342113.2777739,
-      "mtime_str": "07/10/2026 00:01:53"
+      "mtime": 1791377773.1782744,
+      "mtime_str": "07/10/2026 09:56:13"
     },
     "rubiks_atomic": {
       "key": "rubiks_atomic",
@@ -113,8 +113,8 @@
       "file": "s1_rubiks_atomic.onnx",
       "size_mb": 3.18,
       "size_bytes": 3336041,
-      "mtime": 1791342113.135913,
-      "mtime_str": "07/10/2026 00:01:53"
+      "mtime": 1791377773.017656,
+      "mtime_str": "07/10/2026 09:56:13"
     },
     "rubiks_macro": {
       "key": "rubiks_macro",
@@ -129,8 +129,8 @@
       "file": "s1_rubiks_macro.onnx",
       "size_mb": 3.18,
       "size_bytes": 3336041,
-      "mtime": 1791342113.1739848,
-      "mtime_str": "07/10/2026 00:01:53"
+      "mtime": 1791377773.0560188,
+      "mtime_str": "07/10/2026 09:56:13"
     }
   }
 }
