@@ -154,6 +154,12 @@ class HUDProcessRunner:
                 self.logs.append(f"[{time.strftime('%H:%M:%S')}] ⚠️ Processo finalizado com erro (código {exit_code}).")
                 self.log_counter += 1
 
+    def clear_logs(self) -> None:
+        """Limpa o buffer histórico de logs acumulados."""
+        with self._lock:
+            self.logs.clear()
+            self.log_counter = 0
+
     def get_logs(self, since_index: int = 0) -> Tuple[List[str], int]:
         """Retorna as linhas de log acumuladas desde um índice específico."""
         with self._lock:

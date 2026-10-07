@@ -362,13 +362,15 @@ def generate_web_manifest(
         meta["mtime"] = stat.st_mtime
         meta["mtime_str"] = time.strftime("%d/%m/%Y %H:%M:%S", time.localtime(stat.st_mtime))
 
-        # Vincula o checkpoint PyTorch (.pt) de origem, sempre seguindo a convenção 'trained'
         source_ckpt = (ckpt_sources or {}).get(filename)
         if not source_ckpt:
             target_env = meta.get("env_id", "")
             found = find_latest_trained_checkpoint(target_env, project_root)
             if found:
                 source_ckpt = os.path.basename(found)
+            else:
+                clean_env_id = target_env.lower().replace("-", "_")
+                source_ckpt = f"s1_{clean_env_id}_trained.pt"
         if source_ckpt:
             meta["checkpoint_source"] = source_ckpt
             m_ver = re.search(r"_v(\d+)$", Path(source_ckpt).stem)

@@ -10,3 +10,4 @@ _vizdoom.ini
 *.app
 .DS_Store
 *.log
+.checkpoints_backup/

@@ -1808,8 +1808,27 @@
       if (dataArr.length > 30) dataArr.shift();
     }
 
-    function clearLogs() {
-      document.getElementById('terminal-logs').innerHTML = '';
+    async function clearLogs() {
+      document.getElementById('terminal-logs').innerHTML = '<div class="text-gray-500 italic">Central HUD limpa. Configure os parâmetros e clique em Iniciar.</div>';
+      try {
+        [chartLat, chartRew, chartLoss].forEach(c => {
+          c.data.datasets.forEach(d => { d.data = []; });
+          c.update('none');
+        });
+        chartGrads.data.datasets[0].data = [0, 0, 0];
+        chartGrads.update('none');
+      } catch (e) {}
+      document.getElementById('kpi-steps').innerText = '0';
+      document.getElementById('kpi-return').innerText = '0.00';
+      document.getElementById('kpi-latency').innerText = '0.0 µs';
+      document.getElementById('kpi-confidence').innerText = '0.0%';
+      try {
+        await fetch('/api/action', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'clear' })
+        });
+      } catch (e) {}
     }
 
     function appendLog(line) {

@@ -152,6 +152,14 @@ def test_hud_server_lifecycle_and_endpoints():
         action_resp = json.loads(res.read().decode("utf-8"))
         assert action_resp["success"] is True
 
+        # 6. Test POST /api/action clear/reset
+        clear_payload = json.dumps({"action": "clear"}).encode("utf-8")
+        conn.request("POST", "/api/action", clear_payload, {"Content-Type": "application/json"})
+        res = conn.getresponse()
+        assert res.status == 200
+        clear_resp = json.loads(res.read().decode("utf-8"))
+        assert clear_resp["success"] is True
+
         conn.close()
 
 
@@ -179,6 +187,12 @@ def test_hud_process_runner_start_and_stop():
     assert stop_ok is True
     assert not runner.is_running()
     assert runner.get_state()["status"] in ["STOPPED", "COMPLETED"]
+
+    # Clear logs
+    runner.clear_logs()
+    cleared_logs, cleared_count = runner.get_logs(0)
+    assert len(cleared_logs) == 0
+    assert cleared_count == 0
 
 
 def test_hud_e2e_evaluation_and_in_browser_rendering(tmp_path):

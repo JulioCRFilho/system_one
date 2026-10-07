@@ -760,7 +760,24 @@
     // CONSOLE / TERMINAL DE LOGS EM TEMPO REAL
     // =====================================================================
     function clearLogs() {
-      document.getElementById('terminal-logs').innerHTML = '';
+      const term = document.getElementById('terminal-logs');
+      if (term) term.innerHTML = '<div class="text-gray-500 italic">Terminal limpo. Selecione o ambiente e clique em Iniciar.</div>';
+      try {
+        [chartLat, chartRew, chartHomeostasis].forEach(c => {
+          if (c && c.data && c.data.datasets) {
+            c.data.datasets.forEach(d => { d.data = []; });
+            c.update('none');
+          }
+        });
+      } catch (e) {}
+      const kSteps = document.getElementById('kpi-steps');
+      if (kSteps) kSteps.innerText = '0';
+      const kRet = document.getElementById('kpi-return');
+      if (kRet) kRet.innerText = '0.00';
+      const kLat = document.getElementById('kpi-latency');
+      if (kLat) kLat.innerText = '0.0 µs';
+      const kConf = document.getElementById('kpi-confidence');
+      if (kConf) kConf.innerText = '0.0%';
     }
 
     function appendLog(line) {

@@ -260,6 +260,24 @@ class HUDServer:
         with self._lock:
             self.latest_telemetry.update(data)
 
+    def reset_telemetry(self) -> None:
+        """Reseta todos os valores de telemetria acumulados para zero."""
+        with self._lock:
+            self.latest_telemetry = {
+                "fps": 0.0,
+                "total_steps": 0,
+                "mean_return_20": 0.0,
+                "best_return": 0.0,
+                "best_mean_return": 0.0,
+                "latency_p50_us": 0.0,
+                "latency_p99_us": 0.0,
+                "mean_confidence": 0.0,
+                "mean_uncertainty": 0.0,
+                "policy_loss": 0.0,
+                "value_loss": 0.0,
+                "grad_norms": {"FrontEnd": 0.0, "Trunk": 0.0, "PolicyHead": 0.0},
+            }
+
     def get_telemetry_snapshot(self) -> Dict[str, Any]:
         with self._lock:
             return dict(self.latest_telemetry)
@@ -596,6 +614,11 @@ class HUDServer:
                             success, msg = runner.stop()
                             frame_buffer.reset_placeholder("⚡ SYSTEM 1 ENGINE", "TAREFA INTERROMPIDA PELO USUÁRIO")
                             resp = {"success": success, "message": msg}
+                        elif action in ("clear", "reset"):
+                            runner.clear_logs()
+                            server_instance.reset_telemetry()
+                            frame_buffer.reset_placeholder("⚡ SYSTEM 1 ENGINE", "CENTRAL PRONTA / AGUARDANDO TREINO")
+                            resp = {"success": True, "message": "Estado, logs e telemetria resetados com sucesso."}
                         elif action == "set_vision_mode":
                             mode = data.get("mode", "normal")
                             server_instance.vision_mode = mode
