@@ -3,268 +3,634 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>System 1 Engine — Portfolio Live Evaluation</title>
+  <title>System 1 Engine — Web Runtime HUD (ONNX Wasm SIMD)</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- ONNX Runtime Web via CDN (WebAssembly / WebGPU) -->
+  <!-- Chart.js via CDN para Telemetria Gráfica em Tempo Real -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- ONNX Runtime Web via CDN (WebAssembly SIMD / WebGPU) -->
   <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js"></script>
   <!-- Three.js via CDN para Visualização 3D do Cubo Mágico -->
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
   <!-- Runtime e Simuladores do System 1 -->
   <script src="./system1-eval.js"></script>
   <style>
-    body { background-color: #07090E; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace; }
-    .glass-card { background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(51, 65, 85, 0.6); }
+    body {
+      background-color: #080c14;
+      color: #e2e8f0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+    .card {
+      background-color: #0f172a;
+      border: 1px solid #1e293b;
+      border-radius: 0.5rem;
+    }
+    .hud-input {
+      background-color: #090d16;
+      border: 1px solid #1e293b;
+      color: #f1f5f9;
+      border-radius: 0.25rem;
+      padding: 0.35rem 0.5rem;
+      font-size: 0.75rem;
+      width: 100%;
+    }
+    .hud-input:focus {
+      outline: none;
+      border-color: #38bdf8;
+    }
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+    .badge-btn {
+      font-size: 9px;
+      padding: 2px 5px;
+      border-radius: 3px;
+      background: #1e293b;
+      color: #94a3b8;
+      border: 1px solid #334155;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .badge-btn:hover {
+      background: #38bdf8;
+      color: #0f172a;
+      border-color: #38bdf8;
+      font-weight: bold;
+    }
+    #terminal-logs::-webkit-scrollbar {
+      width: 6px;
+    }
+    #terminal-logs::-webkit-scrollbar-track {
+      background: #090d16;
+    }
+    #terminal-logs::-webkit-scrollbar-thumb {
+      background: #1e293b;
+      border-radius: 3px;
+    }
+    #terminal-logs::-webkit-scrollbar-thumb:hover {
+      background: #334155;
+    }
+    /* Estilos de Tooltips Informativos do HUD */
+    .tooltip-wrap {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      cursor: help;
+      vertical-align: middle;
+    }
+    .tooltip-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 13px;
+      height: 13px;
+      border-radius: 50%;
+      background: #1e293b;
+      color: #38bdf8;
+      font-size: 9px;
+      font-weight: bold;
+      line-height: 1;
+      border: 1px solid #0284c7;
+      transition: all 0.15s ease;
+      user-select: none;
+    }
+    .tooltip-wrap:hover .tooltip-icon {
+      background: #0284c7;
+      color: #ffffff;
+      box-shadow: 0 0 6px rgba(56, 189, 248, 0.8);
+      border-color: #38bdf8;
+    }
+    .tooltip-bubble {
+      visibility: hidden;
+      opacity: 0;
+      position: absolute;
+      bottom: calc(100% + 6px);
+      left: 50%;
+      transform: translateX(-50%) translateY(4px);
+      width: 250px;
+      max-width: 80vw;
+      background: #090e1a;
+      border: 1px solid #38bdf8;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.75), 0 0 8px rgba(56, 189, 248, 0.25);
+      color: #cbd5e1;
+      padding: 7px 9px;
+      border-radius: 6px;
+      font-size: 10px;
+      line-height: 1.35;
+      z-index: 1000;
+      transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease;
+      pointer-events: none;
+      white-space: normal;
+      font-weight: normal;
+      text-transform: none;
+    }
+    .tooltip-wrap:hover .tooltip-bubble {
+      visibility: visible;
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
   </style>
 </head>
-<body class="text-gray-200 min-h-screen flex flex-col items-center p-3 md:p-6 select-none">
+<body class="p-4 min-h-screen flex flex-col justify-between">
 
-  <!-- Header do Portfólio -->
-  <header class="w-full max-w-4xl flex items-center justify-between pb-4 mb-4 border-b border-gray-800">
-    <div class="flex items-center gap-2.5">
-      <div class="w-8 h-8 rounded bg-gradient-to-tr from-cyan-600 to-amber-500 flex items-center justify-center font-bold text-white shadow-lg">⚡</div>
-      <div>
-        <h1 class="text-base md:text-lg font-bold text-white tracking-wide flex items-center gap-2">
-          System 1 Engine
-          <span class="text-[10px] px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800 font-mono">LIVE EVALUATION</span>
-        </h1>
-        <p class="text-xs text-gray-400">Agente Neural Recorrente Amortizado • Inferência Sub-Milissegundo</p>
+  <!-- Top Navigation & Global KPIs (Idêntico ao HUD Normal) -->
+  <header class="card p-3 mb-4 flex flex-wrap justify-between items-center gap-4 border-b border-gray-800">
+    <div class="flex items-center gap-3">
+      <span class="text-2xl font-black tracking-wider text-cyan-400 flex items-center gap-2">
+        <span>⚡</span> SYSTEM 1 ENGINE
+      </span>
+      <span class="px-2 py-0.5 rounded text-[10px] bg-cyan-950 text-cyan-300 border border-cyan-800 font-bold tracking-widest uppercase">
+        WEB RUNTIME HUD • LIVE EVALUATION (WASM SIMD)
+      </span>
+      <a href="http://localhost:8050" target="_blank" rel="noopener noreferrer" class="ml-2 px-2.5 py-1 rounded text-xs font-bold bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white border border-cyan-400/50 shadow flex items-center gap-1.5 transition cursor-pointer" title="Abrir HUD Normal Python (FastAPI/WebSocket) em nova aba">
+        <span>🖥️</span> HUD Python ↗
+      </a>
+      <button type="button" id="btn-sync-web-models" onclick="syncWebModels()" class="px-2 py-1 rounded text-[11px] font-mono font-semibold bg-gray-900 hover:bg-gray-800 text-cyan-300 border border-cyan-700/60 shadow-sm flex items-center gap-1 transition cursor-pointer" title="Sincronizar checkpoints PyTorch (.pt) para modelos ONNX">
+        <span>🔄</span> Sincronizar ONNX
+      </button>
+    </div>
+
+    <!-- Indicador de Status Global -->
+    <div class="flex items-center gap-3">
+      <div class="flex items-center gap-2 px-3 py-1 rounded bg-gray-900 border border-gray-800">
+        <span id="global-status-dot" class="status-dot bg-gray-500"></span>
+        <span id="global-status-text" class="text-xs font-bold uppercase text-gray-400">IDLE</span>
       </div>
     </div>
-    <div class="flex items-center gap-2">
-      <button onclick="syncWebModels()" class="text-xs text-cyan-300 hover:text-white bg-cyan-950 hover:bg-cyan-900 border border-cyan-800 px-2.5 py-1.5 rounded transition flex items-center gap-1 shadow-sm cursor-pointer" title="Varre o disco local e sincroniza novos checkpoints treinados">
-        <span>🔄</span> <span class="hidden sm:inline">Sincronizar Modelos</span>
-      </button>
-      <a href="https://github.com/JulioCRFilho/system_one" target="_blank" rel="noopener noreferrer" class="text-xs text-gray-300 hover:text-white bg-gray-900 hover:bg-gray-800 border border-gray-700 px-3 py-1.5 rounded transition flex items-center gap-1.5 shadow-sm">
-        <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-        <span class="hidden sm:inline">GitHub</span>
-      </a>
+
+    <!-- Quick KPIs Instantâneos -->
+    <div class="flex flex-wrap gap-4 text-xs bg-gray-900/80 px-4 py-1.5 rounded border border-gray-800">
+      <div>FPS Simulação: <span id="kpi-fps" class="font-bold text-green-400">60.0</span></div>
+      <div>Passos: <span id="kpi-steps" class="font-bold text-yellow-400">0</span></div>
+      <div>Pico / Score: <span id="kpi-return" class="font-bold text-cyan-400" title="Maior pontuação alcançada">0.00</span></div>
+      <div>Latência P50: <span id="kpi-latency" class="font-bold text-pink-400">0.18 ms</span></div>
+      <div>Confiança: <span id="kpi-confidence" class="font-bold text-emerald-400">--%</span></div>
+      <div>Calibração: <span id="kpi-calib" class="font-bold text-purple-400">0.00</span></div>
     </div>
   </header>
 
-  <!-- Container Principal -->
-  <main class="w-full max-w-4xl grid grid-cols-1 md:grid-cols-3 gap-4">
+  <!-- Main 3-Column Grid (Mesma Arquitetura do HUD Normal) -->
+  <main class="grid grid-cols-1 lg:grid-cols-12 gap-4 flex-1">
 
-    <!-- Viewport da Simulação (Esquerda / 2 Colunas) -->
-    <div class="md:col-span-2 flex flex-col gap-3">
-      <div class="glass-card rounded-xl p-3 flex flex-col gap-2 shadow-2xl">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span id="label-viewport" class="text-xs font-mono font-bold text-gray-300">Cubo Mágico 3x3 (Atômico - 12 Giros)</span>
+    <!-- COLUNA 1: PAINEL DE CONTROLE DE FLAGS E CONFIGURAÇÃO (4 Colunas) -->
+    <section class="lg:col-span-4 flex flex-col gap-4">
+      <div class="card p-4 flex flex-col gap-3 max-h-[85vh] overflow-y-auto">
+        <div class="flex justify-between items-center border-b border-gray-800 pb-2">
+          <h2 class="text-xs font-bold text-cyan-400 uppercase tracking-wider flex items-center gap-1.5">
+            <span>🎛️</span> Painel de Configuração & Modos
+          </h2>
+          <span class="text-[10px] text-gray-500">Wasm SIMD Runtime</span>
+        </div>
+
+        <!-- Modo de Operação -->
+        <div>
+          <div class="flex items-center gap-1.5 mb-1">
+            <label class="text-[11px] text-gray-400 font-semibold">Modo de Operação</label>
+            <span class="tooltip-wrap">
+              <span class="tooltip-icon" title="Define o modo de execução no navegador: Avaliar (Live Run com visualização 3D/2D) ou Benchmark (1.000 passes Wasm SIMD puros).">ⓘ</span>
+              <span class="tooltip-bubble"><strong>Modos Web</strong>:<br>• <strong>Avaliar</strong>: Executa o agente reflexivo com animação em tempo real e telemetria.<br>• <strong>Benchmark</strong>: Executa 1000 passes com WebAssembly SIMD para medir latência P50/P90/P99 e FPS.</span>
+            </span>
           </div>
-          <div class="flex items-center gap-2">
-            <!-- Alternador de Visão 3D vs 2D Net para o Cubo Mágico -->
-            <div id="rubiks-view-toggle" class="flex items-center bg-gray-900 border border-gray-700 rounded p-0.5 text-[10px] font-mono">
-              <button type="button" id="btn-web-3d" onclick="setWebCubeViewMode('3d')" class="px-2 py-0.5 rounded font-bold bg-indigo-600 text-white transition shadow-sm cursor-pointer">🎲 3D</button>
-              <button type="button" id="btn-web-2d" onclick="setWebCubeViewMode('2d')" class="px-2 py-0.5 rounded text-gray-400 hover:text-white transition cursor-pointer">🗺️ 2D Net</button>
-            </div>
-            <span id="badge-fps" class="text-[10px] font-mono text-cyan-400 bg-cyan-950/80 px-2 py-0.5 rounded border border-cyan-800">60 FPS</span>
+          <div class="grid grid-cols-3 gap-1">
+            <button type="button" id="btn-mode-run" onclick="setMode('run')" class="py-1 px-2 text-xs font-bold rounded bg-cyan-600 text-white border border-cyan-500 transition cursor-pointer">Avaliar</button>
+            <button type="button" id="btn-mode-bench" onclick="setMode('benchmark')" class="py-1 px-2 text-xs font-bold rounded bg-gray-800 text-gray-400 border border-gray-700 hover:bg-gray-700 transition cursor-pointer">Bench</button>
+            <a href="http://localhost:8050" target="_blank" class="py-1 px-2 text-xs font-bold rounded bg-gray-800 text-gray-400 border border-gray-700 hover:bg-gray-700 transition cursor-pointer text-center flex items-center justify-center gap-1" title="Treinamento com gradientes PPO requer o HUD Python">Treino ↗</a>
           </div>
         </div>
 
-        <!-- Canvas do Jogo / Viewport -->
-        <div class="relative bg-black rounded-lg overflow-hidden border border-gray-800 flex items-center justify-center min-h-[320px]">
-          <canvas id="viewport-canvas" width="480" height="320" class="w-full h-auto max-h-[320px] object-contain hidden"></canvas>
-          <div id="rubiks-3d-container" class="w-full h-[320px] relative cursor-grab active:cursor-grabbing select-none flex items-center justify-center">
+        <!-- ACESSO RÁPIDO: CUBO MÁGICO 3X3 (SYSTEM 1) -->
+        <div class="bg-gradient-to-br from-amber-950/50 via-purple-950/40 to-cyan-950/40 p-2.5 rounded-lg border border-amber-500/50 flex flex-col gap-2 shadow-sm">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] font-bold text-amber-300 flex items-center gap-1.5">
+              <span>🎲</span> Acesso Rápido: Cubo Mágico 3x3
+            </span>
+            <span class="text-[9px] px-1.5 py-0.5 rounded bg-amber-900/70 text-amber-200 border border-amber-600/70 font-mono">CFOP / Macro</span>
+          </div>
+          <p class="text-[10px] text-gray-300 leading-tight">
+            Avalie reflexos com 12 macro-ações de speedcubing ou giros atômicos elementares com visualização 3D WebGL ao vivo no viewport.
+          </p>
+          <div class="grid grid-cols-2 gap-1.5">
+            <button type="button" onclick="quickSelectEnv('rubiks_macro')" class="py-1.5 px-2 text-[10px] font-bold rounded bg-amber-600 hover:bg-amber-500 text-white border border-amber-400 transition flex items-center justify-center gap-1 cursor-pointer shadow-sm">
+              <span>⚡</span> Avaliar Macro (CFOP)
+            </button>
+            <button type="button" onclick="quickSelectEnv('rubiks_atomic')" class="py-1.5 px-2 text-[10px] font-bold rounded bg-purple-700 hover:bg-purple-600 text-white border border-purple-400 transition flex items-center justify-center gap-1 cursor-pointer shadow-sm">
+              <span>▶</span> Avaliar Atômico
+            </button>
+          </div>
+        </div>
+
+        <!-- Ambiente e Cenário -->
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <div class="flex items-center gap-1.5">
+              <label class="text-[11px] text-gray-400 font-semibold">Ambiente & Modelo ONNX</label>
+              <span class="tooltip-wrap">
+                <span class="tooltip-icon" title="Identificador do ambiente simulado diretamente no navegador.">ⓘ</span>
+                <span class="tooltip-bubble"><strong>Ambiente</strong>: Seleciona o simulador local e o respectivo checkpoint ONNX compilado com Wasm SIMD.</span>
+              </span>
+            </div>
+            <a href="https://gymnasium.farama.org/environments/" target="_blank" rel="noopener noreferrer" class="text-[10px] text-gray-400 hover:text-gray-200 font-mono flex items-center gap-0.5 bg-gray-900 hover:bg-gray-800 px-1.5 py-0.5 rounded border border-gray-800 transition">
+              Docs Gymnasium ↗
+            </a>
+          </div>
+          <select id="select-demo" class="hud-input mb-1.5 font-mono" onchange="onDemoChange()">
+            <option value="rubiks_macro">🧩 RubiksCubeMacro-v0 (CFOP / 12 Algoritmos)</option>
+            <option value="rubiks_atomic" selected>🎲 RubiksCube-v0 (Atômico - 12 Giros Simples)</option>
+            <option value="cartpole">⚖️ CartPole-v1 (Controle Clássico, 4D, 2 Ações)</option>
+            <option value="acrobot">🤸 Acrobot-v1 (Braço Duplo Acrobático, 6D, 3 Ações)</option>
+            <option value="mountaincar">⛰️ MountainCar-v0 (Controle de Inércia Não-Linear)</option>
+            <option value="lunarlander">🚀 LunarLander-v3 (Pouso Espacial Box2D)</option>
+            <option value="ant_v5">🐜 Ant-v5 (Robótica Contínua MuJoCo 27D)</option>
+          </select>
+
+          <!-- Atalhos Rápidos com Chips Coloridos -->
+          <div class="flex flex-wrap gap-1 mb-1">
+            <button type="button" onclick="quickSelectEnv('rubiks_macro')" class="px-1.5 py-0.5 rounded bg-amber-950 text-amber-300 hover:bg-amber-900 border border-amber-800 text-[9px] font-mono cursor-pointer transition">Rubiks-Macro</button>
+            <button type="button" onclick="quickSelectEnv('rubiks_atomic')" class="px-1.5 py-0.5 rounded bg-purple-950 text-purple-300 hover:bg-purple-900 border border-purple-800 text-[9px] font-mono cursor-pointer transition">Rubiks-Atômico</button>
+            <button type="button" onclick="quickSelectEnv('cartpole')" class="px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300 hover:bg-cyan-900 border border-cyan-800 text-[9px] font-mono cursor-pointer transition">CartPole-v1</button>
+            <button type="button" onclick="quickSelectEnv('acrobot')" class="px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300 hover:bg-cyan-900 border border-cyan-800 text-[9px] font-mono cursor-pointer transition">Acrobot-v1</button>
+            <button type="button" onclick="quickSelectEnv('mountaincar')" class="px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 hover:bg-emerald-900 border border-emerald-800 text-[9px] font-mono cursor-pointer transition">MountainCar-v0</button>
+            <button type="button" onclick="quickSelectEnv('lunarlander')" class="px-1.5 py-0.5 rounded bg-purple-950 text-purple-300 hover:bg-purple-900 border border-purple-800 text-[9px] font-mono cursor-pointer transition">LunarLander-v3</button>
+            <button type="button" onclick="quickSelectEnv('ant_v5')" class="px-1.5 py-0.5 rounded bg-pink-950 text-pink-300 hover:bg-pink-900 border border-pink-800 text-[9px] font-mono cursor-pointer transition">Ant-v5</button>
+          </div>
+        </div>
+
+        <!-- HIPERPARÂMETROS DE AVALIAÇÃO E CALIBRAÇÃO -->
+        <div id="param-eval-group" class="border-t border-gray-800/80 pt-2 flex flex-col gap-2">
+          <div class="flex justify-between items-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+            <span>Configuração de Decisão & Ação</span>
+          </div>
+          <div>
+            <div class="flex items-center gap-1.5 mb-1">
+              <label class="text-[10px] text-gray-400 font-semibold">Modo de Decisão do Agente</label>
+              <span class="tooltip-wrap">
+                <span class="tooltip-icon" title="Estratégia de inferência: act_with_confidence (telemetria completa e gating) ou act_fast (modo reflexo direto puro ~180µs).">ⓘ</span>
+                <span class="tooltip-bubble"><strong>Modo de Decisão</strong>:<br>• <strong>act_with_confidence()</strong>: Calcula entropia de Shannon, confiança percentual e alimenta telemetria completa.<br>• <strong>act_fast()</strong>: Modo reflexo amortizado sem gating.</span>
+              </span>
+            </div>
+            <select id="cfg-inference-mode" class="hud-input">
+              <option value="confidence">act_with_confidence() — Gating de Incerteza & Telemetria Completa</option>
+              <option value="fast">act_fast() — Modo Reflexo Ultrarrápido Puro (~180 µs)</option>
+            </select>
+          </div>
+          <div>
+            <div class="flex items-center gap-1.5 mb-1">
+              <label class="text-[10px] text-gray-400 font-semibold">Perfil de Ação na Avaliação</label>
+              <span class="tooltip-wrap">
+                <span class="tooltip-icon" title="Controla a política de ação na avaliação. Em ambientes complexos, Auto/Homeostase previne bloqueios em equilíbrios estáticos.">ⓘ</span>
+                <span class="tooltip-bubble"><strong>Perfil de Ação</strong>:<br>• <strong>Auto / Homeostase</strong>: Termorregulação dinâmica S1 por momentum de recompensa.<br>• <strong>Estocástica Calibrada</strong>: Amostragem suave com temperatura constante.<br>• <strong>Determinística Pura</strong>: Argmax / média μ sem ruído.<br>• <strong>Estocástica Total</strong>: Amostragem Boltzmann T=1.0.</span>
+              </span>
+            </div>
+            <select id="cfg-eval-action-mode" onchange="onEvalActionModeChange(this.value)" class="hud-input">
+              <option value="auto" selected>⚡ Auto / Homeostase (Auto-Ajuste Termodinâmico S1 — Recomendado)</option>
+              <option value="calibrated">Estocástica Calibrada (Fluidez e Locomoção Suave)</option>
+              <option value="deterministic">Determinística Pura (Média μ / Argmax)</option>
+              <option value="stochastic">Estocástica Total (Exploração σ de Treino)</option>
+            </select>
+          </div>
+          <div>
+            <div class="flex justify-between items-center mb-0.5">
+              <div class="flex items-center gap-1">
+                <label class="text-[10px] text-gray-400 font-semibold">Calibração de Ação (0.0 a 1.0)</label>
+                <span class="tooltip-wrap">
+                  <span class="tooltip-icon" title="Calibração contínua de amostragem na avaliação. Interpola suavemente entre determinismo puro (0.0) e estocasticidade total (1.0).">ⓘ</span>
+                  <span class="tooltip-bubble"><strong>Calibração [0.0, 1.0]</strong>:<br>• <strong>⚡ Auto</strong>: Homeostase S1 elevando temperatura quando estagnado.<br>• <strong>0.0 (Determinístico)</strong>: Argmax.<br>• <strong>0.5 (Calibrado)</strong>: Temperatura moderada.<br>• <strong>1.0 (Estocástico Total)</strong>: Distribuição raw completa.</span>
+                </span>
+              </div>
+              <div class="flex gap-0.5">
+                <button type="button" onclick="setEvalCalibration('auto')" class="badge-btn">⚡ Auto</button>
+                <button type="button" onclick="setEvalCalibration(0.0)" class="badge-btn">0.0 [Det]</button>
+                <button type="button" onclick="setEvalCalibration(0.5)" class="badge-btn">0.5 [Calib]</button>
+                <button type="button" onclick="setEvalCalibration(1.0)" class="badge-btn">1.0 [Estoc]</button>
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <input type="range" id="cfg-eval-calib-range" min="0.0" max="1.0" step="0.05" value="0.5" oninput="onEvalCalibRangeChange(this.value)" class="w-full accent-cyan-500 cursor-pointer" />
+              <input type="text" id="cfg-eval-calibration" value="auto" oninput="onEvalCalibNumChange(this.value)" class="hud-input w-16 text-center font-mono text-[11px]" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Seção de Embaralhamento (Exclusivo Cubo Mágico) -->
+        <div id="scramble-section" class="border-t border-gray-800/80 pt-2 flex flex-col gap-1.5">
+          <div class="flex items-center justify-between">
+            <span class="text-[10px] text-gray-400 font-semibold">Embaralhamento do Cubo</span>
+            <select id="select-scramble-depth" onchange="onScrambleDepthChange()" class="hud-input !w-auto text-[10px] font-mono py-0.5">
+              <option value="1">1 giro (Reflexo Puro)</option>
+              <option value="2">2 giros (Médio)</option>
+              <option value="3" selected>3 giros (Padrão)</option>
+              <option value="4">4 giros (Avançado)</option>
+              <option value="5">5 giros (Desafio)</option>
+            </select>
+          </div>
+          <button type="button" onclick="scrambleEnv()" class="py-1 px-2 text-[10px] font-bold rounded bg-amber-950/80 hover:bg-amber-900 text-amber-300 border border-amber-700/60 transition flex items-center justify-center gap-1 cursor-pointer shadow-sm">
+            <span>🎲</span> Embaralhar Cubo Mágico
+          </button>
+        </div>
+
+        <!-- Botões de Execução -->
+        <div class="border-t border-gray-800 pt-3 flex flex-col gap-2">
+          <button type="button" id="btn-start" onclick="toggleEvaluation()" class="w-full py-2.5 px-4 rounded bg-emerald-600 hover:bg-emerald-500 font-bold text-white text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition shadow-lg shadow-emerald-950 cursor-pointer">
+            <span id="btn-start-icon">▶️</span> <span id="btn-start-text">INICIAR AVALIAÇÃO</span>
+          </button>
+          <div class="grid grid-cols-2 gap-1.5">
+            <button type="button" id="btn-step" onclick="stepOnce()" class="py-1.5 px-2 rounded bg-gray-800 hover:bg-gray-700 text-cyan-300 border border-gray-700 text-xs font-semibold flex items-center justify-center gap-1 transition cursor-pointer">
+              <span>⏯</span> Passo Único
+            </button>
+            <button type="button" onclick="resetEnv()" class="py-1.5 px-2 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 text-xs font-semibold flex items-center justify-center gap-1 transition cursor-pointer">
+              <span>🔄</span> Resetar Estado
+            </button>
+          </div>
+          <button type="button" id="btn-stop" onclick="stopEvaluation()" disabled class="w-full py-1.5 px-4 rounded bg-rose-900/40 text-gray-500 font-bold text-[11px] uppercase tracking-wider flex items-center justify-center gap-1 border border-rose-900/60 transition cursor-not-allowed">
+            <span>⏹️</span> INTERROMPER
+          </button>
+        </div>
+
+        <!-- Seção: Benchmark Wasm SIMD Dedicado (Visível em Modo Bench) -->
+        <div id="bench-controls" class="hidden border-t border-cyan-800/80 pt-2 flex flex-col gap-2 bg-cyan-950/30 p-2 rounded border border-cyan-800/50">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] font-bold text-cyan-300 flex items-center gap-1">
+              <span>⚡</span> Benchmark Wasm SIMD
+            </span>
+            <span class="text-[9px] font-mono text-cyan-400">1.000 passes</span>
+          </div>
+          <p class="text-[10px] text-gray-300 leading-tight">
+            Executa 1.000 inferências reflexivas amortizadas em sequência pura no WebAssembly medindo latência e dispersão (P50, P90, P99).
+          </p>
+          <button type="button" id="btn-run-benchmark" onclick="runBenchmark()" class="py-2 px-3 rounded bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs uppercase flex items-center justify-center gap-1.5 transition shadow cursor-pointer">
+            <span>🚀</span> RODAR BENCHMARK WASM SIMD
+          </button>
+          <div id="bench-results" class="hidden flex flex-col gap-1 text-[10px] font-mono bg-black/60 p-2 rounded border border-cyan-900/60">
+            <div class="flex justify-between"><span>Throughput:</span><span id="bench-fps" class="text-green-400 font-bold">-- FPS</span></div>
+            <div class="flex justify-between"><span>Latência P50:</span><span id="bench-p50" class="text-cyan-400 font-bold">-- ms</span></div>
+            <div class="flex justify-between"><span>Latência P90:</span><span id="bench-p90" class="text-yellow-400 font-bold">-- ms</span></div>
+            <div class="flex justify-between"><span>Latência P99:</span><span id="bench-p99" class="text-pink-400 font-bold">-- ms</span></div>
+          </div>
+        </div>
+
+        <!-- Metadados do Modelo ONNX Ativo -->
+        <div class="border-t border-gray-800/80 pt-2 flex flex-col gap-1.5 bg-gray-900/40 p-2 rounded border border-gray-800 text-[10px] font-mono">
+          <div class="flex justify-between items-center text-gray-400">
+            <span>Runtime:</span>
+            <span class="text-cyan-400 font-bold">ONNX Web (Wasm SIMD)</span>
+          </div>
+          <div class="flex justify-between items-center text-gray-400">
+            <span>Arquivo ONNX:</span>
+            <span id="model-file-label" class="text-gray-200 truncate max-w-[160px]">s1_rubiks_atomic.onnx</span>
+          </div>
+          <div class="flex justify-between items-center text-gray-400">
+            <span>Tamanho Modelo:</span>
+            <span id="model-size-label" class="text-gray-200">~3.18 MB</span>
+          </div>
+          <div class="flex justify-between items-center text-gray-400">
+            <span>Sincronização:</span>
+            <span id="model-mtime-label" class="text-emerald-400">Recente</span>
+          </div>
+          <p id="model-desc-text" class="text-[9px] text-gray-400 border-t border-gray-800/80 pt-1 leading-relaxed">
+            Tronco Recorrente Amortizado (GRU 256 + ResMLP) com inferência sub-milissegundo direta.
+          </p>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- COLUNA 2: VIEWPORT DO JOGO, LOGS & MODELOS (4 Colunas) -->
+    <section class="lg:col-span-4 flex flex-col gap-4">
+
+      <!-- Viewport de Vídeo / WebGL 3D do Jogo -->
+      <div class="card p-3 flex flex-col">
+        <div class="flex justify-between items-center border-b border-gray-800 pb-2 mb-2">
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-bold text-yellow-400 uppercase tracking-wider flex items-center gap-1.5">
+              <span>🎮</span> Viewport do Jogo
+            </span>
+            <span id="feed-status" class="px-1.5 py-0.5 rounded text-[9px] bg-emerald-950 text-emerald-300 border border-emerald-800 font-mono">ONLINE</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <button type="button" onclick="resetEnv()" class="px-1.5 py-0.5 rounded text-[9px] bg-gray-800 hover:bg-gray-700 text-gray-300 font-mono transition" title="Resetar simulação">↻ Reset</button>
+          </div>
+        </div>
+
+        <!-- Seletor de Perspectiva 3D / 2D para Cubo Mágico -->
+        <div id="rubiks-view-controls" class="mb-2 py-1.5 px-2.5 rounded bg-indigo-950/40 border border-indigo-700/50 flex items-center justify-between transition">
+          <span class="text-[10px] font-bold text-indigo-300 flex items-center gap-1">
+            <span>🎲</span> Visualização Cubo:
+          </span>
+          <div class="flex items-center gap-1">
+            <button type="button" id="btn-cube-view-3d" onclick="setWebCubeViewMode('3d')" class="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-600 text-white border border-indigo-400 shadow-sm transition cursor-pointer">
+              🎲 3D Isometric
+            </button>
+            <button type="button" id="btn-cube-view-2d" onclick="setWebCubeViewMode('2d')" class="px-2 py-0.5 rounded text-[10px] font-bold bg-gray-900 text-gray-400 border border-gray-800 hover:bg-gray-800 transition cursor-pointer">
+              🗺️ 2D Net
+            </button>
+          </div>
+        </div>
+
+        <!-- Área de Renderização (Three.js 3D WebGL ou Canvas 2D) -->
+        <div class="relative bg-black rounded overflow-hidden aspect-[4/3] flex items-center justify-center border border-gray-800/80">
+          <canvas id="viewport-canvas" width="480" height="320" class="w-full h-full object-contain hidden"></canvas>
+          <div id="rubiks-3d-container" class="w-full h-full relative cursor-grab active:cursor-grabbing select-none flex items-center justify-center">
             <div class="absolute bottom-2 left-2 text-[10px] font-mono text-gray-400 bg-black/60 backdrop-blur-sm px-2 py-0.5 rounded pointer-events-none border border-gray-800/80 flex items-center gap-1 z-10">
               <span>🖱️</span> Arraste para orbitar • 2 cliques para resetar ângulo
             </div>
           </div>
-          <div id="loader-overlay" class="absolute inset-0 bg-black/80 flex flex-col items-center justify-center gap-2 text-xs font-mono text-cyan-400 z-20">
+          <div id="loader-overlay" class="absolute inset-0 bg-black/80 flex flex-col items-center justify-center gap-2 text-xs font-mono text-cyan-400 z-20 hidden">
             <div class="w-6 h-6 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin"></div>
-            <span>Carregando pesos neurais...</span>
+            <span>Carregando pesos ONNX via Wasm SIMD...</span>
+          </div>
+          <div id="video-overlay" class="absolute bottom-2 right-2 flex items-center gap-2 px-2 py-1 rounded bg-black/60 backdrop-blur-sm text-[10px] font-mono text-gray-400 pointer-events-none z-10">
+            <span id="overlay-env" class="text-cyan-400 font-bold">RubiksCube-v0</span>
+            <span>•</span>
+            <span id="overlay-fps" class="text-green-400">60.0 FPS</span>
           </div>
         </div>
 
-        <!-- Controles Interativos -->
-        <div class="flex flex-wrap items-center justify-between pt-1 gap-2">
-          <div class="flex items-center gap-1.5 flex-wrap">
-            <button id="btn-toggle" onclick="toggleEvaluation()" class="px-3 py-1.5 text-xs font-bold rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white transition flex items-center gap-1.5 shadow cursor-pointer">
-              <span id="icon-toggle">▶</span> <span id="text-toggle">Iniciar</span>
-            </button>
-            <button id="btn-step" onclick="stepOnce()" class="px-2.5 py-1.5 text-xs font-medium rounded-lg bg-gray-800 hover:bg-gray-700 text-cyan-300 border border-gray-700 transition flex items-center gap-1 cursor-pointer" title="Executa um único passo reflexivo">
-              ⏯ Passo
-            </button>
-            <div id="scramble-controls" class="flex items-center gap-1">
-              <button id="btn-scramble" onclick="scrambleEnv()" class="px-2.5 py-1.5 text-xs font-bold rounded-lg bg-amber-950/80 hover:bg-amber-900 text-amber-300 border border-amber-700/60 transition flex items-center gap-1 shadow-sm cursor-pointer" title="Embaralha o estado garantindo não-cancelamento">
-                🎲 Embaralhar
-              </button>
-              <select id="select-scramble-depth" onchange="onScrambleDepthChange()" class="bg-gray-900 text-[11px] font-mono border border-gray-700 rounded-lg px-2 py-1.5 text-amber-300 focus:outline-none cursor-pointer">
-                <option value="1">1 giro (Reflexo Puro)</option>
-                <option value="2">2 giros (Médio)</option>
-                <option value="3" selected>3 giros (Padrão)</option>
-                <option value="4">4 giros (Avançado)</option>
-                <option value="5">5 giros (Desafio)</option>
-              </select>
-            </div>
-            <button onclick="resetEnv()" class="px-2.5 py-1.5 text-xs font-medium rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 transition cursor-pointer">
-              🔄 Reset
-            </button>
-          </div>
-          <span id="status-desc" class="text-[11px] font-mono text-gray-400 truncate max-w-[280px]">Pronto para avaliar</span>
+        <!-- Feedback de Ação em Tempo Real -->
+        <div class="mt-2.5 pt-2 border-t border-gray-800/80 flex items-center justify-between text-[11px] font-mono">
+          <span class="text-gray-400">Status do Reflexo:</span>
+          <span id="status-desc" class="text-cyan-300 font-bold truncate max-w-[280px]">Pronto para avaliar</span>
         </div>
       </div>
 
-      <!-- Telemetria em Tempo Real -->
+      <!-- Console / Terminal de Logs em Tempo Real (Idêntico ao HUD Normal) -->
+      <div class="card p-3 flex flex-col min-h-[220px]">
+        <div class="flex justify-between items-center border-b border-gray-800 pb-2 mb-2">
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-bold text-green-400 uppercase tracking-wider flex items-center gap-1.5">
+              <span>💻</span> Logs & Decisões do Agente (Wasm Console)
+            </span>
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick="clearLogs()" class="px-2 py-0.5 rounded text-[10px] bg-gray-800 hover:bg-gray-700 text-gray-300 font-mono transition cursor-pointer">Limpar</button>
+            <label class="flex items-center gap-1 text-[10px] text-gray-400 cursor-pointer">
+              <input type="checkbox" id="chk-autoscroll" checked class="w-3 h-3 rounded bg-gray-900 border-gray-700 text-cyan-500 focus:ring-0" /> Auto-scroll
+            </label>
+          </div>
+        </div>
+
+        <div id="terminal-logs" class="flex-1 bg-[#050811] p-2.5 rounded font-mono text-[11px] text-gray-300 overflow-y-auto max-h-[190px] leading-relaxed select-text space-y-0.5 border border-gray-900">
+          <div class="text-gray-500 italic">Central Web pronta. Selecione o ambiente e clique em Iniciar Avaliação.</div>
+        </div>
+      </div>
+
+      <!-- Card de Modelos ONNX Sincronizados no Projeto -->
+      <div class="card p-3 flex flex-col">
+        <div class="flex justify-between items-center border-b border-gray-800 pb-1.5 mb-2">
+          <span class="text-xs font-bold text-purple-400 uppercase tracking-wider flex items-center gap-1.5">
+            <span>📦</span> Modelos ONNX Sincronizados no Projeto
+          </span>
+          <span id="ckpt-count-badge" class="text-[10px] px-1.5 py-0.2 rounded bg-purple-950 text-purple-300 border border-purple-800 font-mono">7 carregados</span>
+        </div>
+        <div id="models-table-container" class="max-h-36 overflow-y-auto space-y-1">
+          <!-- Renderizado dinamicamente -->
+        </div>
+      </div>
+
+    </section>
+
+    <!-- COLUNA 3: TELEMETRIA GRÁFICA EM TEMPO REAL (Chart.js) -->
+    <section class="lg:col-span-4 flex flex-col gap-4">
+
+      <!-- 1. Latência CPU / Wasm SIMD -->
+      <div class="card p-3">
+        <div class="flex justify-between items-center border-b border-gray-800 pb-1 mb-2">
+          <h3 class="text-xs font-semibold text-cyan-400">FASE 1: LATÊNCIA Wasm SIMD (ms)</h3>
+          <span class="text-[10px] text-gray-500">Reflex Budget &le; 0.8 ms</span>
+        </div>
+        <div class="h-28"><canvas id="chartLatency"></canvas></div>
+      </div>
+
+      <!-- 2. Retorno & Pontuação por Episódio -->
+      <div class="card p-3">
+        <div class="flex justify-between items-center border-b border-gray-800 pb-1 mb-2">
+          <h3 class="text-xs font-semibold text-yellow-400">FASE 2: RETORNO MÉDIO & PONTUAÇÃO</h3>
+          <span class="text-[10px] text-gray-500">Curva de Desempenho</span>
+        </div>
+        <div class="h-28"><canvas id="chartReward"></canvas></div>
+      </div>
+
+      <!-- 3. Homeostase Termodinâmica S1 (Temperatura & Incerteza) -->
+      <div class="card p-3">
+        <div class="flex justify-between items-center border-b border-gray-800 pb-1 mb-2">
+          <h3 class="text-xs font-semibold text-purple-400">FASE 3: HOMEOSTASE TERMODINÂMICA (CALIBRAÇÃO S1)</h3>
+          <span class="text-[10px] text-gray-500">Auto-Ajuste [0.0 - 1.0]</span>
+        </div>
+        <div class="h-28"><canvas id="chartHomeostasis"></canvas></div>
+      </div>
+
+      <!-- 4. Cards de Métricas Instantâneas do Reflexo -->
       <div class="grid grid-cols-4 gap-2">
-        <div class="glass-card rounded-lg p-2.5 flex flex-col">
+        <div class="card p-2.5 flex flex-col">
           <span class="text-[10px] text-gray-400 font-mono">LATÊNCIA</span>
-          <span id="metric-latency" class="text-base font-bold font-mono text-cyan-300 mt-0.5">0.18 ms</span>
-          <span class="text-[9px] text-gray-500">CPU ultrarrápida</span>
+          <span id="metric-latency" class="text-sm font-bold font-mono text-cyan-300 mt-0.5">0.18 ms</span>
+          <span class="text-[9px] text-gray-500">Wasm SIMD</span>
         </div>
-        <div class="glass-card rounded-lg p-2.5 flex flex-col">
+        <div class="card p-2.5 flex flex-col">
           <span class="text-[10px] text-gray-400 font-mono">CONFIANÇA</span>
-          <span id="metric-confidence" class="text-base font-bold font-mono text-emerald-400 mt-0.5">--%</span>
-          <span class="text-[9px] text-gray-500">Certeza do reflexo</span>
+          <span id="metric-confidence" class="text-sm font-bold font-mono text-emerald-400 mt-0.5">--%</span>
+          <span class="text-[9px] text-gray-500">Max softmax</span>
         </div>
-        <div class="glass-card rounded-lg p-2.5 flex flex-col">
+        <div class="card p-2.5 flex flex-col">
           <span class="text-[10px] text-gray-400 font-mono">INCERTEZA</span>
-          <span id="metric-uncertainty" class="text-base font-bold font-mono text-amber-400 mt-0.5">--%</span>
-          <span class="text-[9px] text-gray-500">Entropia Shannon</span>
+          <span id="metric-uncertainty" class="text-sm font-bold font-mono text-amber-400 mt-0.5">--%</span>
+          <span class="text-[9px] text-gray-500">Entropia</span>
         </div>
-        <div class="glass-card rounded-lg p-2.5 flex flex-col">
+        <div class="card p-2.5 flex flex-col">
           <span class="text-[10px] text-gray-400 font-mono">CALIBRAÇÃO</span>
-          <span id="metric-calib" class="text-base font-bold font-mono text-purple-400 mt-0.5">0.00</span>
-          <span class="text-[9px] text-gray-500" id="metric-calib-sub">Homeostase S1</span>
+          <span id="metric-calib" class="text-sm font-bold font-mono text-purple-400 mt-0.5">0.00</span>
+          <span class="text-[9px] text-gray-500" id="metric-calib-sub">Homeostase</span>
         </div>
       </div>
-    </div>
 
-    <!-- Painel de Configuração (Direita / 1 Coluna) -->
-    <div class="flex flex-col gap-3">
-      <div class="glass-card rounded-xl p-3.5 flex flex-col gap-3">
-        <h2 class="text-xs font-bold text-gray-300 uppercase tracking-wider flex items-center justify-between">
-          <span class="flex items-center gap-1.5"><span>⚙️</span> Selecionar Demonstração</span>
-          <span id="badge-sync-status" class="text-[9px] text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-800">ONLINE</span>
-        </h2>
+    </section>
 
-        <div>
-          <label class="text-[11px] text-gray-400 block mb-1">Ambiente & Modelo ONNX</label>
-          <select id="select-demo" onchange="onDemoChange()" class="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500 font-mono">
-            <option value="rubiks_atomic">🎲 Cubo Mágico 3x3 (Atômico - 12 Giros)</option>
-            <option value="rubiks_macro">🧩 Cubo Mágico 3x3 (Macro / CFOP)</option>
-            <option value="cartpole">⚖️ CartPole-v1 (Controle Clássico)</option>
-            <option value="acrobot">🤸 Acrobot-v1 (Braço Duplo)</option>
-            <option value="mountaincar">⛰️ MountainCar-v0 (Controle Clássico)</option>
-            <option value="lunarlander">🚀 LunarLander-v3 (Pouso Lunar Box2D)</option>
-            <option value="ant_v5">🐜 Ant-v5 (Robótica Contínua MuJoCo)</option>
-          </select>
-        </div>
-
-        <div>
-          <div class="flex items-center justify-between mb-1">
-            <label class="text-[11px] text-gray-400 block font-semibold">Calibração Estocástica</label>
-            <span id="label-web-calib" class="text-[10px] font-mono text-cyan-300">⚡ Auto (Homeostase)</span>
-          </div>
-          <div class="flex items-center gap-2 mb-1.5">
-            <input type="range" id="select-web-calibration" min="0.0" max="1.0" step="0.05" value="0.5" oninput="onWebCalibChange(this.value)" class="w-full accent-cyan-500 cursor-pointer" />
-          </div>
-          <div class="grid grid-cols-4 gap-1">
-            <button type="button" onclick="setWebCalib(0.0)" class="py-0.5 text-[9px] font-mono rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 cursor-pointer text-center">0.0 (Det)</button>
-            <button type="button" onclick="setWebCalib(0.5)" class="py-0.5 text-[9px] font-mono rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 cursor-pointer text-center">0.5 (Calib)</button>
-            <button type="button" onclick="setWebCalib(1.0)" class="py-0.5 text-[9px] font-mono rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 cursor-pointer text-center">1.0 (Estoc)</button>
-            <button type="button" id="btn-web-calib-auto" onclick="setWebCalib('auto')" class="py-0.5 text-[9px] font-mono rounded bg-purple-950/80 hover:bg-purple-900 text-purple-300 border border-purple-800 cursor-pointer text-center font-bold">⚡ Auto</button>
-          </div>
-        </div>
-
-        <div class="bg-gray-900/60 p-2.5 rounded-lg border border-gray-800 text-xs text-gray-300 space-y-1.5 leading-relaxed">
-          <div class="font-semibold text-cyan-300 flex items-center gap-1">
-            <span>🧠</span> Arquitetura Universal S1:
-          </div>
-          <p id="model-desc-text" class="text-[11px] text-gray-400 leading-normal">
-            • <strong>Tronco Recorrente</strong>: GRU + ResMLP (256 dims)<br>
-            • <strong>Cálculo Amortizado</strong>: Decisão reflexiva em &lt; 0.8 ms sem busca em árvore<br>
-            • <strong>Homeostase Termodinâmica</strong>: Auto-ajuste de calibração por momentum de recompensa (System 1 puro)
-          </p>
-        </div>
-
-        <div class="pt-1 border-t border-gray-800/80 flex flex-col gap-1.5 text-[11px] text-gray-400 font-mono">
-          <div class="flex justify-between">
-            <span>Runtime:</span>
-            <span class="text-cyan-400">ONNX Web (Wasm SIMD)</span>
-          </div>
-          <div class="flex justify-between">
-            <span>Arquivo ONNX:</span>
-            <span id="model-file-label" class="text-gray-300 truncate max-w-[150px]">s1_rubiks_atomic.onnx</span>
-          </div>
-          <div class="flex justify-between">
-            <span>Tamanho Modelo:</span>
-            <span id="model-size-label" class="text-gray-300">~3.18 MB</span>
-          </div>
-          <div class="flex justify-between">
-            <span>Sincronizado:</span>
-            <span id="model-mtime-label" class="text-emerald-400 truncate max-w-[150px]">Recente</span>
-          </div>
-        </div>
-      </div>
-    </div>
   </main>
+
+  <footer class="mt-4 pt-2 border-t border-gray-800/80 text-[11px] text-gray-500 flex justify-between items-center">
+    <div class="flex items-center gap-2">
+      <span>System 1 Engine • Amortized Reflex Intelligence Framework</span>
+      <span>•</span>
+      <a href="https://github.com/JulioCRFilho/system_one" target="_blank" rel="noopener noreferrer" class="text-cyan-400 hover:text-cyan-300 underline font-mono text-[10px]">
+        GitHub Repo ↗
+      </a>
+    </div>
+    <div class="font-mono">Runtime WebAssembly: <span class="text-green-400">ATIVO (SIMD)</span></div>
+  </footer>
 
   <script>
     const GITHUB_REPO = "JulioCRFilho/system_one";
 
     // Catálogo inicial curado com suporte completo a todos os modelos
     let MODELS = {
-      rubiks_atomic: {
-        key: "rubiks_atomic",
-        name: "🎲 Cubo Mágico 3x3 (Atômico - 12 Giros)",
-        file: "s1_rubiks_atomic.onnx",
-        mode: "atomic",
-        type: "rubiks",
-        size: "3.18 MB",
-        description: "12 giros atômicos elementares (U, D, F, B, R, L) com física e permutação 3D exatas. Taxa de resolução reflexiva comprovada de até 100%."
-      },
       rubiks_macro: {
         key: "rubiks_macro",
-        name: "🧩 Cubo Mágico 3x3 (Macro / CFOP)",
+        name: "🧩 RubiksCubeMacro-v0 (CFOP / 12 Algoritmos)",
+        env_id: "RubiksCubeMacro-v0",
         file: "s1_rubiks_macro.onnx",
         mode: "macro",
         type: "rubiks",
         size: "3.18 MB",
         description: "Hierarchical RL com macro-ações CFOP pré-definidas (Sune, Anti-Sune, Sexy Move, T-Perm, Insert Edge)."
       },
+      rubiks_atomic: {
+        key: "rubiks_atomic",
+        name: "🎲 RubiksCube-v0 (Atômico - 12 Giros Simples)",
+        env_id: "RubiksCube-v0",
+        file: "s1_rubiks_atomic.onnx",
+        mode: "atomic",
+        type: "rubiks",
+        size: "3.18 MB",
+        description: "12 giros atômicos elementares (U, D, F, B, R, L) com física e permutação 3D exatas. Taxa de resolução reflexiva comprovada de até 100%."
+      },
       cartpole: {
         key: "cartpole",
-        name: "⚖️ CartPole-v1 (Controle Clássico)",
+        name: "⚖️ CartPole-v1 (Controle Clássico, 4D, 2 Ações)",
+        env_id: "CartPole-v1",
         file: "s1_cartpole.onnx",
         mode: "vector",
         type: "cartpole",
-        size: "2.78 MB",
+        size: "2.77 MB",
         description: "Equilíbrio invertido amortizado em sub-milissegundo com derivadas temporais Δs_t."
       },
       acrobot: {
         key: "acrobot",
-        name: "🤸 Acrobot-v1 (Braço Duplo)",
+        name: "🤸 Acrobot-v1 (Braço Duplo Acrobático, 6D, 3 Ações)",
+        env_id: "Acrobot-v1",
         file: "s1_acrobot_v1.onnx",
         mode: "vector",
-        type: "cartpole",
+        type: "acrobot",
         size: "2.78 MB",
         description: "Sistema caótico não-linear de dois elos sob controle reflexivo amortizado."
       },
       mountaincar: {
         key: "mountaincar",
-        name: "⛰️ MountainCar-v0 (Controle Clássico)",
+        name: "⛰️ MountainCar-v0 (Controle de Inércia Não-Linear)",
+        env_id: "MountainCar-v0",
         file: "s1_mountaincar_v0.onnx",
         mode: "vector",
-        type: "cartpole",
+        type: "mountaincar",
         size: "2.78 MB",
         description: "Acúmulo de energia potencial gravitacional via oscilação reflexiva de momento."
       },
       lunarlander: {
         key: "lunarlander",
-        name: "🚀 LunarLander-v3 (Pouso Lunar Box2D)",
+        name: "🚀 LunarLander-v3 (Pouso Espacial Box2D)",
+        env_id: "LunarLander-v3",
         file: "s1_lunarlander_v3.onnx",
         mode: "vector",
-        type: "cartpole",
+        type: "lunarlander",
         size: "2.79 MB",
         description: "Controle vetorial de empuxo e atitude em gravidade simulada."
       },
       ant_v5: {
         key: "ant_v5",
-        name: "🐜 Ant-v5 (Robótica Contínua MuJoCo)",
+        name: "🐜 Ant-v5 (Robótica Contínua MuJoCo 27D)",
+        env_id: "Ant-v5",
         file: "s1_ant_v5.onnx",
         mode: "continuous",
-        type: "cartpole",
+        type: "ant",
         size: "2.91 MB",
         description: "Locomoção quadrupedal contínua em alta dimensão com física MuJoCo v5."
       }
@@ -272,14 +638,112 @@
 
     const urlParams = new URLSearchParams(window.location.search);
     let activeDemo = urlParams.get("env") || urlParams.get("model") || "rubiks_atomic";
+    let activeMode = "run"; // 'run' ou 'benchmark'
     let sim = null;
     let agent = null;
     let isRunning = false;
     let animId = null;
     let lastScore = 0.0;
     let actionHistory = [];
+    let stepCount = 0;
+    let peakScore = 0.0;
+    let isAutoCalibrate = true;
 
     const canvas = document.getElementById('viewport-canvas');
+
+    // =====================================================================
+    // CONFIGURAÇÃO DOS GRÁFICOS CHART.JS EM TEMPO REAL
+    // =====================================================================
+    const chartBaseOpts = {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: {
+        legend: { labels: { color: '#94a3b8', font: { family: 'monospace', size: 9 }, boxWidth: 10 } }
+      },
+      scales: {
+        x: { display: false },
+        y: { ticks: { color: '#64748b', font: { family: 'monospace', size: 9 } }, grid: { color: '#1e293b' } }
+      }
+    };
+
+    // 1. Gráfico Latência Wasm SIMD vs Budget 0.8ms
+    const chartLat = new Chart(document.getElementById('chartLatency').getContext('2d'), {
+      type: 'line',
+      data: {
+        labels: Array(30).fill(''),
+        datasets: [
+          { label: 'P50 (ms)', data: [], borderColor: '#38bdf8', borderWidth: 1.5, pointRadius: 0, tension: 0.2 },
+          { label: 'Budget (0.8 ms)', data: Array(30).fill(0.8), borderColor: '#f43f5e', borderDash: [4, 4], borderWidth: 1, pointRadius: 0 }
+        ]
+      },
+      options: chartBaseOpts
+    });
+
+    // 2. Gráfico Retorno & Pontuação
+    const chartRew = new Chart(document.getElementById('chartReward').getContext('2d'), {
+      type: 'line',
+      data: {
+        labels: Array(30).fill(''),
+        datasets: [
+          { label: 'Score / Retorno', data: [], borderColor: '#facc15', backgroundColor: 'rgba(250, 204, 21, 0.1)', fill: true, pointRadius: 0, tension: 0.2 }
+        ]
+      },
+      options: chartBaseOpts
+    });
+
+    // 3. Gráfico Homeostase Termodinâmica S1 (Temperatura & Incerteza)
+    const chartHomeostasis = new Chart(document.getElementById('chartHomeostasis').getContext('2d'), {
+      type: 'line',
+      data: {
+        labels: Array(30).fill(''),
+        datasets: [
+          { label: 'Calibração S1 [0-1]', data: [], borderColor: '#a855f7', borderWidth: 1.5, pointRadius: 0, tension: 0.2 },
+          { label: 'Incerteza Shannon %', data: [], borderColor: '#ec4899', borderDash: [3, 3], borderWidth: 1, pointRadius: 0, tension: 0.2 }
+        ]
+      },
+      options: chartBaseOpts
+    });
+
+    function pushDataPoint(chart, datasetIdx, val) {
+      const dataArr = chart.data.datasets[datasetIdx].data;
+      dataArr.push(val);
+      if (dataArr.length > 30) dataArr.shift();
+    }
+
+    // =====================================================================
+    // CONSOLE / TERMINAL DE LOGS EM TEMPO REAL
+    // =====================================================================
+    function clearLogs() {
+      document.getElementById('terminal-logs').innerHTML = '';
+    }
+
+    function appendLog(line) {
+      const term = document.getElementById('terminal-logs');
+      if (!term) return;
+      const div = document.createElement('div');
+      
+      if (line.includes('❌') || line.includes('Erro')) {
+        div.className = 'text-rose-400 font-semibold';
+      } else if (line.includes('🏆') || line.includes('RESOLVIDO') || line.includes('PERFEITO') || line.includes('META ATINGIDA')) {
+        div.className = 'text-emerald-400 font-semibold';
+      } else if (line.includes('▶️') || line.includes('Iniciando') || line.includes('[INIT]')) {
+        div.className = 'text-cyan-400 font-semibold';
+      } else if (line.includes('🔥') || line.includes('HOMEOSTASE') || line.includes('Aquecendo')) {
+        div.className = 'text-yellow-400 font-semibold';
+      } else if (line.includes('⚡') || line.includes('BENCHMARK')) {
+        div.className = 'text-purple-300 font-bold';
+      } else {
+        div.className = 'text-gray-300';
+      }
+
+      div.textContent = line;
+      term.appendChild(div);
+
+      if (document.getElementById('chk-autoscroll').checked) {
+        term.scrollTop = term.scrollHeight;
+      }
+    }
 
     // =====================================================================
     // MOTOR DE VISUALIZAÇÃO 3D WEBGL (THREE.JS SPEEDCUBE)
@@ -295,15 +759,6 @@
     let pointerPrev = { x: 0, y: 0 };
     let cubeAutoRotate = true;
 
-    const THREE_CUBE_PALETTE = {
-      0: 0xF8FAFC, // U: Branco puro
-      1: 0xFACC15, // D: Amarelo
-      2: 0x22C55E, // F: Verde
-      3: 0x3B82F6, // B: Azul
-      4: 0xEF4444, // R: Vermelho
-      5: 0xF97316  // L: Laranja
-    };
-
     function initThreeCube() {
       const container = document.getElementById('rubiks-3d-container');
       if (!container || isThreeInitialized || typeof THREE === 'undefined') return;
@@ -312,7 +767,7 @@
       const height = container.clientHeight || 320;
 
       threeScene = new THREE.Scene();
-      threeScene.background = new THREE.Color(0x07090E);
+      threeScene.background = new THREE.Color(0x080c14);
 
       threeCamera = new THREE.PerspectiveCamera(38, width / height, 0.1, 100);
       threeCamera.position.set(0, 0, 7.2);
@@ -322,7 +777,6 @@
       threeRenderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
       container.appendChild(threeRenderer.domElement);
 
-      // Iluminação realista de estúdio
       const ambientLight = new THREE.AmbientLight(0xffffff, 1.4);
       threeScene.add(ambientLight);
 
@@ -339,7 +793,6 @@
       cubeGroup.rotation.y = -0.55;
       threeScene.add(cubeGroup);
 
-      // 1. Criar os 27 cubies pretos (núcleo plástico do speedcube)
       const cubieGeo = new THREE.BoxGeometry(0.96, 0.96, 0.96);
       const cubieMat = new THREE.MeshStandardMaterial({
         color: 0x11141A,
@@ -357,58 +810,33 @@
         }
       }
 
-      // 2. Criar os 54 stickers coloridos mapeados rigorosamente para sim.state
       const stickerGeo = new THREE.PlaneGeometry(0.86, 0.86);
       stickerMeshes = new Array(54);
 
       const stickerDefs = [];
-      // Face 0: U (y = 1, norm = [0, 1, 0])
+      // Face 0: U
       for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
-        stickerDefs.push({
-          slot: 0 * 9 + (r * 3 + c),
-          pos: [c - 1, 1 + 0.485, 1 - r],
-          rot: [-Math.PI / 2, 0, 0]
-        });
+        stickerDefs.push({ slot: 0 * 9 + (r * 3 + c), pos: [c - 1, 1 + 0.485, 1 - r], rot: [-Math.PI / 2, 0, 0] });
       }
-      // Face 1: D (y = -1, norm = [0, -1, 0])
+      // Face 1: D
       for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
-        stickerDefs.push({
-          slot: 1 * 9 + (r * 3 + c),
-          pos: [c - 1, -1 - 0.485, r - 1],
-          rot: [Math.PI / 2, 0, 0]
-        });
+        stickerDefs.push({ slot: 1 * 9 + (r * 3 + c), pos: [c - 1, -1 - 0.485, r - 1], rot: [Math.PI / 2, 0, 0] });
       }
-      // Face 2: F (z = 1, norm = [0, 0, 1])
+      // Face 2: F
       for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
-        stickerDefs.push({
-          slot: 2 * 9 + (r * 3 + c),
-          pos: [c - 1, 1 - r, 1 + 0.485],
-          rot: [0, 0, 0]
-        });
+        stickerDefs.push({ slot: 2 * 9 + (r * 3 + c), pos: [c - 1, 1 - r, 1 + 0.485], rot: [0, 0, 0] });
       }
-      // Face 3: B (z = -1, norm = [0, 0, -1])
+      // Face 3: B
       for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
-        stickerDefs.push({
-          slot: 3 * 9 + (r * 3 + c),
-          pos: [1 - c, 1 - r, -1 - 0.485],
-          rot: [0, Math.PI, 0]
-        });
+        stickerDefs.push({ slot: 3 * 9 + (r * 3 + c), pos: [1 - c, 1 - r, -1 - 0.485], rot: [0, Math.PI, 0] });
       }
-      // Face 4: R (x = 1, norm = [1, 0, 0])
+      // Face 4: R
       for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
-        stickerDefs.push({
-          slot: 4 * 9 + (r * 3 + c),
-          pos: [1 + 0.485, 1 - r, 1 - c],
-          rot: [0, Math.PI / 2, 0]
-        });
+        stickerDefs.push({ slot: 4 * 9 + (r * 3 + c), pos: [1 + 0.485, 1 - r, 1 - c], rot: [0, Math.PI / 2, 0] });
       }
-      // Face 5: L (x = -1, norm = [-1, 0, 0])
+      // Face 5: L
       for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
-        stickerDefs.push({
-          slot: 5 * 9 + (r * 3 + c),
-          pos: [-1 - 0.485, 1 - r, c - 1],
-          rot: [0, -Math.PI / 2, 0]
-        });
+        stickerDefs.push({ slot: 5 * 9 + (r * 3 + c), pos: [-1 - 0.485, 1 - r, c - 1], rot: [0, -Math.PI / 2, 0] });
       }
 
       for (const def of stickerDefs) {
@@ -425,7 +853,6 @@
         stickerMeshes[def.slot] = mesh;
       }
 
-      // Drag Orbit e Rotação suave manual
       container.addEventListener('pointerdown', (e) => {
         isPointerDragging = true;
         cubeAutoRotate = false;
@@ -448,153 +875,165 @@
       };
       container.addEventListener('pointerup', onPointerEnd);
       container.addEventListener('pointercancel', onPointerEnd);
-      container.addEventListener('dblclick', () => {
-        cubeGroup.rotation.set(0.45, -0.55, 0);
-        cubeAutoRotate = true;
-      });
 
-      // Redimensionamento reativo
-      const resizeObserver = new ResizeObserver(() => {
-        if (!container || !threeRenderer || !threeCamera) return;
-        const w = container.clientWidth || 480;
-        const h = container.clientHeight || 320;
-        threeCamera.aspect = w / h;
-        threeCamera.updateProjectionMatrix();
-        threeRenderer.setSize(w, h);
+      container.addEventListener('dblclick', () => {
+        cubeGroup.rotation.x = 0.45;
+        cubeGroup.rotation.y = -0.55;
       });
-      resizeObserver.observe(container);
 
       isThreeInitialized = true;
     }
 
+    const THREE_CUBE_PALETTE = {
+      0: 0xF8FAFC, // U: Branco
+      1: 0xFACC15, // D: Amarelo
+      2: 0x22C55E, // F: Verde
+      3: 0x3B82F6, // B: Azul
+      4: 0xEF4444, // R: Vermelho
+      5: 0xF97316  // L: Laranja
+    };
+
     function updateCube3D(state) {
-      if (!isThreeInitialized || !state || !stickerMeshes.length) return;
+      if (!isThreeInitialized || !state) return;
       for (let i = 0; i < 54; i++) {
         const colorId = state[i];
-        const hex = THREE_CUBE_PALETTE[colorId] !== undefined ? THREE_CUBE_PALETTE[colorId] : 0xffffff;
+        const hex = THREE_CUBE_PALETTE[colorId] || 0xffffff;
         if (stickerMeshes[i]) {
           stickerMeshes[i].material.color.setHex(hex);
         }
       }
     }
 
-    function renderThreeFrame() {
-      if (isThreeInitialized && cubeGroup && threeRenderer && threeScene && threeCamera) {
-        if (cubeAutoRotate && !isPointerDragging) {
+    function threeAnimationLoop() {
+      requestAnimationFrame(threeAnimationLoop);
+      if (isThreeInitialized && threeRenderer && threeScene && threeCamera) {
+        if (cubeAutoRotate && !isPointerDragging && cubeGroup) {
           cubeGroup.rotation.y += 0.003;
         }
         threeRenderer.render(threeScene, threeCamera);
       }
     }
 
-    function threeAnimationLoop() {
-      renderThreeFrame();
-      requestAnimationFrame(threeAnimationLoop);
-    }
-
     function setWebCubeViewMode(mode) {
-      if (mode === '3d' && typeof THREE === 'undefined') {
-        console.warn("Three.js não carregado, mantendo modo 2D.");
-        mode = '2d';
-      }
       webCubeViewMode = mode;
-      const btn3d = document.getElementById('btn-web-3d');
-      const btn2d = document.getElementById('btn-web-2d');
+      const btn3d = document.getElementById('btn-cube-view-3d');
+      const btn2d = document.getElementById('btn-cube-view-2d');
       const canvasEl = document.getElementById('viewport-canvas');
       const container3d = document.getElementById('rubiks-3d-container');
 
-      if (mode === '3d') {
-        if (btn3d) btn3d.className = 'px-2 py-0.5 rounded font-bold bg-indigo-600 text-white transition shadow-sm cursor-pointer';
-        if (btn2d) btn2d.className = 'px-2 py-0.5 rounded text-gray-400 hover:text-white transition cursor-pointer';
-        canvasEl.classList.add('hidden');
-        container3d.classList.remove('hidden');
-        if (!isThreeInitialized) initThreeCube();
-        if (sim && sim.state) updateCube3D(sim.state);
-      } else {
-        if (btn2d) btn2d.className = 'px-2 py-0.5 rounded font-bold bg-indigo-600 text-white transition shadow-sm cursor-pointer';
-        if (btn3d) btn3d.className = 'px-2 py-0.5 rounded text-gray-400 hover:text-white transition cursor-pointer';
-        container3d.classList.add('hidden');
-        canvasEl.classList.remove('hidden');
-        if (sim) sim.render(canvasEl);
+      if (btn3d && btn2d) {
+        if (mode === '3d') {
+          btn3d.className = 'px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-600 text-white border border-indigo-400 shadow-sm transition cursor-pointer';
+          btn2d.className = 'px-2 py-0.5 rounded text-[10px] font-bold bg-gray-900 text-gray-400 border border-gray-800 hover:bg-gray-800 transition cursor-pointer';
+          canvasEl.classList.add('hidden');
+          container3d.classList.remove('hidden');
+          if (sim && sim.state) updateCube3D(sim.state);
+        } else {
+          btn2d.className = 'px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-600 text-white border border-indigo-400 shadow-sm transition cursor-pointer';
+          btn3d.className = 'px-2 py-0.5 rounded text-[10px] font-bold bg-gray-900 text-gray-400 border border-gray-800 hover:bg-gray-800 transition cursor-pointer';
+          container3d.classList.add('hidden');
+          canvasEl.classList.remove('hidden');
+          if (sim) sim.render(canvasEl);
+        }
       }
     }
 
-    function getScrambleDepth() {
-      const el = document.getElementById('select-scramble-depth');
-      return el ? parseInt(el.value, 10) || 3 : 3;
-    }
+    // =====================================================================
+    // CONTROLES DE CALIBRAÇÃO E MODOS DE AÇÃO
+    // =====================================================================
+    function setEvalCalibration(val) {
+      const numEl = document.getElementById('cfg-eval-calibration');
+      const rngEl = document.getElementById('cfg-eval-calib-range');
+      const modeSel = document.getElementById('cfg-eval-action-mode');
 
-    function onScrambleDepthChange() {
-      scrambleEnv();
-    }
-
-    let isAutoCalibrate = true;
-
-    function onWebCalibChange(val) {
-      isAutoCalibrate = false;
-      const v = parseFloat(val);
-      const label = document.getElementById('label-web-calib');
-      if (label) {
-        if (v === 0.0) label.innerText = "0.00 [Determinístico]";
-        else if (v === 1.0) label.innerText = "1.00 [Estocástico]";
-        else label.innerText = `${v.toFixed(2)} [Calibrado]`;
-      }
-    }
-
-    function setWebCalib(val) {
-      const rng = document.getElementById('select-web-calibration');
-      const label = document.getElementById('label-web-calib');
       if (val === 'auto') {
         isAutoCalibrate = true;
-        if (label) label.innerText = "⚡ Auto (Homeostase)";
+        if (numEl) numEl.value = 'auto';
+        if (rngEl) rngEl.value = 0.5;
+        if (modeSel) modeSel.value = 'auto';
+        appendLog("[CONFIG] Calibração definida para ⚡ Auto / Homeostase Termodinâmica S1");
       } else {
         isAutoCalibrate = false;
-        if (rng) rng.value = val;
-        onWebCalibChange(val);
+        const fVal = typeof val === 'number' ? val : parseFloat(val);
+        if (numEl) numEl.value = fVal.toFixed(2);
+        if (rngEl) rngEl.value = fVal;
+        syncEvalActionModeFromCalib(fVal);
+        appendLog(`[CONFIG] Calibração estática ajustada para: ${fVal.toFixed(2)}`);
       }
     }
 
-    async function syncWebModels() {
-      const badge = document.getElementById('badge-sync-status');
-      badge.innerText = "SINCRONIZANDO...";
-      badge.className = "text-[9px] text-amber-300 bg-amber-950/60 px-1.5 py-0.5 rounded border border-amber-800 animate-pulse";
-      try {
-        const resp = await fetch('/api/web_models/sync', { method: 'POST' });
-        if (resp.ok) {
-          const data = await resp.json();
-          await fetchManifest();
-          badge.innerText = "SINCRONIZADO ✓";
-          badge.className = "text-[9px] text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-800";
-          setTimeout(() => {
-            badge.innerText = "ONLINE";
-          }, 3000);
-          await loadModel(activeDemo);
-          return;
-        }
-      } catch (e) {
-        console.warn("Servidor local não respondeu a /api/web_models/sync, recarregando manifesto estático:", e);
-      }
-      await fetchManifest();
-      badge.innerText = "ESTÁTICO";
-      badge.className = "text-[9px] text-gray-400 bg-gray-900 px-1.5 py-0.5 rounded border border-gray-700";
+    function onEvalCalibRangeChange(val) {
+      const numEl = document.getElementById('cfg-eval-calibration');
+      const fVal = parseFloat(val);
+      isAutoCalibrate = false;
+      if (numEl) numEl.value = fVal.toFixed(2);
+      syncEvalActionModeFromCalib(fVal);
     }
 
+    function onEvalCalibNumChange(val) {
+      if (val === 'auto') {
+        setEvalCalibration('auto');
+        return;
+      }
+      const fVal = parseFloat(val);
+      if (!isNaN(fVal)) {
+        isAutoCalibrate = false;
+        const rngEl = document.getElementById('cfg-eval-calib-range');
+        if (rngEl) rngEl.value = Math.min(1.0, Math.max(0.0, fVal));
+        syncEvalActionModeFromCalib(fVal);
+      }
+    }
+
+    function syncEvalActionModeFromCalib(calib) {
+      const modeSel = document.getElementById('cfg-eval-action-mode');
+      if (!modeSel) return;
+      if (calib === 'auto') modeSel.value = 'auto';
+      else if (calib === 0.0) modeSel.value = 'deterministic';
+      else if (calib === 1.0) modeSel.value = 'stochastic';
+      else modeSel.value = 'calibrated';
+    }
+
+    function onEvalActionModeChange(mode) {
+      if (mode === 'auto') setEvalCalibration('auto');
+      else if (mode === 'deterministic') setEvalCalibration(0.0);
+      else if (mode === 'stochastic') setEvalCalibration(1.0);
+      else setEvalCalibration(0.5);
+    }
+
+    function setMode(mode) {
+      activeMode = mode;
+      const btnRun = document.getElementById('btn-mode-run');
+      const btnBench = document.getElementById('btn-mode-bench');
+      const benchBox = document.getElementById('bench-controls');
+
+      if (mode === 'benchmark') {
+        stopEvaluation();
+        btnBench.className = 'py-1 px-2 text-xs font-bold rounded bg-cyan-600 text-white border border-cyan-500 transition cursor-pointer';
+        btnRun.className = 'py-1 px-2 text-xs font-bold rounded bg-gray-800 text-gray-400 border border-gray-700 hover:bg-gray-700 transition cursor-pointer';
+        if (benchBox) benchBox.classList.remove('hidden');
+        document.getElementById('global-status-dot').className = 'status-dot bg-cyan-400';
+        document.getElementById('global-status-text').innerText = 'BENCHMARK Wasm';
+        appendLog("[MODO] Alternado para Benchmark Wasm SIMD");
+      } else {
+        btnRun.className = 'py-1 px-2 text-xs font-bold rounded bg-cyan-600 text-white border border-cyan-500 transition cursor-pointer';
+        btnBench.className = 'py-1 px-2 text-xs font-bold rounded bg-gray-800 text-gray-400 border border-gray-700 hover:bg-gray-700 transition cursor-pointer';
+        if (benchBox) benchBox.classList.add('hidden');
+        document.getElementById('global-status-dot').className = 'status-dot bg-gray-500';
+        document.getElementById('global-status-text').innerText = 'IDLE';
+        appendLog("[MODO] Alternado para Avaliação (Live Run)");
+      }
+    }
+
+    // =====================================================================
+    // MANIFESTO DINÂMICO E CARREGAMENTO DE MODELOS ONNX
+    // =====================================================================
     async function fetchManifest() {
       try {
-        // Tenta endpoint do servidor local HUD primeiro, depois o arquivo estático
-        let manifest = null;
-        try {
-          const r1 = await fetch(`/api/web_models?v=${Date.now()}`);
-          if (r1.ok) manifest = await r1.json();
-        } catch (_) {}
-
-        if (!manifest || !manifest.models) {
-          const r2 = await fetch(`./models/manifest.json?v=${Date.now()}`);
-          if (r2.ok) manifest = await r2.json();
-        }
-
+        const res = await fetch("./models/manifest.json?v=" + Date.now());
+        if (!res.ok) return;
+        const manifest = await res.json();
         if (manifest && manifest.models) {
-          const select = document.getElementById('select-demo');
+          const select = document.getElementById("select-demo");
           const currentVal = select.value;
           select.innerHTML = "";
 
@@ -602,6 +1041,7 @@
             MODELS[key] = {
               key: key,
               name: m.name || key,
+              env_id: m.env_id || key,
               file: m.file,
               mode: m.mode || (key.includes("macro") ? "macro" : "atomic"),
               type: m.type || (key.includes("rubik") ? "rubiks" : "cartpole"),
@@ -618,10 +1058,39 @@
             }
             select.appendChild(opt);
           }
+          renderModelsTable();
         }
       } catch (err) {
         console.warn("Manifesto dinâmico não disponível, utilizando catálogo padrão em memória:", err);
       }
+    }
+
+    function renderModelsTable() {
+      const container = document.getElementById('models-table-container');
+      if (!container) return;
+      container.innerHTML = '';
+
+      Object.values(MODELS).forEach(m => {
+        const div = document.createElement('div');
+        div.className = 'flex items-center justify-between p-1.5 rounded bg-gray-900/70 border border-gray-800 text-xs';
+        const isCurrent = m.key === activeDemo;
+        const activeBadge = isCurrent ? '<span class="px-1 py-0.2 rounded bg-cyan-950 text-cyan-400 text-[9px] border border-cyan-800 font-bold">ATIVO</span>' : '';
+        div.innerHTML = `
+          <div class="flex flex-col min-w-0 pr-2 gap-0.5">
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <span class="font-bold text-gray-200 truncate font-mono text-[11px]">${m.file}</span>
+              ${activeBadge}
+            </div>
+            <div class="flex items-center gap-2 text-[9px] text-gray-500">
+              <span>${m.size}</span>
+              <span>•</span>
+              <span class="text-gray-400 font-mono">${m.name}</span>
+            </div>
+          </div>
+          <button type="button" onclick="quickSelectEnv('${m.key}')" class="badge-btn">Carregar</button>
+        `;
+        container.appendChild(div);
+      });
     }
 
     async function loadModel(demoKey) {
@@ -633,38 +1102,61 @@
       if (cfg.description) {
         document.getElementById('model-desc-text').innerText = cfg.description;
       }
+      document.getElementById('overlay-env').innerText = cfg.env_id || cfg.name;
 
-      // Adiciona timestamp para prevenção rigorosa de cache desatualizado
+      appendLog(`[INIT] Carregando pesos neurais: ${cfg.file} (${cfg.size})...`);
+
       const localUrl = `./models/${cfg.file}?v=${Date.now()}`;
       const cdnUrl = `https://cdn.jsdelivr.net/gh/${GITHUB_REPO}@master/web/models/${cfg.file}`;
 
       let session = null;
       try {
         session = await ort.InferenceSession.create(localUrl, { executionProviders: ['wasm'] });
-        console.log(`[ONNX] Modelo local carregado com sucesso: ${localUrl}`);
+        appendLog(`[INIT] ✅ Sessão ONNX Web compilada via Wasm SIMD (${cfg.file})`);
       } catch (err) {
         console.warn("Falha ao carregar modelo local, tentando CDN do GitHub...", err);
         try {
           session = await ort.InferenceSession.create(cdnUrl, { executionProviders: ['wasm'] });
+          appendLog(`[INIT] ✅ Sessão ONNX carregada via CDN GitHub (${cfg.file})`);
         } catch (cdnErr) {
           console.error("Falha ao carregar modelo do CDN:", cdnErr);
+          appendLog(`[ERRO] ❌ Falha ao carregar ${cfg.file}: ${cdnErr.message}`);
           alert(`Erro ao carregar os pesos de ${cfg.file}. Verifique a conexão ou execute a sincronização local.`);
         }
       }
 
       if (session) {
         agent = new System1.System1AgentWeb(session);
+        appendLog(`[INIT] Agente System 1 instanciado com memória amortizada e homeostase.`);
       }
       document.getElementById('loader-overlay').classList.add('hidden');
+      renderModelsTable();
+    }
+
+    // =====================================================================
+    // INICIALIZAÇÃO DE SIMULADORES
+    // =====================================================================
+    function getScrambleDepth() {
+      const el = document.getElementById('select-scramble-depth');
+      return el ? parseInt(el.value, 10) : 3;
+    }
+
+    function onScrambleDepthChange() {
+      appendLog(`[CONFIG] Profundidade de embaralhamento ajustada para: ${getScrambleDepth()} giros`);
     }
 
     function initSim(demoKey) {
       const cfg = MODELS[demoKey] || MODELS["rubiks_atomic"];
       const isRubiks = cfg.type === "rubiks" || demoKey.startsWith("rubiks");
-      const scrambleControls = document.getElementById('scramble-controls');
-      const viewToggle = document.getElementById('rubiks-view-toggle');
+      const scrambleSec = document.getElementById('scramble-section');
+      const viewControls = document.getElementById('rubiks-view-controls');
       const canvasEl = document.getElementById('viewport-canvas');
       const container3d = document.getElementById('rubiks-3d-container');
+
+      stepCount = 0;
+      peakScore = 0.0;
+      document.getElementById('kpi-steps').innerText = "0";
+      document.getElementById('kpi-return').innerText = "0.00";
 
       if (isRubiks) {
         sim = new System1.RubiksCubeSim();
@@ -674,9 +1166,10 @@
         lastScore = sim.getScore();
         actionHistory = [];
 
-        scrambleControls.classList.remove('hidden');
-        if (viewToggle) viewToggle.classList.remove('hidden');
+        if (scrambleSec) scrambleSec.classList.remove('hidden');
+        if (viewControls) viewControls.classList.remove('hidden');
         document.getElementById('status-desc').innerText = `Embaralhado (${moves.length} giros): ${moves.join(" ")}`;
+        appendLog(`[RESET] Cubo embaralhado com ${moves.length} giros: ${moves.join(" ")}`);
 
         if (webCubeViewMode === '3d') {
           canvasEl.classList.add('hidden');
@@ -689,9 +1182,25 @@
           sim.render(canvasEl);
         }
       } else {
-        sim = new System1.CartPoleSim();
-        scrambleControls.classList.add('hidden');
-        if (viewToggle) viewToggle.classList.add('hidden');
+        if (demoKey.includes("lunarlander") || demoKey === "lunarlander") {
+          sim = new System1.LunarLanderSim();
+          appendLog("[RESET] Simulador LunarLander-v3 inicializado.");
+        } else if (demoKey.includes("mountaincar") || demoKey === "mountaincar") {
+          sim = new System1.MountainCarSim();
+          appendLog("[RESET] Simulador MountainCar-v0 inicializado.");
+        } else if (demoKey.includes("acrobot") || demoKey === "acrobot") {
+          sim = new System1.AcrobotSim();
+          appendLog("[RESET] Simulador Acrobot-v1 inicializado.");
+        } else if (demoKey.includes("ant") || demoKey === "ant_v5") {
+          sim = new System1.AntSim();
+          appendLog("[RESET] Simulador Ant-v5 (MuJoCo) inicializado.");
+        } else {
+          sim = new System1.CartPoleSim();
+          appendLog("[RESET] Simulador CartPole-v1 inicializado.");
+        }
+
+        if (scrambleSec) scrambleSec.classList.add('hidden');
+        if (viewControls) viewControls.classList.add('hidden');
         container3d.classList.add('hidden');
         canvasEl.classList.remove('hidden');
         document.getElementById('status-desc').innerText = "Pronto para avaliar";
@@ -701,11 +1210,15 @@
       if (agent) agent.resetMemory();
     }
 
+    async function quickSelectEnv(envKey) {
+      const select = document.getElementById('select-demo');
+      if (select) select.value = envKey;
+      await onDemoChange();
+    }
+
     async function onDemoChange() {
       stopEvaluation();
       activeDemo = document.getElementById('select-demo').value;
-      const cfg = MODELS[activeDemo] || MODELS["rubiks_atomic"];
-      document.getElementById('label-viewport').innerText = cfg.name;
       initSim(activeDemo);
       await loadModel(activeDemo);
     }
@@ -716,22 +1229,42 @@
     }
 
     function startEvaluation() {
-      if (!agent) return;
+      if (!agent) {
+        alert("Aguarde o carregamento do modelo ONNX...");
+        return;
+      }
       isRunning = true;
-      document.getElementById('btn-toggle').classList.replace('bg-cyan-600', 'bg-amber-600');
-      document.getElementById('btn-toggle').classList.replace('hover:bg-cyan-500', 'hover:bg-amber-500');
-      document.getElementById('icon-toggle').innerText = "⏸";
-      document.getElementById('text-toggle').innerText = "Pausar";
+      const btnStart = document.getElementById('btn-start');
+      const btnStop = document.getElementById('btn-stop');
+      btnStart.className = 'w-full py-2.5 px-4 rounded bg-amber-600 hover:bg-amber-500 font-bold text-white text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition shadow-lg shadow-amber-950 cursor-pointer';
+      document.getElementById('btn-start-icon').innerText = "⏸";
+      document.getElementById('btn-start-text').innerText = "PAUSAR AVALIAÇÃO";
+      btnStop.disabled = false;
+      btnStop.className = 'w-full py-1.5 px-4 rounded bg-rose-600 hover:bg-rose-500 font-bold text-white text-[11px] uppercase tracking-wider flex items-center justify-center gap-1 border border-rose-500 transition cursor-pointer shadow';
+
+      document.getElementById('global-status-dot').className = 'status-dot bg-green-500 animate-pulse';
+      document.getElementById('global-status-text').innerText = 'AVALIANDO';
+      document.getElementById('global-status-text').className = 'text-xs font-bold uppercase text-green-400';
+      appendLog("▶️ Execução de avaliação iniciada.");
+
       stepLoop();
     }
 
     function stopEvaluation() {
       isRunning = false;
       if (animId) cancelAnimationFrame(animId);
-      document.getElementById('btn-toggle').classList.replace('bg-amber-600', 'bg-cyan-600');
-      document.getElementById('btn-toggle').classList.replace('hover:bg-amber-500', 'hover:bg-cyan-500');
-      document.getElementById('icon-toggle').innerText = "▶";
-      document.getElementById('text-toggle').innerText = "Iniciar";
+      const btnStart = document.getElementById('btn-start');
+      const btnStop = document.getElementById('btn-stop');
+      btnStart.className = 'w-full py-2.5 px-4 rounded bg-emerald-600 hover:bg-emerald-500 font-bold text-white text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition shadow-lg shadow-emerald-950 cursor-pointer';
+      document.getElementById('btn-start-icon').innerText = "▶️";
+      document.getElementById('btn-start-text').innerText = "INICIAR AVALIAÇÃO";
+      btnStop.disabled = true;
+      btnStop.className = 'w-full py-1.5 px-4 rounded bg-rose-900/40 text-gray-500 font-bold text-[11px] uppercase tracking-wider flex items-center justify-center gap-1 border border-rose-900/60 transition cursor-not-allowed';
+
+      document.getElementById('global-status-dot').className = 'status-dot bg-gray-500';
+      document.getElementById('global-status-text').innerText = 'IDLE';
+      document.getElementById('global-status-text').className = 'text-xs font-bold uppercase text-gray-400';
+      appendLog("⏹️ Avaliação interrompida.");
     }
 
     function scrambleEnv() {
@@ -748,6 +1281,7 @@
         sim.render(canvas);
         if (agent) agent.resetMemory();
         document.getElementById('status-desc').innerText = `Embaralhado (${moves.length} giros): ${moves.join(" ")}`;
+        appendLog(`🎲 Cubo re-embaralhado (${moves.length} giros): ${moves.join(" ")}`);
       }
     }
 
@@ -755,12 +1289,15 @@
       sim.reset();
       lastScore = sim.getScore ? sim.getScore() : 0.0;
       actionHistory = [];
+      stepCount = 0;
+      document.getElementById('kpi-steps').innerText = "0";
       if (webCubeViewMode === '3d') {
         updateCube3D(sim.state);
       }
       sim.render(canvas);
       if (agent) agent.resetMemory();
       document.getElementById('status-desc').innerText = "Estado resetado para inicial";
+      appendLog("🔄 Estado da simulação resetado.");
     }
 
     async function stepOnce() {
@@ -773,17 +1310,23 @@
       const isRubiks = cfg.type === "rubiks" || activeDemo.startsWith("rubiks");
       const obs = isRubiks ? sim.getOneHot() : sim.getState();
 
-      // Causal Feedback: calcula o reward do passo anterior para alimentar a GRU
+      stepCount++;
+      document.getElementById('kpi-steps').innerText = stepCount.toLocaleString();
+
       let stepReward = 0.0;
       if (isRubiks) {
         const curScore = sim.getScore();
         const deltaScore = curScore - lastScore;
         lastScore = curScore;
         stepReward = (deltaScore * 8.0) - 0.02 + (sim.isSolved() ? 15.0 : 0.0);
+        if (curScore > peakScore) peakScore = curScore;
+        document.getElementById('kpi-return').innerText = peakScore.toFixed(2);
+      } else {
+        stepReward = 1.0;
+        document.getElementById('kpi-return').innerText = stepCount.toFixed(0);
       }
 
-      // Prevenção inteligente de ciclos (Cycle Breaking):
-      // Se a mesma ação for repetida 3 vezes consecutivas sem avanço de alinhamento, força a 2ª melhor ação se em modo determinístico fixo
+      // Prevenção de ciclos consecutivos
       let avoidAct = undefined;
       if (actionHistory.length >= 3) {
         const last3 = actionHistory.slice(-3);
@@ -792,53 +1335,80 @@
         }
       }
 
-      const calibEl = document.getElementById('select-web-calibration');
-      const webCalib = calibEl ? parseFloat(calibEl.value) : 0.5;
+      const calibEl = document.getElementById('cfg-eval-calibration');
+      const webCalib = calibEl ? (calibEl.value === 'auto' ? 'auto' : parseFloat(calibEl.value)) : 0.5;
 
-      const decision = await agent.actWithConfidence(obs, stepReward, { 
+      const decision = await agent.actWithConfidence(obs, stepReward, {
         calibration: isAutoCalibrate ? 'auto' : webCalib,
         autoCalibrate: isAutoCalibrate,
-        avoidAction: (!isAutoCalibrate && webCalib === 0.0) ? avoidAct : undefined 
+        avoidAction: (!isAutoCalibrate && webCalib === 0.0) ? avoidAct : undefined
       });
+
       actionHistory.push(decision.action);
       if (actionHistory.length > 20) actionHistory.shift();
 
-      // Atualiza telemetria na UI
+      // Telemetria na UI & KPIs
+      document.getElementById('kpi-latency').innerText = `${decision.latencyMs.toFixed(2)} ms`;
       document.getElementById('metric-latency').innerText = `${decision.latencyMs.toFixed(2)} ms`;
+      document.getElementById('kpi-confidence').innerText = `${(decision.confidence * 100).toFixed(1)}%`;
       document.getElementById('metric-confidence').innerText = `${(decision.confidence * 100).toFixed(1)}%`;
       document.getElementById('metric-uncertainty').innerText = `${(decision.uncertainty * 100).toFixed(1)}%`;
-      const calibCard = document.getElementById('metric-calib');
-      if (calibCard && decision.calibration !== undefined) {
-        calibCard.innerText = decision.calibration.toFixed(2);
-        const calibSub = document.getElementById('metric-calib-sub');
-        if (calibSub) {
-          if (isAutoCalibrate) {
-            calibSub.innerText = decision.calibration > 0.05 ? "🔥 Inovando (Homeostase)" : "⚡ Foco (Determinístico)";
-          } else {
-            calibSub.innerText = decision.calibration > 0.05 ? "Estocástico" : "Determinístico";
-          }
+
+      const calibVal = decision.calibration !== undefined ? decision.calibration : 0.0;
+      document.getElementById('kpi-calib').innerText = calibVal.toFixed(2);
+      document.getElementById('metric-calib').innerText = calibVal.toFixed(2);
+
+      const calibSub = document.getElementById('metric-calib-sub');
+      if (calibSub) {
+        if (isAutoCalibrate) {
+          calibSub.innerText = calibVal > 0.05 ? "🔥 Inovando (Homeostase)" : "⚡ Foco (Determinístico)";
+        } else {
+          calibSub.innerText = calibVal > 0.05 ? "Estocástico" : "Determinístico";
         }
       }
 
+      // Atualiza Gráficos Chart.js
+      pushDataPoint(chartLat, 0, decision.latencyMs);
+      chartLat.update('none');
+
+      const plotScore = isRubiks ? (sim.getScore ? sim.getScore() : 0) : stepCount;
+      pushDataPoint(chartRew, 0, plotScore);
+      chartRew.update('none');
+
+      pushDataPoint(chartHomeostasis, 0, calibVal);
+      pushDataPoint(chartHomeostasis, 1, decision.uncertainty * 100);
+      chartHomeostasis.update('none');
+
+      let actName = `${decision.action}`;
       if (isRubiks) {
         if (cfg.mode === "macro") {
-          const macroName = System1.RubiksCubeSim.MACRO_NAMES[decision.action];
-          sim.applyMacro(macroName);
-          document.getElementById('status-desc').innerText = `Macro: ${macroName}`;
+          actName = System1.RubiksCubeSim.MACRO_NAMES[decision.action] || `Macro ${decision.action}`;
+          sim.applyMacro(actName);
+          document.getElementById('status-desc').innerText = `Macro: ${actName}`;
         } else {
-          const atomicName = System1.RubiksCubeSim.ATOMIC_MOVES[decision.action];
-          sim.applyAtomic(atomicName);
-          document.getElementById('status-desc').innerText = `Giro Atômico: ${atomicName}`;
+          actName = System1.RubiksCubeSim.ATOMIC_MOVES[decision.action] || `Giro ${decision.action}`;
+          sim.applyAtomic(actName);
+          document.getElementById('status-desc').innerText = `Giro Atômico: ${actName}`;
         }
 
         if (sim.isSolved()) {
           stopEvaluation();
-          document.getElementById('status-desc').innerText = "🏆 CUBO RESOLVIDO!";
+          document.getElementById('status-desc').innerText = "🏆 CUBO RESOLVIDO COM SUCESSO!";
+          appendLog(`[SOLVED] 🏆 Cubo 3x3 totalmente resolvido em ${stepCount} passos reflexivos!`);
         }
       } else {
         const res = sim.step(decision.action);
         document.getElementById('status-desc').innerText = `Passos: ${res.steps}`;
-        if (res.done) sim.reset();
+        if (res.done) {
+          appendLog(`[DONE] Episódio concluído em ${res.steps} passos. Reiniciando ambiente.`);
+          sim.reset();
+        }
+      }
+
+      // Stream para o terminal de logs
+      if (stepCount % 5 === 1 || isRubiks || decision.isUncertain) {
+        const calibTag = isAutoCalibrate ? `[Auto: ${calibVal.toFixed(2)}]` : `[Calib: ${calibVal.toFixed(2)}]`;
+        appendLog(`[PASSO ${String(stepCount).padStart(4, '0')}] Ação: ${actName} | Lat: ${decision.latencyMs.toFixed(2)}ms | Conf: ${(decision.confidence * 100).toFixed(1)}% | Incerteza: ${(decision.uncertainty * 100).toFixed(1)}% ${calibTag}`);
       }
 
       if (isRubiks && webCubeViewMode === '3d') {
@@ -852,8 +1422,8 @@
       if (!isRunning) return;
 
       const isRubiks = activeDemo.startsWith("rubiks");
-      const interval = isRubiks ? 250 : 25; // 4 Hz para Cubo (apreciação humana dos giros), 40 Hz para CartPole
-      if (timestamp - lastStepTime >= interval) {
+      const interval = isRubiks ? 250 : 25; // 4 Hz para Cubo (apreciação humana dos giros), 40 Hz para CartPole/Física
+      if (!lastStepTime || timestamp - lastStepTime >= interval) {
         lastStepTime = timestamp;
         await executeSingleStep();
       }
@@ -863,11 +1433,100 @@
       }
     }
 
-    // Inicialização ao carregar
+    // =====================================================================
+    // MODO BENCHMARK WASM SIMD (1.000 PASSES EM TEMPO REAL)
+    // =====================================================================
+    async function runBenchmark() {
+      if (!agent) {
+        alert("Aguarde o carregamento do modelo ONNX...");
+        return;
+      }
+
+      const btn = document.getElementById('btn-run-benchmark');
+      btn.disabled = true;
+      btn.innerText = "⏳ Executando 1.000 passes Wasm SIMD...";
+      appendLog("⚡ [BENCHMARK] Disparando 1.000 inferências ONNX Web (Wasm SIMD)...");
+
+      const cfg = MODELS[activeDemo] || MODELS["rubiks_atomic"];
+      const isRubiks = cfg.type === "rubiks" || activeDemo.startsWith("rubiks");
+      const obs = isRubiks ? sim.getOneHot() : sim.getState();
+
+      const latencies = [];
+      const totalPasses = 1000;
+      const tStart = performance.now();
+
+      for (let i = 0; i < totalPasses; i++) {
+        const t0 = performance.now();
+        await agent.actWithConfidence(obs, 0.0, { calibration: 0.0 });
+        const dt = performance.now() - t0;
+        latencies.push(dt);
+
+        if (i % 100 === 0) {
+          pushDataPoint(chartLat, 0, dt);
+          chartLat.update('none');
+        }
+      }
+
+      const totalTimeMs = performance.now() - tStart;
+      latencies.sort((a, b) => a - b);
+
+      const p50 = latencies[Math.floor(totalPasses * 0.50)];
+      const p90 = latencies[Math.floor(totalPasses * 0.90)];
+      const p99 = latencies[Math.floor(totalPasses * 0.99)];
+      const fps = (totalPasses / (totalTimeMs / 1000)).toFixed(0);
+
+      document.getElementById('bench-results').classList.remove('hidden');
+      document.getElementById('bench-fps').innerText = `${fps} FPS`;
+      document.getElementById('bench-p50').innerText = `${p50.toFixed(3)} ms (${(p50 * 1000).toFixed(0)} µs)`;
+      document.getElementById('bench-p90').innerText = `${p90.toFixed(3)} ms (${(p90 * 1000).toFixed(0)} µs)`;
+      document.getElementById('bench-p99').innerText = `${p99.toFixed(3)} ms (${(p99 * 1000).toFixed(0)} µs)`;
+
+      document.getElementById('kpi-latency').innerText = `${p50.toFixed(2)} ms`;
+      document.getElementById('kpi-fps').innerText = `${fps}`;
+
+      appendLog(`🏁 [BENCHMARK COMPLETO] 1000 passes concluídos em ${(totalTimeMs / 1000).toFixed(2)}s!`);
+      appendLog(`   • Throughput: ${fps} FPS`);
+      appendLog(`   • P50: ${p50.toFixed(3)} ms | P90: ${p90.toFixed(3)} ms | P99: ${p99.toFixed(3)} ms`);
+
+      btn.disabled = false;
+      btn.innerHTML = "<span>🚀</span> RODAR BENCHMARK WASM SIMD";
+    }
+
+    async function syncWebModels() {
+      const btn = document.getElementById('btn-sync-web-models');
+      const originalText = btn ? btn.innerHTML : '';
+      try {
+        if (btn) {
+          btn.disabled = true;
+          btn.innerHTML = '<span>⏳</span> Sincronizando...';
+        }
+        appendLog("[SYNC] Solicitando sincronização com checkpoints do projeto...");
+        const res = await fetch('/api/web_models/sync', { method: 'POST' });
+        if (res.ok) {
+          const data = await res.json();
+          appendLog(`✅ Sincronização concluída! ${data.synced ? data.synced.length : 0} modelos sincronizados.`);
+          await fetchManifest();
+          alert(`Sincronização concluída com sucesso!`);
+        } else {
+          appendLog("⚠️ Sincronização via API indisponível (modo estático). Recarregando manifesto local...");
+          await fetchManifest();
+        }
+      } catch (e) {
+        appendLog("ℹ️ Executando em modo cliente web autônomo. Recarregando manifesto...");
+        await fetchManifest();
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = originalText;
+        }
+      }
+    }
+
+    // Inicialização ao carregar a página
     window.addEventListener('DOMContentLoaded', async () => {
-      await fetchManifest();
       initThreeCube();
       threeAnimationLoop();
+      await fetchManifest();
       initSim(activeDemo);
       await loadModel(activeDemo);
     });
