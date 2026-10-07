@@ -1,6 +1,6 @@
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 import gymnasium as gym
 import numpy as np
 import torch
@@ -221,7 +221,7 @@ class UniversalS1Agent(nn.Module):
         noise_scale: float = 0.0,
         calibration: Optional[Union[float, str]] = None,
         auto_calibrate: bool = False,
-        avoid_action: Optional[int] = None,
+        avoid_action: Optional[Union[int, List[int], Set[int]]] = None,
     ) -> Union[int, np.ndarray, ReflexDecision]:
         """Ultra-fast single-forward reflex inference.
 
@@ -358,16 +358,22 @@ class UniversalS1Agent(nn.Module):
             eff_scale = noise_scale if noise_scale > 0.0 else 1.0
             calib = 0.0 if deterministic else (noise_scale if noise_scale > 0.0 else 1.0)
 
-        # Resolução de ação a evitar / quebra de ciclos
-        cycle_avoid_action = avoid_action if (avoid_action is not None and avoid_action >= 0) else -1
+        # Resolução do conjunto de ações a evitar / quebra de ciclos
+        avoid_set = set()
+        if avoid_action is not None:
+            if isinstance(avoid_action, (list, tuple, set)):
+                avoid_set.update(int(a) for a in avoid_action if int(a) >= 0)
+            elif int(avoid_action) >= 0:
+                avoid_set.add(int(avoid_action))
+
         hist = getattr(self, "_action_history", [])
-        if cycle_avoid_action == -1 and is_auto_calib and self._stagnation_count >= 2:
+        if is_auto_calib and self._stagnation_count >= 2:
             if len(hist) >= 3 and hist[-1] == hist[-3]:
                 # Oscilação A -> B -> A sob estagnação: evita B para romper o ciclo vicioso
-                cycle_avoid_action = hist[-2]
+                avoid_set.add(hist[-2])
             elif len(hist) >= 3 and hist[-1] == hist[-2] and hist[-2] == hist[-3]:
                 # Repetição tripla consecutiva
-                cycle_avoid_action = hist[-1]
+                avoid_set.add(hist[-1])
 
         # Policy decision
         if self.is_discrete:
@@ -376,11 +382,10 @@ class UniversalS1Agent(nn.Module):
             best_action = int(torch.argmax(probs, dim=-1).item())
 
             # Detecção de anulação imediata em cubo atômico (apenas quando estagnado em auto-calibração)
-            if cycle_avoid_action == -1 and is_auto_calib and self._stagnation_count >= 2 and len(hist) >= 1 and probs.shape[0] == 12:
+            if is_auto_calib and self._stagnation_count >= 2 and len(hist) >= 1 and probs.shape[0] == 12:
                 last_act = hist[-1]
                 inv_act = (last_act + 1) if (last_act % 2 == 0) else (last_act - 1)
-                if best_action == inv_act:
-                    cycle_avoid_action = inv_act
+                avoid_set.add(inv_act)
 
             if is_deterministic_mode:
                 action = best_action
@@ -393,11 +398,11 @@ class UniversalS1Agent(nn.Module):
                     action = best_action
 
             # Quebra estrita de ciclos (Cycle Breaker):
-            if cycle_avoid_action >= 0 and action == cycle_avoid_action and probs.shape[0] > 1:
+            if len(avoid_set) > 0 and action in avoid_set and probs.shape[0] > 1:
                 top_indices = torch.argsort(probs, descending=True)
                 for alt_idx in top_indices:
                     alt_action = int(alt_idx.item())
-                    if alt_action != cycle_avoid_action:
+                    if alt_action not in avoid_set:
                         action = alt_action
                         break
 
@@ -497,7 +502,7 @@ class UniversalS1Agent(nn.Module):
         noise_scale: float = 0.0,
         calibration: Optional[Union[float, str]] = None,
         auto_calibrate: bool = False,
-        avoid_action: Optional[int] = None,
+        avoid_action: Optional[Union[int, List[int], Set[int]]] = None,
     ) -> ReflexDecision:
         """Executa a decisão reflexiva retornando a estrutura ReflexDecision com telemetria e calibração."""
         decision = self.act_fast(

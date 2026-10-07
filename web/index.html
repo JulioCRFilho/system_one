@@ -1214,6 +1214,8 @@
         const mode = cfg.mode === "macro" ? "macro" : "atomic";
         const moves = sim.scramble(depth, mode);
         lastScore = sim.getScore();
+        peakScore = lastScore;
+        window.visitedStates = [sim.getStateHash ? sim.getStateHash() : ""];
         actionHistory = [];
 
         if (scrambleSec) scrambleSec.classList.remove('hidden');
@@ -1324,6 +1326,8 @@
         const mode = cfg.mode === "macro" ? "macro" : "atomic";
         const moves = sim.scramble(depth, mode);
         lastScore = sim.getScore();
+        peakScore = lastScore;
+        window.visitedStates = [sim.getStateHash ? sim.getStateHash() : ""];
         actionHistory = [];
         if (webCubeViewMode === '3d') {
           updateCube3D(sim.state);
@@ -1338,6 +1342,8 @@
     function resetEnv() {
       sim.reset();
       lastScore = sim.getScore ? sim.getScore() : 0.0;
+      peakScore = lastScore;
+      window.visitedStates = [sim.getStateHash ? sim.getStateHash() : ""];
       actionHistory = [];
       stepCount = 0;
       document.getElementById('kpi-steps').innerText = "0";
@@ -1365,24 +1371,48 @@
 
       let stepReward = 0.0;
       if (isRubiks) {
-        const curScore = sim.getScore();
-        const deltaScore = curScore - lastScore;
-        lastScore = curScore;
+        const curScore = sim.getScore ? sim.getScore() : 0;
         const isNewPeak = curScore > peakScore;
-        if (isNewPeak) peakScore = curScore;
-        stepReward = (deltaScore * 8.0) - 0.02 + (isNewPeak ? 1.0 : 0.0) + (sim.isSolved() ? 15.0 : 0.0);
+        let sRew = -0.02;
+        if (isNewPeak) {
+          const deltaPeak = curScore - peakScore;
+          peakScore = curScore;
+          sRew = (deltaPeak * 10.0) + 1.0;
+        }
+        if (sim.isSolved()) {
+          sRew += 15.0;
+        }
+        stepReward = sRew;
         document.getElementById('kpi-return').innerText = peakScore.toFixed(2);
       } else {
         stepReward = 1.0;
         document.getElementById('kpi-return').innerText = stepCount.toFixed(0);
       }
 
-      // Prevenção de ciclos consecutivos (A -> B -> A -> B ou repetições A -> A)
-      let avoidAct = -1;
+      // Prevenção de ciclos, anulação inversa e estados repetidos (Inhibition of Return)
+      const avoidList = [];
+      if (isRubiks) {
+        // Inibição de inverso atômico imediato (evita no-op de 2 passos)
+        if (cfg.mode !== "macro" && actionHistory.length >= 1) {
+          const last = actionHistory[actionHistory.length - 1];
+          const inv = (last % 2 === 0) ? last + 1 : last - 1;
+          avoidList.push(inv);
+        }
+        // Prevenção de retorno a configurações recentemente visitadas
+        if (window.visitedStates && window.visitedStates.length > 0) {
+          const moves = cfg.mode === "macro" ? System1.RubiksCubeSim.MACRO_NAMES : System1.RubiksCubeSim.ATOMIC_MOVES;
+          for (let i = 0; i < moves.length; i++) {
+            const nextH = sim.predictStateHash(moves[i]);
+            if (window.visitedStates.includes(nextH)) {
+              avoidList.push(i);
+            }
+          }
+        }
+      }
       if (actionHistory.length >= 3 && actionHistory[actionHistory.length - 1] === actionHistory[actionHistory.length - 3]) {
-        avoidAct = actionHistory[actionHistory.length - 2];
+        avoidList.push(actionHistory[actionHistory.length - 2]);
       } else if (actionHistory.length >= 2 && actionHistory[actionHistory.length - 1] === actionHistory[actionHistory.length - 2]) {
-        avoidAct = actionHistory[actionHistory.length - 1];
+        avoidList.push(actionHistory[actionHistory.length - 1]);
       }
 
       const calibEl = document.getElementById('cfg-eval-calibration');
@@ -1391,7 +1421,7 @@
       const decision = await agent.actWithConfidence(obs, stepReward, {
         calibration: isAutoCalibrate ? 'auto' : webCalib,
         autoCalibrate: isAutoCalibrate,
-        avoidAction: avoidAct >= 0 ? avoidAct : undefined
+        avoidAction: avoidList.length > 0 ? avoidList : undefined
       });
 
       actionHistory.push(decision.action);
@@ -1434,12 +1464,16 @@
         if (cfg.mode === "macro") {
           actName = System1.RubiksCubeSim.MACRO_NAMES[decision.action] || `Macro ${decision.action}`;
           sim.applyMacro(actName);
-          document.getElementById('status-desc').innerText = `Macro: ${actName}`;
+          document.getElementById('status-desc').innerText = `Macro: ${actName} (Passo ${sim.steps})`;
         } else {
           actName = System1.RubiksCubeSim.ATOMIC_MOVES[decision.action] || `Giro ${decision.action}`;
-          sim.applyAtomic(actName);
-          document.getElementById('status-desc').innerText = `Giro Atômico: ${actName}`;
+          sim.applyAtomic(actName, true);
+          document.getElementById('status-desc').innerText = `Giro Atômico: ${actName} (Passo ${sim.steps})`;
         }
+
+        if (!window.visitedStates) window.visitedStates = [];
+        window.visitedStates.push(sim.getStateHash());
+        if (window.visitedStates.length > 24) window.visitedStates.shift();
 
         if (sim.isSolved()) {
           stopEvaluation();
