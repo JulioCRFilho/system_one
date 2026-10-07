@@ -1,3 +1,4 @@
+import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple, Union
 import gymnasium as gym
@@ -23,6 +24,7 @@ class ReflexDecision:
     entropy: float             # Entropia bruta de Shannon
     latent_value: Optional[float] = None  # Valor estimado V(s) se solicitado
     calibration: float = 0.0   # [0.0, 1.0] - Nível de calibração / temperatura aplicada
+    latency_ms: float = 0.0    # Latência de execução do reflexo em ms
 
 
 class UniversalS1Agent(nn.Module):
@@ -225,6 +227,7 @@ class UniversalS1Agent(nn.Module):
         auto-calibration (auto_calibrate=True or calibration='auto') based on reward momentum.
         If return_decision=True, returns ReflexDecision with uncertainty gating signals and active calibration.
         """
+        t0 = time.perf_counter()
         raw_obs = obs_dict["obs"]
         raw_action = obs_dict["prev_action"]
         raw_reward = obs_dict["prev_reward"]
@@ -386,6 +389,7 @@ class UniversalS1Agent(nn.Module):
 
             is_uncertain = (uncertainty >= uncertainty_threshold) or (confidence < confidence_threshold)
             latent_val = float(self.value_head(h).squeeze().item()) if return_value else None
+            latency_ms = (time.perf_counter() - t0) * 1000.0
 
             return ReflexDecision(
                 action=action,
@@ -396,6 +400,7 @@ class UniversalS1Agent(nn.Module):
                 entropy=entropy,
                 latent_value=latent_val,
                 calibration=calib,
+                latency_ms=latency_ms,
             )
         else:
             mu = self.policy_head.mu_net(h)
@@ -428,6 +433,7 @@ class UniversalS1Agent(nn.Module):
 
             is_uncertain = (uncertainty >= uncertainty_threshold) or (confidence < confidence_threshold)
             latent_val = float(self.value_head(h).squeeze().item()) if return_value else None
+            latency_ms = (time.perf_counter() - t0) * 1000.0
 
             return ReflexDecision(
                 action=action_np,
@@ -438,6 +444,7 @@ class UniversalS1Agent(nn.Module):
                 entropy=entropy,
                 latent_value=latent_val,
                 calibration=calib,
+                latency_ms=latency_ms,
             )
 
     @torch.no_grad()
