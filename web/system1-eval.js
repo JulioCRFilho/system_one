@@ -18,16 +18,13 @@ class RubiksCubeSim {
 
   static MACRO_ACTIONS = {
     "SEXY_MOVE_R": ["R", "U", "R_prime", "U_prime"],
+    "SEXY_MOVE_R_PRIME": ["U", "R", "U_prime", "R_prime"],
     "SEXY_MOVE_L": ["L_prime", "U_prime", "L", "U"],
+    "SEXY_MOVE_L_PRIME": ["U_prime", "L_prime", "U", "L"],
     "SUNE": ["R", "U", "R_prime", "U", "R", "U", "U", "R_prime"],
     "ANTI_SUNE": ["R", "U", "U", "R_prime", "U_prime", "R", "U_prime", "R_prime"],
-    "T_PERM": [
-      "R", "U", "R_prime", "U_prime", "R_prime", "F",
-      "R", "R", "U_prime", "R_prime", "U_prime", "R", "U", "R_prime", "F_prime"
-    ],
-    "INSERT_EDGE_R": ["U", "R", "U_prime", "R_prime", "U_prime", "F_prime", "U", "F"],
-    "INSERT_EDGE_L": ["U_prime", "L_prime", "U", "L", "U", "F", "U_prime", "F_prime"],
     "YELLOW_CROSS": ["F", "R", "U", "R_prime", "U_prime", "F_prime"],
+    "YELLOW_CROSS_PRIME": ["F", "U", "R", "U_prime", "R_prime", "F_prime"],
     "ROTATE_Y": ["Y"],
     "ROTATE_Y_PRIME": ["Y_prime"],
     "U_TURN": ["U"],
@@ -45,17 +42,25 @@ class RubiksCubeSim {
   };
 
   static INVERSE_MACROS = {
-    "SUNE": "ANTI_SUNE", "ANTI_SUNE": "SUNE",
-    "U_TURN": "U_PRIME_TURN", "U_PRIME_TURN": "U_TURN",
-    "ROTATE_Y": "ROTATE_Y_PRIME", "ROTATE_Y_PRIME": "ROTATE_Y"
+    "SEXY_MOVE_R": "SEXY_MOVE_R_PRIME",
+    "SEXY_MOVE_R_PRIME": "SEXY_MOVE_R",
+    "SEXY_MOVE_L": "SEXY_MOVE_L_PRIME",
+    "SEXY_MOVE_L_PRIME": "SEXY_MOVE_L",
+    "SUNE": "ANTI_SUNE",
+    "ANTI_SUNE": "SUNE",
+    "YELLOW_CROSS": "YELLOW_CROSS_PRIME",
+    "YELLOW_CROSS_PRIME": "YELLOW_CROSS",
+    "ROTATE_Y": "ROTATE_Y_PRIME",
+    "ROTATE_Y_PRIME": "ROTATE_Y",
+    "U_TURN": "U_PRIME_TURN",
+    "U_PRIME_TURN": "U_TURN"
   };
 
   static SCRAMBLE_MACRO_NAMES = [
-    "SEXY_MOVE_R", "SEXY_MOVE_L",
+    "SEXY_MOVE_R", "SEXY_MOVE_R_PRIME",
+    "SEXY_MOVE_L", "SEXY_MOVE_L_PRIME",
     "SUNE", "ANTI_SUNE",
-    "T_PERM",
-    "INSERT_EDGE_R", "INSERT_EDGE_L",
-    "YELLOW_CROSS",
+    "YELLOW_CROSS", "YELLOW_CROSS_PRIME",
     "U_TURN", "U_PRIME_TURN"
   ];
 

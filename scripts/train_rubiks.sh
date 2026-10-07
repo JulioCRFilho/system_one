@@ -9,13 +9,14 @@ set -e
 
 cd "$(dirname "$0")/.."
 
-MODE="${1:-macro}"
-STEPS="${2:-15000}"
-DEPTH="${3:-2}"
+MODE="${1:-atomic}"
+STEPS="${2:-40000}"
+DEPTH="${3:-4}"
+EXTRA_ARGS="${@:4}"
 
 echo "================================================================="
 echo "🎲 INICIANDO TREINAMENTO DO CUBO MÁGICO (SYSTEM 1 ENGINE)"
-echo "   Modo: $MODE | Passos: $STEPS | Scramble Depth: $DEPTH"
+echo "   Modo: $MODE | Passos: $STEPS | Max Depth: $DEPTH (Curriculum)"
 echo "================================================================="
 
-.venv/bin/python examples/13_train_rubiks_cube.py --mode "$MODE" --steps "$STEPS" --scramble-depth "$DEPTH"
+.venv/bin/python examples/13_train_rubiks_cube.py --mode "$MODE" --steps "$STEPS" --max-depth "$DEPTH" --curriculum $EXTRA_ARGS

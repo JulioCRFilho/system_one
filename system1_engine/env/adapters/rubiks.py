@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import io
 import math
+from collections import deque
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import gymnasium as gym
@@ -136,19 +137,16 @@ class RubiksCubeCore:
         "R", "R_prime", "L", "L_prime",
     ]
 
-    # 12 Macro-Ações Pré-Definidas (Hierarchical / Speedcubing)
+    # 12 Macro-Ações Pré-Definidas Simétricas (Pares Inversos Exatos)
     MACRO_ACTIONS = {
         "SEXY_MOVE_R": ["R", "U", "R_prime", "U_prime"],
+        "SEXY_MOVE_R_PRIME": ["U", "R", "U_prime", "R_prime"],
         "SEXY_MOVE_L": ["L_prime", "U_prime", "L", "U"],
+        "SEXY_MOVE_L_PRIME": ["U_prime", "L_prime", "U", "L"],
         "SUNE": ["R", "U", "R_prime", "U", "R", "U", "U", "R_prime"],
         "ANTI_SUNE": ["R", "U", "U", "R_prime", "U_prime", "R", "U_prime", "R_prime"],
-        "T_PERM": [
-            "R", "U", "R_prime", "U_prime", "R_prime", "F",
-            "R", "R", "U_prime", "R_prime", "U_prime", "R", "U", "R_prime", "F_prime"
-        ],
-        "INSERT_EDGE_R": ["U", "R", "U_prime", "R_prime", "U_prime", "F_prime", "U", "F"],
-        "INSERT_EDGE_L": ["U_prime", "L_prime", "U", "L", "U", "F", "U_prime", "F_prime"],
         "YELLOW_CROSS": ["F", "R", "U", "R_prime", "U_prime", "F_prime"],
+        "YELLOW_CROSS_PRIME": ["F", "U", "R", "U_prime", "R_prime", "F_prime"],
         "ROTATE_Y": ["Y"],
         "ROTATE_Y_PRIME": ["Y_prime"],
         "U_TURN": ["U"],
@@ -189,17 +187,25 @@ class RubiksCubeCore:
         "L": "L_prime", "L_prime": "L",
     }
     INVERSE_MACROS = {
-        "SUNE": "ANTI_SUNE", "ANTI_SUNE": "SUNE",
-        "U_TURN": "U_PRIME_TURN", "U_PRIME_TURN": "U_TURN",
-        "ROTATE_Y": "ROTATE_Y_PRIME", "ROTATE_Y_PRIME": "ROTATE_Y",
+        "SEXY_MOVE_R": "SEXY_MOVE_R_PRIME",
+        "SEXY_MOVE_R_PRIME": "SEXY_MOVE_R",
+        "SEXY_MOVE_L": "SEXY_MOVE_L_PRIME",
+        "SEXY_MOVE_L_PRIME": "SEXY_MOVE_L",
+        "SUNE": "ANTI_SUNE",
+        "ANTI_SUNE": "SUNE",
+        "YELLOW_CROSS": "YELLOW_CROSS_PRIME",
+        "YELLOW_CROSS_PRIME": "YELLOW_CROSS",
+        "ROTATE_Y": "ROTATE_Y_PRIME",
+        "ROTATE_Y_PRIME": "ROTATE_Y",
+        "U_TURN": "U_PRIME_TURN",
+        "U_PRIME_TURN": "U_TURN",
     }
     # Macro-ações que efetivamente desalinham e embaralham peças (exclui rotações globais do cubo Y e Y')
     SCRAMBLE_MACRO_NAMES = [
-        "SEXY_MOVE_R", "SEXY_MOVE_L",
+        "SEXY_MOVE_R", "SEXY_MOVE_R_PRIME",
+        "SEXY_MOVE_L", "SEXY_MOVE_L_PRIME",
         "SUNE", "ANTI_SUNE",
-        "T_PERM",
-        "INSERT_EDGE_R", "INSERT_EDGE_L",
-        "YELLOW_CROSS",
+        "YELLOW_CROSS", "YELLOW_CROSS_PRIME",
         "U_TURN", "U_PRIME_TURN",
     ]
 
@@ -568,11 +574,24 @@ class RubiksCubeEnv(gym.Env):
         render_mode: Optional[str] = "rgb_array",
         scramble_depth: int = 3,
         max_steps: int = 40,
+        curriculum: bool = False,
+        min_depth: int = 1,
+        max_depth: int = 5,
+        target_success_rate: float = 0.90,
+        curriculum_window: int = 25,
     ) -> None:
         super().__init__()
         self.render_mode = render_mode
         self.scramble_depth = scramble_depth
         self.max_steps = max_steps
+        self.curriculum = curriculum
+        self.min_depth = min_depth
+        self.max_depth = max_depth
+        self.target_success_rate = target_success_rate
+        self.curriculum_window = curriculum_window
+        self.current_depth = min_depth if curriculum else scramble_depth
+        self.recent_successes: deque[float] = deque(maxlen=curriculum_window)
+        self.curriculum_promotions: int = 0
         self.core = RubiksCubeCore()
 
         # 12 Ações Atômicas: U, U', D, D', F, F', B, B', R, R', L, L'
@@ -599,7 +618,24 @@ class RubiksCubeEnv(gym.Env):
         if seed is not None:
             self.rng = np.random.default_rng(seed)
 
-        depth = options.get("scramble_depth", self.scramble_depth) if options else self.scramble_depth
+        if options and "scramble_depth" in options:
+            depth = options["scramble_depth"]
+        elif self.curriculum:
+            if len(self.recent_successes) >= self.curriculum_window:
+                success_rate = float(np.mean(self.recent_successes))
+                if success_rate >= self.target_success_rate and self.current_depth < self.max_depth:
+                    old_d = self.current_depth
+                    self.current_depth += 1
+                    self.curriculum_promotions += 1
+                    self.recent_successes.clear()
+                    print(
+                        f"\n🚀 [CURRICULUM ATÔMICO] Sucesso {success_rate*100:.1f}% >= {self.target_success_rate*100:.0f}%! "
+                        f"Profundidade promovida: {old_d} -> {self.current_depth}/{self.max_depth}"
+                    )
+            depth = self.current_depth
+        else:
+            depth = self.scramble_depth
+
         if options and "view_mode" in options:
             self.set_view_mode(options["view_mode"])
         self.core.scramble(depth=depth, use_macros=False, rng=self.rng)
@@ -612,6 +648,10 @@ class RubiksCubeEnv(gym.Env):
             "aligned_stickers": self.core.get_aligned_count(),
             "score": self._prev_score,
             "is_solved": self.core.is_solved(),
+            "current_depth": depth,
+            "curriculum_success_rate": (
+                float(np.mean(self.recent_successes)) if len(self.recent_successes) > 0 else 0.0
+            ),
         }
         return obs, info
 
@@ -638,12 +678,19 @@ class RubiksCubeEnv(gym.Env):
         terminated = is_solved
         truncated = self._steps >= self.max_steps
 
+        if (terminated or truncated) and self.curriculum:
+            self.recent_successes.append(1.0 if is_solved else 0.0)
+
         obs = self.core.get_one_hot()
         info = {
             "aligned_stickers": self.core.get_aligned_count(),
             "score": cur_score,
             "is_solved": is_solved,
             "action_name": action_name,
+            "current_depth": self.current_depth if self.curriculum else self.scramble_depth,
+            "curriculum_success_rate": (
+                float(np.mean(self.recent_successes)) if len(self.recent_successes) > 0 else 0.0
+            ),
         }
         return obs, reward, terminated, truncated, info
 
@@ -660,19 +707,19 @@ class RubiksCubeEnv(gym.Env):
 class RubiksCubeMacroEnv(gym.Env):
     """Ambiente Gymnasium para Cubo Mágico com Macro-Ações e Algoritmos Pré-Definidos.
     
-    Ações (Discrete 12):
-    0: SEXY_MOVE_R    (R U R' U')
-    1: SEXY_MOVE_L    (L' U' L U)
-    2: SUNE           (R U R' U R U2 R')
-    3: ANTI_SUNE      (R U2 R' U' R U' R')
-    4: T_PERM         (R U R' U' R' F R2 U' R' U' R U R' F')
-    5: INSERT_EDGE_R  (U R U' R' U' F' U F)
-    6: INSERT_EDGE_L  (U' L' U L U F U' F')
-    7: YELLOW_CROSS   (F R U R' U' F')
-    8: ROTATE_Y       (Giro do cubo todo no eixo Y)
-    9: ROTATE_Y_PRIME (Giro reverso do cubo no eixo Y)
-    10: U_TURN        (U - Giro superior)
-    11: U_PRIME_TURN  (U' - Giro superior inverso)
+    Ações (Discrete 12 - Pares Inversos Exatos):
+    0: SEXY_MOVE_R        (R U R' U')
+    1: SEXY_MOVE_R_PRIME  (U R U' R')
+    2: SEXY_MOVE_L        (L' U' L U)
+    3: SEXY_MOVE_L_PRIME  (U' L' U L)
+    4: SUNE               (R U R' U R U2 R')
+    5: ANTI_SUNE          (R U2 R' U' R U' R')
+    6: YELLOW_CROSS       (F R U R' U' F')
+    7: YELLOW_CROSS_PRIME (F U R U' R' F')
+    8: ROTATE_Y           (Giro do cubo todo no eixo Y +90°)
+    9: ROTATE_Y_PRIME     (Giro do cubo todo no eixo Y -90°)
+    10: U_TURN            (U - Giro superior +90°)
+    11: U_PRIME_TURN      (U' - Giro superior -90°)
     """
 
     metadata = {"render_modes": ["rgb_array"]}
@@ -682,11 +729,24 @@ class RubiksCubeMacroEnv(gym.Env):
         render_mode: Optional[str] = "rgb_array",
         scramble_depth: int = 2,
         max_steps: int = 25,
+        curriculum: bool = False,
+        min_depth: int = 1,
+        max_depth: int = 4,
+        target_success_rate: float = 0.90,
+        curriculum_window: int = 25,
     ) -> None:
         super().__init__()
         self.render_mode = render_mode
         self.scramble_depth = scramble_depth
         self.max_steps = max_steps
+        self.curriculum = curriculum
+        self.min_depth = min_depth
+        self.max_depth = max_depth
+        self.target_success_rate = target_success_rate
+        self.curriculum_window = curriculum_window
+        self.current_depth = min_depth if curriculum else scramble_depth
+        self.recent_successes: deque[float] = deque(maxlen=curriculum_window)
+        self.curriculum_promotions: int = 0
         self.core = RubiksCubeCore()
 
         # 12 Macro-Ações
@@ -713,7 +773,24 @@ class RubiksCubeMacroEnv(gym.Env):
         if seed is not None:
             self.rng = np.random.default_rng(seed)
 
-        depth = options.get("scramble_depth", self.scramble_depth) if options else self.scramble_depth
+        if options and "scramble_depth" in options:
+            depth = options["scramble_depth"]
+        elif self.curriculum:
+            if len(self.recent_successes) >= self.curriculum_window:
+                success_rate = float(np.mean(self.recent_successes))
+                if success_rate >= self.target_success_rate and self.current_depth < self.max_depth:
+                    old_d = self.current_depth
+                    self.current_depth += 1
+                    self.curriculum_promotions += 1
+                    self.recent_successes.clear()
+                    print(
+                        f"\n🚀 [CURRICULUM MACRO] Sucesso {success_rate*100:.1f}% >= {self.target_success_rate*100:.0f}%! "
+                        f"Profundidade promovida: {old_d} -> {self.current_depth}/{self.max_depth}"
+                    )
+            depth = self.current_depth
+        else:
+            depth = self.scramble_depth
+
         if options and "view_mode" in options:
             self.set_view_mode(options["view_mode"])
         self.core.scramble(depth=depth, use_macros=True, rng=self.rng)
@@ -726,6 +803,10 @@ class RubiksCubeMacroEnv(gym.Env):
             "aligned_stickers": self.core.get_aligned_count(),
             "score": self._prev_score,
             "is_solved": self.core.is_solved(),
+            "current_depth": depth,
+            "curriculum_success_rate": (
+                float(np.mean(self.recent_successes)) if len(self.recent_successes) > 0 else 0.0
+            ),
         }
         return obs, info
 
@@ -749,12 +830,19 @@ class RubiksCubeMacroEnv(gym.Env):
         terminated = is_solved
         truncated = self._steps >= self.max_steps
 
+        if (terminated or truncated) and self.curriculum:
+            self.recent_successes.append(1.0 if is_solved else 0.0)
+
         obs = self.core.get_one_hot()
         info = {
             "aligned_stickers": self.core.get_aligned_count(),
             "score": cur_score,
             "is_solved": is_solved,
             "action_name": macro_name,
+            "current_depth": self.current_depth if self.curriculum else self.scramble_depth,
+            "curriculum_success_rate": (
+                float(np.mean(self.recent_successes)) if len(self.recent_successes) > 0 else 0.0
+            ),
         }
         return obs, reward, terminated, truncated, info
 

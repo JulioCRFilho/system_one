@@ -83,6 +83,15 @@ class TestRubiksCubeMath:
         assert frame.shape == (320, 480, 3)
         assert frame.dtype == np.uint8
 
+    def test_all_macros_have_exact_inverses(self):
+        """Cada uma das 12 macro-ações deve possuir inversa exata que desfaz o movimento."""
+        for m, m_inv in RubiksCubeCore.INVERSE_MACROS.items():
+            core = RubiksCubeCore()
+            init_state = core.state.copy()
+            core.apply_macro(m)
+            core.apply_macro(m_inv)
+            assert np.array_equal(core.state, init_state), f"Macro {m} + {m_inv} não retornaram ao estado resolvido"
+
 
 class TestRubiksGymEnvironments:
     """Testa os ambientes compatíveis com Gymnasium."""
@@ -171,6 +180,20 @@ class TestRubiksGymEnvironments:
         assert raw_macro is not None
         raw_macro.reset()
         raw_macro.close()
+
+    def test_curriculum_depth_promotion(self):
+        """Valida que o curriculum promove a profundidade quando o agente atinge a meta de vitórias."""
+        env = RubiksCubeEnv(curriculum=True, min_depth=1, max_depth=3, target_success_rate=0.80, curriculum_window=5)
+        assert env.current_depth == 1
+
+        # Simula 5 episódios resolvidos
+        for _ in range(5):
+            env.recent_successes.append(1.0)
+
+        obs, info = env.reset()
+        assert env.current_depth == 2
+        assert info["current_depth"] == 2
+        assert info["curriculum_success_rate"] == 0.0  # resetado após promoção
 
 
 class TestRubiksSystemOneIntegration:

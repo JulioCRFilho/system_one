@@ -15,6 +15,7 @@ from system1_engine.env.adapters.native_adapter import NativeEngineEnv
 from system1_engine.env.adapters.vizdoom import VizdoomAimRewardWrapper
 from system1_engine.env.adapters.window_adapter import WindowCaptureEnv
 
+from system1_engine.env.adapters.frozenlake import FrozenLakeCurriculumWrapper
 from system1_engine.env.adapters.rubiks import (
     RubiksCubeCore,
     RubiksCubeEnv,
@@ -33,6 +34,7 @@ __all__ = [
     "MountainCarNormalizedWrapper",
     "MountainCarEnergyRewardWrapper",
     "VizdoomAimRewardWrapper",
+    "FrozenLakeCurriculumWrapper",
     "make_game_env",
     "RubiksCubeCore",
     "RubiksCubeEnv",

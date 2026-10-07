@@ -237,6 +237,9 @@ def build_hud_env(
         if is_training:
             raw_env = MountainCarEnergyRewardWrapper(raw_env)
         raw_env = MountainCarNormalizedWrapper(raw_env)
+    elif env_id == "FrozenLake-v1":
+        from system1_engine.env.adapters.frozenlake import FrozenLakeCurriculumWrapper
+        raw_env = FrozenLakeCurriculumWrapper(raw_env, curriculum=is_training)
 
     return UniversalS1Wrapper(raw_env)
 
