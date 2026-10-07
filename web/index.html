@@ -225,10 +225,10 @@
         <div>
           <div class="flex items-center justify-between mb-1">
             <div class="flex items-center gap-1.5">
-              <label class="text-[11px] text-gray-400 font-semibold">Ambiente & Modelo ONNX</label>
+              <label class="text-[11px] text-gray-400 font-semibold">Ambiente de Simulação (--env)</label>
               <span class="tooltip-wrap">
-                <span class="tooltip-icon" title="Identificador do ambiente simulado diretamente no navegador.">ⓘ</span>
-                <span class="tooltip-bubble"><strong>Ambiente</strong>: Seleciona o simulador local e o respectivo checkpoint ONNX compilado com Wasm SIMD.</span>
+                <span class="tooltip-icon" title="Identificador do ambiente simulado. O Web Hub busca e carrega automaticamente a versão mais recente do checkpoint neural compilado para o ambiente ativo.">ⓘ</span>
+                <span class="tooltip-bubble"><strong>Ambiente</strong>: Seleciona o ambiente. O runtime busca e carrega automaticamente a versão mais recente do checkpoint compilado via Wasm SIMD, sem seleção manual.</span>
               </span>
             </div>
             <a href="https://gymnasium.farama.org/environments/" target="_blank" rel="noopener noreferrer" class="text-[10px] text-gray-400 hover:text-gray-200 font-mono flex items-center gap-0.5 bg-gray-900 hover:bg-gray-800 px-1.5 py-0.5 rounded border border-gray-800 transition">
@@ -475,16 +475,43 @@
         </div>
       </div>
 
-      <!-- Card de Modelos ONNX Sincronizados no Projeto -->
-      <div class="card p-3 flex flex-col">
-        <div class="flex justify-between items-center border-b border-gray-800 pb-1.5 mb-2">
+      <!-- Card de Checkpoint Ativo (Versão Mais Recente Auto-Resolvida) -->
+      <div class="card p-3 flex flex-col gap-2">
+        <div class="flex justify-between items-center border-b border-gray-800 pb-1.5 mb-1">
           <span class="text-xs font-bold text-purple-400 uppercase tracking-wider flex items-center gap-1.5">
-            <span>📦</span> Modelos ONNX Sincronizados no Projeto
+            <span>📦</span> Checkpoint Neural Ativo
           </span>
-          <span id="ckpt-count-badge" class="text-[10px] px-1.5 py-0.2 rounded bg-purple-950 text-purple-300 border border-purple-800 font-mono">7 carregados</span>
+          <span class="text-[9px] px-1.5 py-0.5 rounded bg-purple-950 text-purple-300 border border-purple-800 font-mono font-bold flex items-center gap-1">
+            <span>⚡</span> VERSÃO MAIS RECENTE
+          </span>
         </div>
-        <div id="models-table-container" class="max-h-36 overflow-y-auto space-y-1">
-          <!-- Renderizado dinamicamente -->
+
+        <div class="bg-[#050811] p-2.5 rounded border border-gray-900 font-mono text-[11px] flex flex-col gap-1.5">
+          <div class="flex items-center justify-between">
+            <span class="text-gray-400">Arquivo ONNX:</span>
+            <span id="active-ckpt-file" class="font-bold text-cyan-300">s1_rubiks_atomic.onnx</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-gray-400">Atualizado em:</span>
+            <span id="active-ckpt-mtime" class="text-emerald-400">07/10/2026 09:56:13</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-gray-400">Dimensões & Arquitetura:</span>
+            <span id="active-ckpt-dims" class="text-gray-300">54D obs • 12 ações • GRU 256</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-gray-400">Tamanho do Binário:</span>
+            <span id="active-ckpt-size" class="text-gray-300">3.18 MB</span>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between text-[10px] text-gray-400 px-1 pt-0.5">
+          <div class="flex items-center gap-1 text-emerald-400 font-mono text-[10px]">
+            <span>✓</span> <span>Sempre a última versão compilada (sem seleção manual)</span>
+          </div>
+          <button type="button" onclick="loadModel(activeDemo, true)" class="badge-btn flex items-center gap-1" title="Forçar rechecagem e recarregamento da versão mais recente">
+            <span>🔄</span> Recarregar
+          </button>
         </div>
       </div>
 
@@ -1025,7 +1052,7 @@
     }
 
     // =====================================================================
-    // MANIFESTO DINÂMICO E CARREGAMENTO DE MODELOS ONNX
+    // MANIFESTO DINÂMICO E AUTO-RESOLUÇÃO DA VERSÃO MAIS RECENTE
     // =====================================================================
     async function fetchManifest() {
       try {
@@ -1045,8 +1072,11 @@
               file: m.file,
               mode: m.mode || (key.includes("macro") ? "macro" : "atomic"),
               type: m.type || (key.includes("rubik") ? "rubiks" : "cartpole"),
+              obs_dim: m.obs_dim,
+              act_dim: m.act_dim,
               size: `${m.size_mb || 3.0} MB`,
               mtime: m.mtime_str || "Recente",
+              mtime_ts: m.mtime || 0,
               description: m.description || ""
             };
 
@@ -1058,43 +1088,40 @@
             }
             select.appendChild(opt);
           }
-          renderModelsTable();
+          updateActiveCheckpointCard(activeDemo);
         }
       } catch (err) {
         console.warn("Manifesto dinâmico não disponível, utilizando catálogo padrão em memória:", err);
       }
     }
 
-    function renderModelsTable() {
-      const container = document.getElementById('models-table-container');
-      if (!container) return;
-      container.innerHTML = '';
+    function updateActiveCheckpointCard(demoKey) {
+      const cfg = MODELS[demoKey] || MODELS["rubiks_atomic"];
+      const fileEl = document.getElementById('active-ckpt-file');
+      const mtimeEl = document.getElementById('active-ckpt-mtime');
+      const dimsEl = document.getElementById('active-ckpt-dims');
+      const sizeEl = document.getElementById('active-ckpt-size');
 
-      Object.values(MODELS).forEach(m => {
-        const div = document.createElement('div');
-        div.className = 'flex items-center justify-between p-1.5 rounded bg-gray-900/70 border border-gray-800 text-xs';
-        const isCurrent = m.key === activeDemo;
-        const activeBadge = isCurrent ? '<span class="px-1 py-0.2 rounded bg-cyan-950 text-cyan-400 text-[9px] border border-cyan-800 font-bold">ATIVO</span>' : '';
-        div.innerHTML = `
-          <div class="flex flex-col min-w-0 pr-2 gap-0.5">
-            <div class="flex items-center gap-1.5 flex-wrap">
-              <span class="font-bold text-gray-200 truncate font-mono text-[11px]">${m.file}</span>
-              ${activeBadge}
-            </div>
-            <div class="flex items-center gap-2 text-[9px] text-gray-500">
-              <span>${m.size}</span>
-              <span>•</span>
-              <span class="text-gray-400 font-mono">${m.name}</span>
-            </div>
-          </div>
-          <button type="button" onclick="quickSelectEnv('${m.key}')" class="badge-btn">Carregar</button>
-        `;
-        container.appendChild(div);
-      });
+      if (fileEl) fileEl.innerText = cfg.file;
+      if (mtimeEl) mtimeEl.innerText = cfg.mtime;
+      if (sizeEl) sizeEl.innerText = cfg.size;
+      if (dimsEl) {
+        if (cfg.obs_dim && cfg.act_dim) {
+          dimsEl.innerText = `${cfg.obs_dim}D obs • ${cfg.act_dim} ações • GRU 256`;
+        } else if (demoKey.includes("rubiks")) {
+          dimsEl.innerText = "54D obs • 12 ações • GRU 256";
+        } else {
+          dimsEl.innerText = "Vetor amortizado • GRU 256";
+        }
+      }
     }
 
-    async function loadModel(demoKey) {
+    async function loadModel(demoKey, forceReload = false) {
       document.getElementById('loader-overlay').classList.remove('hidden');
+      if (forceReload) {
+        await fetchManifest();
+      }
+
       const cfg = MODELS[demoKey] || MODELS["rubiks_atomic"];
       document.getElementById('model-file-label').innerText = cfg.file;
       document.getElementById('model-size-label').innerText = cfg.size;
@@ -1104,7 +1131,9 @@
       }
       document.getElementById('overlay-env').innerText = cfg.env_id || cfg.name;
 
-      appendLog(`[INIT] Carregando pesos neurais: ${cfg.file} (${cfg.size})...`);
+      updateActiveCheckpointCard(demoKey);
+
+      appendLog(`[AUTOLOAD] ⚡ Buscando e carregando automaticamente a versão mais recente do checkpoint para ${cfg.name}: ${cfg.file} (${cfg.size}, atualizado em ${cfg.mtime})`);
 
       const localUrl = `./models/${cfg.file}?v=${Date.now()}`;
       const cdnUrl = `https://cdn.jsdelivr.net/gh/${GITHUB_REPO}@master/web/models/${cfg.file}`;
@@ -1127,10 +1156,9 @@
 
       if (session) {
         agent = new System1.System1AgentWeb(session);
-        appendLog(`[INIT] Agente System 1 instanciado com memória amortizada e homeostase.`);
+        appendLog(`[INIT] Agente System 1 instanciado com a versão mais recente do checkpoint.`);
       }
       document.getElementById('loader-overlay').classList.add('hidden');
-      renderModelsTable();
     }
 
     // =====================================================================
