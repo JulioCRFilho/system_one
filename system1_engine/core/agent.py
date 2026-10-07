@@ -107,6 +107,7 @@ class UniversalS1Agent(nn.Module):
         self._adaptive_calibration: float = 0.0
         self._reward_ema: float = 0.0
         self._stagnation_count: int = 0
+        self._action_history: List[int] = []
 
     @property
     def device(self) -> torch.device:
@@ -122,6 +123,7 @@ class UniversalS1Agent(nn.Module):
         self._adaptive_calibration = 0.0
         self._reward_ema = 0.0
         self._stagnation_count = 0
+        self._action_history = []
 
     def extract_features(
         self,
@@ -219,6 +221,7 @@ class UniversalS1Agent(nn.Module):
         noise_scale: float = 0.0,
         calibration: Optional[Union[float, str]] = None,
         auto_calibrate: bool = False,
+        avoid_action: Optional[int] = None,
     ) -> Union[int, np.ndarray, ReflexDecision]:
         """Ultra-fast single-forward reflex inference.
 
@@ -324,6 +327,7 @@ class UniversalS1Agent(nn.Module):
         is_auto_calib = auto_calibrate or (
             isinstance(calibration, str) and calibration.lower() in ("auto", "adaptive", "homeostatic")
         )
+
         if is_auto_calib:
             rew_val = float(np.asarray(raw_reward).flat[0])
             delta_rew = rew_val - self._reward_ema
@@ -341,12 +345,12 @@ class UniversalS1Agent(nn.Module):
 
             calib = float(self._adaptive_calibration)
             is_deterministic_mode = (calib <= 0.01)
-            eff_temp = max(0.05, calib)
+            eff_temp = 1.0 + 0.5 * calib
             eff_scale = calib
         elif calibration is not None:
             calib = float(np.clip(float(calibration), 0.0, 1.0))
             is_deterministic_mode = (calib <= 0.0)
-            eff_temp = max(0.05, calib)
+            eff_temp = 1.0 + 0.5 * calib
             eff_scale = calib
         else:
             is_deterministic_mode = deterministic
@@ -354,19 +358,54 @@ class UniversalS1Agent(nn.Module):
             eff_scale = noise_scale if noise_scale > 0.0 else 1.0
             calib = 0.0 if deterministic else (noise_scale if noise_scale > 0.0 else 1.0)
 
+        # Resolução de ação a evitar / quebra de ciclos
+        cycle_avoid_action = avoid_action if (avoid_action is not None and avoid_action >= 0) else -1
+        hist = getattr(self, "_action_history", [])
+        if cycle_avoid_action == -1 and is_auto_calib and self._stagnation_count >= 2:
+            if len(hist) >= 3 and hist[-1] == hist[-3]:
+                # Oscilação A -> B -> A sob estagnação: evita B para romper o ciclo vicioso
+                cycle_avoid_action = hist[-2]
+            elif len(hist) >= 3 and hist[-1] == hist[-2] and hist[-2] == hist[-3]:
+                # Repetição tripla consecutiva
+                cycle_avoid_action = hist[-1]
+
         # Policy decision
         if self.is_discrete:
             logits_sq = self.policy_head.linear(h).squeeze(0).squeeze(0)
             probs = torch.softmax(logits_sq, dim=-1)
+            best_action = int(torch.argmax(probs, dim=-1).item())
 
-            if not is_deterministic_mode:
-                if eff_temp != 1.0:
-                    probs_sampled = torch.softmax(logits_sq / eff_temp, dim=-1)
-                else:
-                    probs_sampled = probs
-                action = int(torch.multinomial(probs_sampled, num_samples=1).item())
+            # Detecção de anulação imediata em cubo atômico (apenas quando estagnado em auto-calibração)
+            if cycle_avoid_action == -1 and is_auto_calib and self._stagnation_count >= 2 and len(hist) >= 1 and probs.shape[0] == 12:
+                last_act = hist[-1]
+                inv_act = (last_act + 1) if (last_act % 2 == 0) else (last_act - 1)
+                if best_action == inv_act:
+                    cycle_avoid_action = inv_act
+
+            if is_deterministic_mode:
+                action = best_action
             else:
-                action = int(torch.argmax(probs, dim=-1).item())
+                # Inovação proporcional: sorteia inovação estocástica com probabilidade = calib
+                if float(np.random.rand()) < calib:
+                    probs_sampled = torch.softmax(logits_sq / eff_temp, dim=-1)
+                    action = int(torch.multinomial(probs_sampled, num_samples=1).item())
+                else:
+                    action = best_action
+
+            # Quebra estrita de ciclos (Cycle Breaker):
+            if cycle_avoid_action >= 0 and action == cycle_avoid_action and probs.shape[0] > 1:
+                top_indices = torch.argsort(probs, descending=True)
+                for alt_idx in top_indices:
+                    alt_action = int(alt_idx.item())
+                    if alt_action != cycle_avoid_action:
+                        action = alt_action
+                        break
+
+            if not hasattr(self, "_action_history"):
+                self._action_history = []
+            self._action_history.append(action)
+            if len(self._action_history) > 8:
+                self._action_history.pop(0)
 
             if not return_decision:
                 return action
@@ -458,6 +497,7 @@ class UniversalS1Agent(nn.Module):
         noise_scale: float = 0.0,
         calibration: Optional[Union[float, str]] = None,
         auto_calibrate: bool = False,
+        avoid_action: Optional[int] = None,
     ) -> ReflexDecision:
         """Executa a decisão reflexiva retornando a estrutura ReflexDecision com telemetria e calibração."""
         decision = self.act_fast(
@@ -470,6 +510,7 @@ class UniversalS1Agent(nn.Module):
             noise_scale=noise_scale,
             calibration=calibration,
             auto_calibrate=auto_calibrate,
+            avoid_action=avoid_action,
         )
         assert isinstance(decision, ReflexDecision)
         return decision

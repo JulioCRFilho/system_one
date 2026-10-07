@@ -1265,6 +1265,7 @@ class System1AgentWeb {
     this.dynamicCalibration = 0.0;
     this.stagnationCount = 0;
     this.rewardEma = 0.0;
+    this.actionHistory = [];
   }
 
   resetMemory() {
@@ -1275,6 +1276,7 @@ class System1AgentWeb {
     this.dynamicCalibration = 0.0;
     this.stagnationCount = 0;
     this.rewardEma = 0.0;
+    this.actionHistory = [];
   }
 
   async actWithConfidence(obsArr, prevReward = 0.0, options = {}) {
@@ -1335,7 +1337,8 @@ class System1AgentWeb {
 
     // Calibração Contínua de Ação [0.0 = Determinístico/argmax, 1.0 = Estocástico Total] ou Auto-Calibração Homeostática
     let calib = 0.5;
-    if (options.autoCalibrate || options.calibration === 'auto') {
+    const isAuto = Boolean(options.autoCalibrate || options.calibration === 'auto');
+    if (isAuto) {
       const r = this.prevReward;
       const deltaR = r - this.rewardEma;
       this.rewardEma = 0.9 * this.rewardEma + 0.1 * r;
@@ -1357,39 +1360,70 @@ class System1AgentWeb {
       calib = Math.min(1.0, Math.max(0.0, typeof calibration === 'number' ? calibration : 0.5));
     }
 
+    // Resolução de ação a evitar / quebra de ciclos
+    let cycleAvoidAction = (options.avoidAction !== undefined && options.avoidAction >= 0)
+      ? options.avoidAction
+      : -1;
+
+    const hist = this.actionHistory || [];
+    if (cycleAvoidAction === -1 && isAuto && this.stagnationCount >= 2) {
+      if (hist.length >= 3 && hist[hist.length - 1] === hist[hist.length - 3]) {
+        // Oscilação A -> B -> A sob estagnação: evita B para romper o ciclo vicioso
+        cycleAvoidAction = hist[hist.length - 2];
+      } else if (hist.length >= 3 && hist[hist.length - 1] === hist[hist.length - 2] && hist[hist.length - 2] === hist[hist.length - 3]) {
+        cycleAvoidAction = hist[hist.length - 1];
+      }
+    }
+
+    // Inverso atômico em cubo mágico (apenas sob estagnação em auto-calibração)
+    if (cycleAvoidAction === -1 && isAuto && this.stagnationCount >= 2 && hist.length >= 1 && logits.length === 12) {
+      const last = hist[hist.length - 1];
+      const inv = (last % 2 === 0) ? last + 1 : last - 1;
+      if (bestAction === inv) {
+        cycleAvoidAction = inv;
+      }
+    }
+
     let chosenAction = bestAction;
     if (calib > 0.01) {
-      const T = Math.max(0.05, calib);
-      let maxScaled = -Infinity;
-      for (let i = 0; i < logits.length; i++) {
-        if (logits[i] / T > maxScaled) maxScaled = logits[i] / T;
-      }
-      let sumExpT = 0;
-      const sampledProbs = new Float32Array(logits.length);
-      for (let i = 0; i < logits.length; i++) {
-        sampledProbs[i] = Math.exp((logits[i] / T) - maxScaled);
-        sumExpT += sampledProbs[i];
-      }
-      for (let i = 0; i < logits.length; i++) sampledProbs[i] /= sumExpT;
-
-      const r = Math.random();
-      let cum = 0;
-      for (let i = 0; i < sampledProbs.length; i++) {
-        cum += sampledProbs[i];
-        if (r <= cum || i === sampledProbs.length - 1) {
-          chosenAction = i;
-          break;
+      // Inovação proporcional com probabilidade = calib
+      if (Math.random() < calib) {
+        const T = 1.0 + 0.5 * calib;
+        let maxScaled = -Infinity;
+        for (let i = 0; i < logits.length; i++) {
+          if (logits[i] / T > maxScaled) maxScaled = logits[i] / T;
         }
+        let sumExpT = 0;
+        const sampledProbs = new Float32Array(logits.length);
+        for (let i = 0; i < logits.length; i++) {
+          sampledProbs[i] = Math.exp((logits[i] / T) - maxScaled);
+          sumExpT += sampledProbs[i];
+        }
+        for (let i = 0; i < logits.length; i++) sampledProbs[i] /= sumExpT;
+
+        const randVal = Math.random();
+        let cum = 0;
+        for (let i = 0; i < sampledProbs.length; i++) {
+          cum += sampledProbs[i];
+          if (randVal <= cum || i === sampledProbs.length - 1) {
+            chosenAction = i;
+            break;
+          }
+        }
+      } else {
+        chosenAction = bestAction;
       }
     }
 
-    // Fallback defensivo de cycle breaking se avoidAction for especificado explicitamente
-    if (options.avoidAction !== undefined && options.avoidAction >= 0 && options.avoidAction === chosenAction && ranked.length > 1) {
-      chosenAction = ranked[1].action;
+    // Quebra estrita de ciclos (Cycle Breaker):
+    if (cycleAvoidAction >= 0 && chosenAction === cycleAvoidAction && ranked.length > 1) {
+      const alt = ranked.find(item => item.action !== cycleAvoidAction);
+      chosenAction = alt ? alt.action : ranked[1].action;
     }
 
-    const maxEntropy = Math.log(logits.length);
-    const uncertainty = Math.min(1.0, Math.max(0.0, entropy / maxEntropy));
+    if (!this.actionHistory) this.actionHistory = [];
+    this.actionHistory.push(chosenAction);
+    if (this.actionHistory.length > 8) this.actionHistory.shift();
 
     this.prevAction = chosenAction;
 

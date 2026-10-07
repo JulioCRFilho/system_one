@@ -1368,21 +1368,21 @@
         const curScore = sim.getScore();
         const deltaScore = curScore - lastScore;
         lastScore = curScore;
-        stepReward = (deltaScore * 8.0) - 0.02 + (sim.isSolved() ? 15.0 : 0.0);
-        if (curScore > peakScore) peakScore = curScore;
+        const isNewPeak = curScore > peakScore;
+        if (isNewPeak) peakScore = curScore;
+        stepReward = (deltaScore * 8.0) - 0.02 + (isNewPeak ? 1.0 : 0.0) + (sim.isSolved() ? 15.0 : 0.0);
         document.getElementById('kpi-return').innerText = peakScore.toFixed(2);
       } else {
         stepReward = 1.0;
         document.getElementById('kpi-return').innerText = stepCount.toFixed(0);
       }
 
-      // Prevenção de ciclos consecutivos
-      let avoidAct = undefined;
-      if (actionHistory.length >= 3) {
-        const last3 = actionHistory.slice(-3);
-        if (last3.every(a => a === last3[0])) {
-          avoidAct = last3[0];
-        }
+      // Prevenção de ciclos consecutivos (A -> B -> A -> B ou repetições A -> A)
+      let avoidAct = -1;
+      if (actionHistory.length >= 3 && actionHistory[actionHistory.length - 1] === actionHistory[actionHistory.length - 3]) {
+        avoidAct = actionHistory[actionHistory.length - 2];
+      } else if (actionHistory.length >= 2 && actionHistory[actionHistory.length - 1] === actionHistory[actionHistory.length - 2]) {
+        avoidAct = actionHistory[actionHistory.length - 1];
       }
 
       const calibEl = document.getElementById('cfg-eval-calibration');
@@ -1391,7 +1391,7 @@
       const decision = await agent.actWithConfidence(obs, stepReward, {
         calibration: isAutoCalibrate ? 'auto' : webCalib,
         autoCalibrate: isAutoCalibrate,
-        avoidAction: (!isAutoCalibrate && webCalib === 0.0) ? avoidAct : undefined
+        avoidAction: avoidAct >= 0 ? avoidAct : undefined
       });
 
       actionHistory.push(decision.action);
