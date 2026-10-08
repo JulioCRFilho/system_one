@@ -246,3 +246,30 @@ class TestRubiksSystemOneIntegration:
         # Executa um ciclo curto de 128 passos
         ret = trainer.train(max_steps=128, target_return=100.0, verbose=False)
         assert isinstance(ret, float)
+
+    def test_rubiks_build_hud_env_and_cli_curriculum_activation(self):
+        """Garante que o modo de treino (is_training=True) ativa o currículo (profundidade 1) no Rubik."""
+        from system1_engine.hud.worker import build_hud_env
+        from system1_engine.cli import build_environment
+
+        # HUD Worker: RubiksCube-v0 (Atômico)
+        hud_env_atomic = build_hud_env("RubiksCube-v0", is_training=True)
+        raw_atomic = hud_env_atomic.env.unwrapped
+        assert raw_atomic.curriculum is True
+        assert raw_atomic.current_depth == 1
+
+        # HUD Worker: RubiksCubeMacro-v0 (Macro)
+        hud_env_macro = build_hud_env("RubiksCubeMacro-v0", is_training=True)
+        raw_macro = hud_env_macro.env.unwrapped
+        assert raw_macro.curriculum is True
+        assert raw_macro.current_depth == 1
+
+        # Modo Run / Avaliação não deve forçar curriculum=True
+        eval_env = build_hud_env("RubiksCube-v0", is_training=False)
+        assert eval_env.env.unwrapped.curriculum is False
+
+        # CLI: build_environment
+        cli_env = build_environment("RubiksCube-v0", is_training=True)
+        assert cli_env.env.unwrapped.curriculum is True
+        assert cli_env.env.unwrapped.current_depth == 1
+

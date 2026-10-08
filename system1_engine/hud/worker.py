@@ -228,7 +228,11 @@ def build_hud_env(
     elif render_mode == "window":
         gym_render_mode = "human"
 
-    raw_env = make_gym_env_with_auto_install(env_id, render_mode=gym_render_mode)
+    extra_kwargs = {}
+    if env_id in ("RubiksCube-v0", "RubiksCubeMacro-v0"):
+        extra_kwargs["curriculum"] = is_training
+
+    raw_env = make_gym_env_with_auto_install(env_id, render_mode=gym_render_mode, **extra_kwargs)
     if env_id == "MountainCar-v0":
         from system1_engine.env.adapters.mountain_car import (
             MountainCarEnergyRewardWrapper,

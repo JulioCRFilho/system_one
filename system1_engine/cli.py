@@ -42,7 +42,11 @@ def build_environment(
         )
         return env
     render_mode = "human" if render else None
-    raw_env = make_gym_env_with_auto_install(env_id, render_mode=render_mode)
+    extra_kwargs = {}
+    if env_id in ("RubiksCube-v0", "RubiksCubeMacro-v0"):
+        extra_kwargs["curriculum"] = is_training
+
+    raw_env = make_gym_env_with_auto_install(env_id, render_mode=render_mode, **extra_kwargs)
     if env_id == "MountainCar-v0":
         from system1_engine.env.adapters.mountain_car import (
             MountainCarEnergyRewardWrapper,
@@ -51,6 +55,9 @@ def build_environment(
         if is_training:
             raw_env = MountainCarEnergyRewardWrapper(raw_env)
         raw_env = MountainCarNormalizedWrapper(raw_env)
+    elif env_id == "FrozenLake-v1":
+        from system1_engine.env.adapters.frozenlake import FrozenLakeCurriculumWrapper
+        raw_env = FrozenLakeCurriculumWrapper(raw_env, curriculum=is_training)
     return UniversalS1Wrapper(raw_env)
 
 
