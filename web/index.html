@@ -1302,6 +1302,12 @@
         alert("Aguarde o carregamento do modelo ONNX...");
         return;
       }
+      if (agent) agent.resetMemory();
+      if (sim) {
+        window.visitedStates = [sim.getStateHash ? sim.getStateHash() : ""];
+        lastScore = sim.getScore ? sim.getScore() : 0.0;
+      }
+      actionHistory = [];
       isRunning = true;
       const btnStart = document.getElementById('btn-start');
       const btnStop = document.getElementById('btn-stop');
@@ -1389,47 +1395,34 @@
       let stepReward = 0.0;
       if (isRubiks) {
         const curScore = sim.getScore ? sim.getScore() : 0;
-        const isNewPeak = curScore > peakScore;
-        let sRew = -0.02;
-        if (isNewPeak) {
-          const deltaPeak = curScore - peakScore;
-          peakScore = curScore;
-          sRew = (deltaPeak * 10.0) + 1.0;
-        }
+        const deltaScore = curScore - lastScore;
+        lastScore = curScore;
+        let sRew = (deltaScore * 5.0) - 0.02;
         if (sim.isSolved()) {
-          sRew += 15.0;
+          sRew += 10.0;
         }
         stepReward = sRew;
-        document.getElementById('kpi-return').innerText = peakScore.toFixed(2);
+        document.getElementById('kpi-return').innerText = curScore.toFixed(2);
       } else {
         stepReward = 1.0;
         document.getElementById('kpi-return').innerText = stepCount.toFixed(0);
       }
 
-      // Prevenção de ciclos, anulação inversa e estados repetidos (Inhibition of Return)
+      // Prevenção de ciclos apenas sob estagnação persistente no modo auto (e nunca inibe o estado resolvido)
       const avoidList = [];
-      if (isRubiks) {
-        // Inibição de inverso atômico imediato (evita no-op de 2 passos)
-        if (cfg.mode !== "macro" && actionHistory.length >= 1) {
-          const last = actionHistory[actionHistory.length - 1];
-          const inv = (last % 2 === 0) ? last + 1 : last - 1;
-          avoidList.push(inv);
-        }
-        // Prevenção de retorno a configurações recentemente visitadas
-        if (window.visitedStates && window.visitedStates.length > 0) {
+      if (isRubiks && isAutoCalibrate && actionHistory.length >= 3) {
+        if (window.visitedStates && window.visitedStates.length > 2) {
           const moves = cfg.mode === "macro" ? System1.RubiksCubeSim.MACRO_NAMES : System1.RubiksCubeSim.ATOMIC_MOVES;
           for (let i = 0; i < moves.length; i++) {
             const nextH = sim.predictStateHash(moves[i]);
-            if (window.visitedStates.includes(nextH)) {
+            if (nextH !== '000000000111111111222222222333333333444444444555555555' && window.visitedStates.includes(nextH)) {
               avoidList.push(i);
             }
           }
         }
-      }
-      if (actionHistory.length >= 3 && actionHistory[actionHistory.length - 1] === actionHistory[actionHistory.length - 3]) {
-        avoidList.push(actionHistory[actionHistory.length - 2]);
-      } else if (actionHistory.length >= 2 && actionHistory[actionHistory.length - 1] === actionHistory[actionHistory.length - 2]) {
-        avoidList.push(actionHistory[actionHistory.length - 1]);
+        if (actionHistory.length >= 3 && actionHistory[actionHistory.length - 1] === actionHistory[actionHistory.length - 3]) {
+          avoidList.push(actionHistory[actionHistory.length - 2]);
+        }
       }
 
       const calibEl = document.getElementById('cfg-eval-calibration');
