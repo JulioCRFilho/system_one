@@ -463,14 +463,36 @@ class RecurrentPPOTrainer:
                     self.tracker.metrics.best_mean_return = best_mean_return
 
             if verbose and iteration % 2 == 0:
-                peak_val = self.tracker.metrics.best_return if (self.tracker is not None and self.tracker.metrics.best_return is not None) else best_mean_return
-                print(
-                    f"[Step {self.total_steps:6d}/{max_steps}] "
-                    f"Mean Return (last 20 ep): {mean_return:.2f} | "
-                    f"Pico: {peak_val:.2f} | "
-                    f"Policy Loss: {metrics['policy_loss']:.4f} | "
-                    f"Value Loss: {metrics['value_loss']:.4f}"
-                )
+                log_parts = [
+                    f"[Step {self.total_steps:6d}/{max_steps}] Mean Return (last 20 ep): {mean_return:.2f}"
+                ]
+                if self.tracker is not None and self.tracker.metrics.fps > 0:
+                    log_parts.append(f"FPS: {self.tracker.metrics.fps:.1f}")
+                if self.tracker is not None and len(self.tracker.metrics.confidences) > 0:
+                    mean_conf = float(np.mean(self.tracker.metrics.confidences))
+                    log_parts.append(f"Confiança: {mean_conf*100:.1f}%")
+
+                calib = float(self._adaptive_scale if self.is_auto_exploration else self.exploration_scale)
+                if self.tracker is not None and len(self.tracker.metrics.calibrations) > 0:
+                    calib = float(self.tracker.metrics.calibrations[-1])
+                log_parts.append(f"Calibração: {calib:.2f}")
+
+                if self.tracker is not None and len(self.tracker.metrics.step_latencies_us) > 0:
+                    lat_p50 = float(np.percentile(self.tracker.metrics.step_latencies_us, 50))
+                    if lat_p50 >= 1000.0:
+                        log_parts.append(f"Latência: {lat_p50/1000.0:.1f}ms")
+                    else:
+                        log_parts.append(f"Latência: {lat_p50:.0f}µs")
+
+                raw_env = getattr(self.env, "unwrapped", self.env)
+                if hasattr(raw_env, "current_depth"):
+                    max_d = getattr(raw_env, "max_depth", 5)
+                    log_parts.append(f"Profundidade: {raw_env.current_depth}/{max_d}")
+                elif hasattr(raw_env, "current_level"):
+                    max_l = getattr(raw_env, "max_level", 4)
+                    log_parts.append(f"Nível: {raw_env.current_level}/{max_l}")
+
+                print(" | ".join(log_parts))
 
             if callback is not None:
                 callback(self.total_steps, mean_return)
