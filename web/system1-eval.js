@@ -85,7 +85,20 @@ class RubiksCubeSim {
   constructor() {
     this.permutations = this._initPermutations();
     this.scrambleSequence = [];
+    this._initWasm();
     this.reset();
+  }
+
+  _initWasm() {
+    if (typeof window !== "undefined" && window.System1Core && window.System1Core.RubiksCubeCoreWasm) {
+      try {
+        this._wasm = new window.System1Core.RubiksCubeCoreWasm();
+      } catch (_) {
+        this._wasm = null;
+      }
+    } else {
+      this._wasm = null;
+    }
   }
 
   _initPermutations() {
@@ -164,9 +177,17 @@ class RubiksCubeSim {
   }
 
   reset() {
-    this.state = new Int32Array(54);
-    for (let f = 0; f < 6; f++) {
-      for (let i = 0; i < 9; i++) this.state[f * 9 + i] = f;
+    if (!this._wasm && typeof window !== "undefined" && window.System1Core && window.System1Core.RubiksCubeCoreWasm) {
+      this._initWasm();
+    }
+    if (this._wasm) {
+      this._wasm.reset();
+      this.state = this._wasm.get_state();
+    } else {
+      this.state = new Int32Array(54);
+      for (let f = 0; f < 6; f++) {
+        for (let i = 0; i < 9; i++) this.state[f * 9 + i] = f;
+      }
     }
     this.lastAction = "RESET";
     this.scrambleSequence = [];
@@ -174,11 +195,16 @@ class RubiksCubeSim {
   }
 
   applyAtomic(moveName, countStep = true) {
-    const perm = this.permutations[moveName];
-    if (!perm) return;
-    const nextState = new Int32Array(54);
-    for (let i = 0; i < 54; i++) nextState[i] = this.state[perm[i]];
-    this.state = nextState;
+    if (this._wasm) {
+      this._wasm.apply_atomic(moveName);
+      this.state = this._wasm.get_state();
+    } else {
+      const perm = this.permutations[moveName];
+      if (!perm) return;
+      const nextState = new Int32Array(54);
+      for (let i = 0; i < 54; i++) nextState[i] = this.state[perm[i]];
+      this.state = nextState;
+    }
     if (countStep) {
       this.lastAction = moveName;
       this.steps++;
@@ -198,9 +224,14 @@ class RubiksCubeSim {
   }
 
   applyMacro(macroName) {
-    const seq = RubiksCubeSim.MACRO_ACTIONS[macroName];
-    if (!seq) return;
-    for (const m of seq) this.applyAtomic(m, false);
+    if (this._wasm) {
+      this._wasm.apply_macro(macroName);
+      this.state = this._wasm.get_state();
+    } else {
+      const seq = RubiksCubeSim.MACRO_ACTIONS[macroName];
+      if (!seq) return;
+      for (const m of seq) this.applyAtomic(m, false);
+    }
     this.lastAction = macroName;
     this.steps++;
   }
@@ -210,8 +241,9 @@ class RubiksCubeSim {
     const applied = [];
     let lastMove = null;
     let attempts = 0;
-    const targetDepth = Math.max(1, depth);
-    while ((applied.length < targetDepth || this.isSolved()) && attempts < 60) {
+    const targetDepth = Math.max(1, parseInt(depth, 10) || 3);
+    const maxAttempts = Math.max(100, targetDepth * 10);
+    while ((applied.length < targetDepth || this.isSolved()) && attempts < maxAttempts) {
       attempts++;
       const candidates = RubiksCubeSim.ATOMIC_MOVES.filter(m => m !== RubiksCubeSim.INVERSE_ATOMIC[lastMove]);
       const move = candidates[Math.floor(Math.random() * candidates.length)];
@@ -230,8 +262,9 @@ class RubiksCubeSim {
     const applied = [];
     let lastMove = null;
     let attempts = 0;
-    const targetDepth = Math.max(1, depth);
-    while ((applied.length < targetDepth || this.isSolved()) && attempts < 60) {
+    const targetDepth = Math.max(1, parseInt(depth, 10) || 2);
+    const maxAttempts = Math.max(100, targetDepth * 10);
+    while ((applied.length < targetDepth || this.isSolved()) && attempts < maxAttempts) {
       attempts++;
       const candidates = RubiksCubeSim.SCRAMBLE_MACRO_NAMES.filter(m => m !== RubiksCubeSim.INVERSE_MACROS[lastMove]);
       const move = candidates[Math.floor(Math.random() * candidates.length)];
@@ -246,13 +279,23 @@ class RubiksCubeSim {
   }
 
   scramble(depth = 3, mode = "atomic") {
-    if (mode === "macro") {
-      return this.scrambleMacro(depth || 2);
+    const d = Math.max(1, parseInt(depth, 10) || (mode === "macro" ? 2 : 3));
+    if (this._wasm) {
+      const moves = this._wasm.scramble(d, mode === "macro");
+      this.state = this._wasm.get_state();
+      this.lastAction = "EMBARALHADO";
+      this.scrambleSequence = moves;
+      this.steps = 0;
+      return moves;
     }
-    return this.scrambleAtomic(depth || 3);
+    if (mode === "macro") {
+      return this.scrambleMacro(d);
+    }
+    return this.scrambleAtomic(d);
   }
 
   getAlignedCount() {
+    if (this._wasm) return this._wasm.get_aligned_count();
     let count = 0;
     for (let f = 0; f < 6; f++) {
       const center = this.state[f * 9 + 4];
@@ -264,15 +307,18 @@ class RubiksCubeSim {
   }
 
   getScore() {
+    if (this._wasm) return this._wasm.get_score();
     const aligned = this.getAlignedCount();
     return Math.max(0.0, Math.min(1.0, (aligned - 6) / 48.0));
   }
 
   isSolved() {
+    if (this._wasm) return this._wasm.is_solved();
     return this.getAlignedCount() === 54;
   }
 
   getOneHot() {
+    if (this._wasm) return this._wasm.get_one_hot();
     const arr = new Float32Array(324);
     for (let i = 0; i < 54; i++) {
       const color = this.state[i];

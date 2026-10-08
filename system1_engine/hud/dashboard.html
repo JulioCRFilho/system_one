@@ -323,6 +323,32 @@
             </select>
             <input type="text" id="cfg-scenario" placeholder="Nome ou caminho do .cfg..." class="hud-input hidden" value="basic.cfg" oninput="onCustomScenarioInput()" />
           </div>
+
+          <!-- SEÇÃO: EMBARALHAMENTO DO CUBO MÁGICO (--scramble-depth) -->
+          <div id="group-rubiks-scramble" class="mt-2 bg-[#120f09] p-2 rounded border border-amber-800/60 flex flex-col gap-1.5 transition">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-1.5">
+                <span class="text-[10px] font-bold text-amber-300 flex items-center gap-1">
+                  <span>🎲</span> Embaralhamento (--scramble-depth)
+                </span>
+                <span class="tooltip-wrap tooltip-down tooltip-left">
+                  <span class="tooltip-icon" title="Número de passos/profundidade de embaralhamento do Cubo Mágico (número aberto sem limites para treino e avaliação).">ⓘ</span>
+                  <span class="tooltip-bubble"><strong>--scramble-depth</strong>: Número de giros/macro-ações aplicadas para embaralhar o cubo no início de cada episódio.<br>• <strong>Sem limite</strong>: Pode digitar qualquer valor inteiro positivo (ex: 1, 3, 10, 20, 50, 100...).<br>• Funciona tanto no <strong>Treino</strong> quanto na <strong>Avaliação</strong>.</span>
+                </span>
+              </div>
+              <div class="flex gap-1">
+                <button type="button" onclick="setScrambleDepthInput(1)" class="badge-btn">1</button>
+                <button type="button" onclick="setScrambleDepthInput(3)" class="badge-btn">3</button>
+                <button type="button" onclick="setScrambleDepthInput(5)" class="badge-btn">5</button>
+                <button type="button" onclick="setScrambleDepthInput(10)" class="badge-btn">10</button>
+                <button type="button" onclick="setScrambleDepthInput(20)" class="badge-btn">20</button>
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <input type="number" id="cfg-scramble-depth" value="3" min="1" placeholder="Qtd de passos (livre sem limite)..." class="hud-input font-mono text-[11px] text-amber-200" />
+              <span class="text-[9px] text-amber-400/80 font-mono whitespace-nowrap">Passos livres</span>
+            </div>
+          </div>
         </div>
 
         <!-- SEÇÃO: GERENCIAMENTO DE CHECKPOINTS & MODELOS -->
@@ -1360,6 +1386,10 @@
       if (rubiksCtrl) {
         rubiksCtrl.classList.toggle('hidden', !isRubiks);
       }
+      const rubiksScramble = document.getElementById('group-rubiks-scramble');
+      if (rubiksScramble) {
+        rubiksScramble.classList.toggle('hidden', !isRubiks);
+      }
       
       // Ajusta target return e hiperparâmetros padrão de acordo com o ambiente
       if (actualEnv === 'CartPole-v1') {
@@ -1428,12 +1458,23 @@
       validateCheckpointCompatibility();
     }
 
+    function setScrambleDepthInput(val) {
+      const inp = document.getElementById('cfg-scramble-depth');
+      if (inp) {
+        inp.value = val;
+      }
+    }
+
     function quickLaunchRubiks(type, mode) {
       const envId = type === 'macro' ? 'RubiksCubeMacro-v0' : 'RubiksCube-v0';
       const envSel = document.getElementById('cfg-env');
       if (envSel) {
         envSel.value = envId;
         onEnvChange();
+      }
+      const scrambleInp = document.getElementById('cfg-scramble-depth');
+      if (scrambleInp && (!scrambleInp.value || parseInt(scrambleInp.value, 10) <= 0)) {
+        scrambleInp.value = type === 'macro' ? '2' : '3';
       }
       setMode(mode);
 
@@ -2187,7 +2228,8 @@
         inference_mode: document.getElementById('cfg-inference-mode').value,
         eval_action_mode: document.getElementById('cfg-eval-action-mode') ? document.getElementById('cfg-eval-action-mode').value : 'auto',
         eval_calibration: (document.getElementById('cfg-eval-calibration')?.value === 'auto' || document.getElementById('cfg-eval-action-mode')?.value === 'auto') ? 'auto' : (parseFloat(document.getElementById('cfg-eval-calibration')?.value) || 0.5),
-        train_calibration: (document.getElementById('cfg-train-calibration')?.value === 'auto' || !document.getElementById('cfg-train-calibration')?.value) ? 'auto' : (parseFloat(document.getElementById('cfg-train-calibration')?.value) || 'auto')
+        train_calibration: (document.getElementById('cfg-train-calibration')?.value === 'auto' || !document.getElementById('cfg-train-calibration')?.value) ? 'auto' : (parseFloat(document.getElementById('cfg-train-calibration')?.value) || 'auto'),
+        scramble_depth: document.getElementById('cfg-scramble-depth') ? (parseInt(document.getElementById('cfg-scramble-depth').value, 10) || null) : null
       };
 
       if (activeMode === 'run' && payload.load) {

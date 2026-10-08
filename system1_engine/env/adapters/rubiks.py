@@ -18,6 +18,13 @@ import gymnasium as gym
 import numpy as np
 from PIL import Image, ImageDraw
 
+try:
+    import system1_core
+    HAS_RUST_CORE = True
+except ImportError:
+    HAS_RUST_CORE = False
+
+
 
 # =====================================================================
 # MATEMÁTICA E PERMUTAÇÕES 3D DO CUBO MÁGICO
@@ -210,36 +217,54 @@ class RubiksCubeCore:
     ]
 
     def __init__(self) -> None:
-        # Estado resolvido: 6 faces x 9 facetas com a cor da face (0..5)
-        self.state = np.repeat(np.arange(6, dtype=np.int32), 9)
+        self._rust = system1_core.RubiksCubeCore() if HAS_RUST_CORE else None
+        if self._rust is not None:
+            self.state = np.array(self._rust.get_state(), dtype=np.int32)
+        else:
+            self.state = np.repeat(np.arange(6, dtype=np.int32), 9)
 
     def reset(self) -> None:
         """Restaura o cubo para o estado perfeitamente resolvido."""
-        self.state = np.repeat(np.arange(6, dtype=np.int32), 9)
+        if self._rust is not None:
+            self._rust.reset()
+            self.state = np.array(self._rust.get_state(), dtype=np.int32)
+        else:
+            self.state = np.repeat(np.arange(6, dtype=np.int32), 9)
 
     def apply_atomic(self, move_name: str) -> None:
         """Executa um movimento atômico via permutação de arrays."""
-        if move_name in PERMUTATIONS:
+        if self._rust is not None:
+            self._rust.apply_atomic(move_name)
+            self.state = np.array(self._rust.get_state(), dtype=np.int32)
+        elif move_name in PERMUTATIONS:
             self.state = self.state[PERMUTATIONS[move_name]]
 
     def apply_macro(self, macro_name: str) -> None:
         """Executa uma macro-ação (sequência atômica)."""
-        if macro_name in self.MACRO_ACTIONS:
+        if self._rust is not None:
+            self._rust.apply_macro(macro_name)
+            self.state = np.array(self._rust.get_state(), dtype=np.int32)
+        elif macro_name in self.MACRO_ACTIONS:
             for m in self.MACRO_ACTIONS[macro_name]:
                 self.apply_atomic(m)
 
     def scramble(self, depth: int = 4, use_macros: bool = False, rng: Optional[np.random.Generator] = None) -> List[str]:
-        """Embaralha o cubo a partir do estado resolvido com uma profundidade definida, garantindo não-cancelamento."""
+        """Embaralha o cubo a partir do estado resolvido com uma profundidade aberta sem limite, garantindo não-cancelamento."""
+        target_depth = max(1, int(depth))
+        if self._rust is not None:
+            seed = int(rng.integers(0, 2**63 - 1)) if rng is not None else None
+            return list(self._rust.scramble(target_depth, use_macros, seed))
+
         self.reset()
         if rng is None:
             rng = np.random.default_rng()
         applied = []
-        target_depth = max(1, depth)
         last_act = None
         attempts = 0
+        max_attempts = max(100, target_depth * 10)
 
         if use_macros:
-            while (len(applied) < target_depth or self.is_solved()) and attempts < 60:
+            while (len(applied) < target_depth or self.is_solved()) and attempts < max_attempts:
                 attempts += 1
                 choices = [m for m in self.SCRAMBLE_MACRO_NAMES if m != self.INVERSE_MACROS.get(last_act)]
                 act = str(rng.choice(choices))
@@ -247,7 +272,7 @@ class RubiksCubeCore:
                 applied.append(act)
                 last_act = act
         else:
-            while (len(applied) < target_depth or self.is_solved()) and attempts < 60:
+            while (len(applied) < target_depth or self.is_solved()) and attempts < max_attempts:
                 attempts += 1
                 choices = [m for m in self.ATOMIC_MOVES if m != self.INVERSE_ATOMIC.get(last_act)]
                 act = str(rng.choice(choices))
@@ -258,6 +283,8 @@ class RubiksCubeCore:
 
     def get_aligned_count(self) -> int:
         """Retorna o número de facetas que combinam com a cor do centro da sua respectiva face (6 a 54)."""
+        if self._rust is not None:
+            return int(self._rust.get_aligned_count())
         count = 0
         for f in range(6):
             center_color = self.state[f * 9 + 4]
@@ -266,16 +293,22 @@ class RubiksCubeCore:
 
     def get_score(self) -> float:
         """Retorna a métrica de resolução normalizada em [0.0, 1.0]."""
+        if self._rust is not None:
+            return float(self._rust.get_score())
         aligned = self.get_aligned_count()
         # 6 centros sempre coincidem, sobram 48 facetas
         return float(max(0.0, min(1.0, (aligned - 6) / 48.0)))
 
     def is_solved(self) -> bool:
         """Verifica se o cubo está 100% resolvido."""
+        if self._rust is not None:
+            return bool(self._rust.is_solved())
         return self.get_aligned_count() == 54
 
     def get_one_hot(self) -> np.ndarray:
         """Retorna a observação vetorial one-hot: shape (324,) em [0.0, 1.0]."""
+        if self._rust is not None:
+            return np.array(self._rust.get_one_hot(), dtype=np.float32)
         one_hot = np.zeros((54, 6), dtype=np.float32)
         one_hot[np.arange(54), self.state] = 1.0
         return one_hot.flatten()
@@ -576,20 +609,20 @@ class RubiksCubeEnv(gym.Env):
         max_steps: int = 40,
         curriculum: bool = False,
         min_depth: int = 1,
-        max_depth: int = 5,
+        max_depth: Optional[int] = None,
         target_success_rate: float = 0.90,
         curriculum_window: int = 25,
     ) -> None:
         super().__init__()
         self.render_mode = render_mode
-        self.scramble_depth = scramble_depth
+        self.scramble_depth = max(1, int(scramble_depth))
         self.max_steps = max_steps
         self.curriculum = curriculum
-        self.min_depth = min_depth
+        self.min_depth = max(1, int(min_depth))
         self.max_depth = max_depth
         self.target_success_rate = target_success_rate
         self.curriculum_window = curriculum_window
-        self.current_depth = min_depth if curriculum else scramble_depth
+        self.current_depth = min_depth if curriculum else self.scramble_depth
         self.recent_successes: deque[float] = deque(maxlen=curriculum_window)
         self.curriculum_promotions: int = 0
         self.core = RubiksCubeCore()
@@ -619,18 +652,20 @@ class RubiksCubeEnv(gym.Env):
             self.rng = np.random.default_rng(seed)
 
         if options and "scramble_depth" in options:
-            depth = options["scramble_depth"]
+            depth = max(1, int(options["scramble_depth"]))
         elif self.curriculum:
             if len(self.recent_successes) >= self.curriculum_window:
                 success_rate = float(np.mean(self.recent_successes))
-                if success_rate >= self.target_success_rate and self.current_depth < self.max_depth:
+                can_promote = self.max_depth is None or self.current_depth < self.max_depth
+                if success_rate >= self.target_success_rate and can_promote:
                     old_d = self.current_depth
                     self.current_depth += 1
                     self.curriculum_promotions += 1
                     self.recent_successes.clear()
+                    max_d_str = str(self.max_depth) if self.max_depth is not None else "∞"
                     print(
                         f"\n🚀 [CURRICULUM ATÔMICO] Sucesso {success_rate*100:.1f}% >= {self.target_success_rate*100:.0f}%! "
-                        f"Profundidade promovida: {old_d} -> {self.current_depth}/{self.max_depth}"
+                        f"Profundidade promovida: {old_d} -> {self.current_depth}/{max_d_str}"
                     )
             depth = self.current_depth
         else:
@@ -731,20 +766,20 @@ class RubiksCubeMacroEnv(gym.Env):
         max_steps: int = 25,
         curriculum: bool = False,
         min_depth: int = 1,
-        max_depth: int = 4,
+        max_depth: Optional[int] = None,
         target_success_rate: float = 0.90,
         curriculum_window: int = 25,
     ) -> None:
         super().__init__()
         self.render_mode = render_mode
-        self.scramble_depth = scramble_depth
+        self.scramble_depth = max(1, int(scramble_depth))
         self.max_steps = max_steps
         self.curriculum = curriculum
-        self.min_depth = min_depth
+        self.min_depth = max(1, int(min_depth))
         self.max_depth = max_depth
         self.target_success_rate = target_success_rate
         self.curriculum_window = curriculum_window
-        self.current_depth = min_depth if curriculum else scramble_depth
+        self.current_depth = min_depth if curriculum else self.scramble_depth
         self.recent_successes: deque[float] = deque(maxlen=curriculum_window)
         self.curriculum_promotions: int = 0
         self.core = RubiksCubeCore()
@@ -774,18 +809,20 @@ class RubiksCubeMacroEnv(gym.Env):
             self.rng = np.random.default_rng(seed)
 
         if options and "scramble_depth" in options:
-            depth = options["scramble_depth"]
+            depth = max(1, int(options["scramble_depth"]))
         elif self.curriculum:
             if len(self.recent_successes) >= self.curriculum_window:
                 success_rate = float(np.mean(self.recent_successes))
-                if success_rate >= self.target_success_rate and self.current_depth < self.max_depth:
+                can_promote = self.max_depth is None or self.current_depth < self.max_depth
+                if success_rate >= self.target_success_rate and can_promote:
                     old_d = self.current_depth
                     self.current_depth += 1
                     self.curriculum_promotions += 1
                     self.recent_successes.clear()
+                    max_d_str = str(self.max_depth) if self.max_depth is not None else "∞"
                     print(
                         f"\n🚀 [CURRICULUM MACRO] Sucesso {success_rate*100:.1f}% >= {self.target_success_rate*100:.0f}%! "
-                        f"Profundidade promovida: {old_d} -> {self.current_depth}/{self.max_depth}"
+                        f"Profundidade promovida: {old_d} -> {self.current_depth}/{max_d_str}"
                     )
             depth = self.current_depth
         else:

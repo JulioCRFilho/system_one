@@ -273,3 +273,43 @@ class TestRubiksSystemOneIntegration:
         assert cli_env.env.unwrapped.curriculum is True
         assert cli_env.env.unwrapped.current_depth == 1
 
+    def test_rubiks_open_scramble_depth_train_and_eval(self):
+        """Valida que valores abertos de profundidade (ex: 20, 50, 100) funcionam no treino e avaliação."""
+        from system1_engine.hud.worker import build_hud_env
+        from system1_engine.cli import build_environment
+
+        # Treino com scramble_depth aberto fixado (ex: 35)
+        train_env = build_hud_env("RubiksCube-v0", is_training=True, scramble_depth=35)
+        raw_train = train_env.env.unwrapped
+        assert raw_train.scramble_depth == 35
+        assert raw_train.curriculum is False
+        obs, info = train_env.reset()
+        assert info["current_depth"] == 35
+
+        # Avaliação com scramble_depth aberto fixado (ex: 50)
+        eval_env = build_hud_env("RubiksCubeMacro-v0", is_training=False, scramble_depth=50)
+        raw_eval = eval_env.env.unwrapped
+        assert raw_eval.scramble_depth == 50
+        obs, info = eval_env.reset()
+        assert info["current_depth"] == 50
+
+        # CLI build_environment com scramble_depth aberto (ex: 100)
+        cli_train = build_environment("RubiksCube-v0", is_training=True, scramble_depth=100)
+        obs, info = cli_train.reset()
+        assert info["current_depth"] == 100
+
+        cli_eval = build_environment("RubiksCubeMacro-v0", is_training=False, scramble_depth=42)
+        obs, info = cli_eval.reset()
+        assert info["current_depth"] == 42
+
+    def test_rubiks_core_large_scramble_unlimited(self):
+        """Valida que RubiksCubeCore embaralha sem truncamento arbitrário para valores grandes (>60)."""
+        core = RubiksCubeCore()
+        moves_100 = core.scramble(depth=100, use_macros=False)
+        assert len(moves_100) == 100
+        assert not core.is_solved()
+
+        moves_75_macro = core.scramble(depth=75, use_macros=True)
+        assert len(moves_75_macro) == 75
+        assert not core.is_solved()
+

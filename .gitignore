@@ -11,3 +11,6 @@ _vizdoom.ini
 .DS_Store
 *.log
 .checkpoints_backup/
+target/
+crates/**/target/
+

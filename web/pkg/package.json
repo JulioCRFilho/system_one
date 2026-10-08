@@ -1,0 +1,16 @@
+{
+  "name": "system1_core",
+  "type": "module",
+  "description": "High-performance Core Simulation and Decision Engine for System 1",
+  "version": "0.1.0",
+  "files": [
+    "system1_core_bg.wasm",
+    "system1_core.js",
+    "system1_core.d.ts"
+  ],
+  "main": "system1_core.js",
+  "types": "system1_core.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

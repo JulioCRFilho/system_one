@@ -199,6 +199,7 @@ def build_hud_env(
     render_mode: str = "in_browser",
     is_training: bool = False,
     frame_skip: Optional[int] = None,
+    scramble_depth: Optional[int] = None,
 ) -> UniversalS1Wrapper:
     """Instancia o ambiente com suporte a renderização in-browser (rgb_array), janela ou headless no Modo Puro Universal."""
     env_lower = env_id.lower().replace("_", "-")
@@ -230,7 +231,11 @@ def build_hud_env(
 
     extra_kwargs = {}
     if env_id in ("RubiksCube-v0", "RubiksCubeMacro-v0"):
-        extra_kwargs["curriculum"] = is_training
+        if scramble_depth is not None and int(scramble_depth) > 0:
+            extra_kwargs["scramble_depth"] = int(scramble_depth)
+            extra_kwargs["curriculum"] = False
+        else:
+            extra_kwargs["curriculum"] = is_training
 
     raw_env = make_gym_env_with_auto_install(env_id, render_mode=gym_render_mode, **extra_kwargs)
     if env_id == "MountainCar-v0":
@@ -309,12 +314,23 @@ def run_worker_train(config: Dict[str, Any], hud_client: HUDClient) -> None:
     if transfer_from:
         print(f"Transferência de pesos ativa a partir de: {transfer_from} (freeze_trunk={freeze_trunk})")
 
+    scramble_depth = config.get("scramble_depth")
+    if scramble_depth is not None:
+        try:
+            scramble_depth = int(scramble_depth)
+        except (ValueError, TypeError):
+            scramble_depth = None
+
+    if env_id.lower().replace("_", "-") in ("rubikscube-v0", "rubikscubemacro-v0", "rubiks", "rubik") and scramble_depth:
+        print(f"🎲 Cubo Mágico: Profundidade de Embaralhamento no Treino: {scramble_depth} passos")
+
     env = build_hud_env(
         env_id,
         scenario=config.get("scenario"),
         render_mode=render_mode,
         is_training=True,
         frame_skip=int(config.get("frame_skip", 4)),
+        scramble_depth=scramble_depth,
     )
     agent = UniversalS1Agent(
         obs_space=env.observation_space,
@@ -450,12 +466,23 @@ def run_worker_eval(config: Dict[str, Any], hud_client: HUDClient) -> None:
 
     device = resolve_compute_device(device_pref, is_training=False)
 
+    scramble_depth = config.get("scramble_depth")
+    if scramble_depth is not None:
+        try:
+            scramble_depth = int(scramble_depth)
+        except (ValueError, TypeError):
+            scramble_depth = None
+
+    if env_id.lower().replace("_", "-") in ("rubikscube-v0", "rubikscubemacro-v0", "rubiks", "rubik") and scramble_depth:
+        print(f"🎲 Cubo Mágico: Profundidade de Embaralhamento na Avaliação: {scramble_depth} passos")
+
     env = build_hud_env(
         env_id,
         scenario=config.get("scenario"),
         render_mode=render_mode,
         is_training=False,
         frame_skip=int(config.get("frame_skip", 4)),
+        scramble_depth=scramble_depth,
     )
     agent = UniversalS1Agent(
         obs_space=env.observation_space,

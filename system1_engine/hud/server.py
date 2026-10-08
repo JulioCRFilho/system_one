@@ -551,6 +551,34 @@ class HUDServer:
                         self.send_header("Content-Length", "0")
                         self.end_headers()
 
+                elif clean_path.startswith("/pkg/") or clean_path.startswith("/web/pkg/"):
+                    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+                    pkg_file = os.path.basename(clean_path)
+                    target_file = os.path.join(project_root, "web", "pkg", pkg_file)
+                    if os.path.exists(target_file) and os.path.isfile(target_file):
+                        with open(target_file, "rb") as f:
+                            file_bytes = f.read()
+                        if pkg_file.endswith(".wasm"):
+                            content_type = "application/wasm"
+                        elif pkg_file.endswith(".js"):
+                            content_type = "application/javascript; charset=utf-8"
+                        elif pkg_file.endswith(".json"):
+                            content_type = "application/json; charset=utf-8"
+                        else:
+                            content_type = "text/plain; charset=utf-8"
+                        self.send_response(200)
+                        self.send_header("Content-Type", content_type)
+                        self.send_header("Content-Length", str(len(file_bytes)))
+                        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+                        self.send_header("Access-Control-Allow-Origin", "*")
+                        self.end_headers()
+                        self.wfile.write(file_bytes)
+                    else:
+                        self.send_response(404)
+                        self.send_header("Content-Length", "0")
+                        self.end_headers()
+
+
                 elif clean_path == "/api/web_models":
                     try:
                         from system1_engine.core.onnx_exporter import generate_web_manifest

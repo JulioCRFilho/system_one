@@ -144,6 +144,9 @@
       <span class="px-2 py-0.5 rounded text-[10px] bg-cyan-950 text-cyan-300 border border-cyan-800 font-bold tracking-widest uppercase">
         WEB RUNTIME HUD • LIVE EVALUATION (WASM SIMD)
       </span>
+      <span id="daemon-indicator" class="hidden px-2 py-0.5 rounded text-[10px] bg-emerald-950/80 border border-emerald-500/60 text-emerald-300 font-bold tracking-wider animate-pulse">
+        ⚡ DAEMON LOCAL 8050
+      </span>
       <a href="http://localhost:8050" target="_blank" rel="noopener noreferrer" class="ml-2 px-2.5 py-1 rounded text-xs font-bold bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white border border-cyan-400/50 shadow flex items-center gap-1.5 transition cursor-pointer" title="Abrir HUD Normal Python (FastAPI/WebSocket) em nova aba">
         <span>🖥️</span> HUD Python ↗
       </a>
@@ -317,17 +320,20 @@
         <div id="scramble-section" class="border-t border-gray-800/80 pt-2 flex flex-col gap-1.5">
           <div class="flex items-center justify-between">
             <span class="text-[10px] text-gray-400 font-semibold">Embaralhamento do Cubo</span>
-            <select id="select-scramble-depth" onchange="onScrambleDepthChange()" class="hud-input !w-auto text-[10px] font-mono py-0.5">
-              <option value="1">1 giro (Reflexo Puro)</option>
-              <option value="2">2 giros (Médio)</option>
-              <option value="3" selected>3 giros (Padrão)</option>
-              <option value="4">4 giros (Avançado)</option>
-              <option value="5">5 giros (Desafio)</option>
-            </select>
+            <div class="flex items-center gap-1">
+              <button type="button" onclick="setWebScrambleDepth(1)" class="badge-btn">1</button>
+              <button type="button" onclick="setWebScrambleDepth(3)" class="badge-btn">3</button>
+              <button type="button" onclick="setWebScrambleDepth(5)" class="badge-btn">5</button>
+              <button type="button" onclick="setWebScrambleDepth(10)" class="badge-btn">10</button>
+              <button type="button" onclick="setWebScrambleDepth(20)" class="badge-btn">20</button>
+            </div>
           </div>
-          <button type="button" onclick="scrambleEnv()" class="py-1 px-2 text-[10px] font-bold rounded bg-amber-950/80 hover:bg-amber-900 text-amber-300 border border-amber-700/60 transition flex items-center justify-center gap-1 cursor-pointer shadow-sm">
-            <span>🎲</span> Embaralhar Cubo Mágico
-          </button>
+          <div class="flex items-center gap-1.5">
+            <input type="number" id="input-scramble-depth" value="3" min="1" oninput="onScrambleDepthChange()" class="hud-input w-20 text-center font-mono text-[11px] py-1 text-amber-300" placeholder="Qtd..." />
+            <button type="button" onclick="scrambleEnv()" class="flex-1 py-1 px-2 text-[10px] font-bold rounded bg-amber-950/80 hover:bg-amber-900 text-amber-300 border border-amber-700/60 transition flex items-center justify-center gap-1 cursor-pointer shadow-sm">
+              <span>🎲</span> Embaralhar Cubo
+            </button>
+          </div>
         </div>
 
         <!-- Botões de Execução -->
@@ -1205,12 +1211,22 @@
     // INICIALIZAÇÃO DE SIMULADORES
     // =====================================================================
     function getScrambleDepth() {
-      const el = document.getElementById('select-scramble-depth');
-      return el ? parseInt(el.value, 10) : 3;
+      const el = document.getElementById('input-scramble-depth') || document.getElementById('select-scramble-depth');
+      const val = el ? parseInt(el.value, 10) : 3;
+      return (val && val > 0) ? val : 3;
+    }
+
+    function setWebScrambleDepth(val) {
+      const el = document.getElementById('input-scramble-depth');
+      if (el) {
+        el.value = val;
+        onScrambleDepthChange();
+        scrambleEnv();
+      }
     }
 
     function onScrambleDepthChange() {
-      appendLog(`[CONFIG] Profundidade de embaralhamento ajustada para: ${getScrambleDepth()} giros`);
+      appendLog(`[CONFIG] Profundidade de embaralhamento ajustada para: ${getScrambleDepth()} passos`);
     }
 
     function initSim(demoKey) {
@@ -1622,9 +1638,33 @@
     window.addEventListener('DOMContentLoaded', async () => {
       initThreeCube();
       threeAnimationLoop();
+
+      // Carrega o motor nativo WebAssembly compilado se disponível
+      try {
+        const wasm = await import('./pkg/system1_core.js');
+        await wasm.default();
+        window.System1Core = wasm;
+        appendLog("[CORE] ⚡ Engine nativo WebAssembly SIMD (system1_core.wasm) ativo com sucesso!");
+      } catch (err) {
+        console.warn("[CORE] WebAssembly não carregado (fallback JS ativo):", err);
+      }
+
       await fetchManifest();
       initSim(activeDemo);
       await loadModel(activeDemo);
+
+      // Verificação de conectividade com Daemon Local
+      try {
+        const res = await fetch("http://localhost:8050/api/state", { signal: AbortSignal.timeout(400) });
+        if (res.ok) {
+          const state = await res.json();
+          appendLog(`[DAEMON] 🖥️ Servidor Python Local conectado na porta 8050 (${state.hardware?.device_name || 'Ativo'}).`);
+          const statusBadge = document.getElementById('daemon-indicator');
+          if (statusBadge) statusBadge.classList.remove('hidden');
+        }
+      } catch (_) {
+        appendLog("[MODE] 🌐 Modo Portfólio Web Standalone ativo (Zero Servidor / Client-Side).");
+      }
     });
   </script>
 </body>

@@ -21,6 +21,7 @@ def build_environment(
     render: bool = False,
     is_training: bool = False,
     frame_skip: Optional[int] = None,
+    scramble_depth: Optional[int] = None,
 ) -> UniversalS1Wrapper:
     """Instancia o ambiente apropriado (Gymnasium padrão ou Adaptador Nativo ViZDoom) no Modo Puro Universal."""
     env_lower = env_id.lower().replace("_", "-")
@@ -44,7 +45,11 @@ def build_environment(
     render_mode = "human" if render else None
     extra_kwargs = {}
     if env_id in ("RubiksCube-v0", "RubiksCubeMacro-v0"):
-        extra_kwargs["curriculum"] = is_training
+        if scramble_depth is not None and scramble_depth > 0:
+            extra_kwargs["scramble_depth"] = int(scramble_depth)
+            extra_kwargs["curriculum"] = False
+        else:
+            extra_kwargs["curriculum"] = is_training
 
     raw_env = make_gym_env_with_auto_install(env_id, render_mode=render_mode, **extra_kwargs)
     if env_id == "MountainCar-v0":
@@ -102,6 +107,7 @@ def train_mode(args: argparse.Namespace) -> None:
         render=getattr(args, "render", False),
         is_training=True,
         frame_skip=getattr(args, "frame_skip", None),
+        scramble_depth=getattr(args, "scramble_depth", None),
     )
 
     agent = UniversalS1Agent(
@@ -219,6 +225,7 @@ def run_mode(args: argparse.Namespace) -> None:
         render=getattr(args, "render", False),
         is_training=False,
         frame_skip=getattr(args, "frame_skip", None),
+        scramble_depth=getattr(args, "scramble_depth", None),
     )
 
     agent = UniversalS1Agent(
@@ -500,6 +507,12 @@ def main() -> None:
         type=int,
         default=None,
         help="Frame skip para ambientes de motor nativo (padrão: 1 ao renderizar, 4 em headless)",
+    )
+    parser.add_argument(
+        "--scramble-depth",
+        type=int,
+        default=None,
+        help="Número de passos/profundidade de embaralhamento do Cubo Mágico (sem limite aberto, ex: 1, 3, 10, 20...)",
     )
 
     args = parser.parse_args()
