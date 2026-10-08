@@ -125,7 +125,15 @@ def train_mode(args: argparse.Namespace) -> None:
         web_server.start()
 
     try:
-        train_calib = getattr(args, "train_calibration", 1.0)
+        train_calib_raw = getattr(args, "train_calibration", "auto")
+        if str(train_calib_raw).lower() in ("auto", "adaptive", "homeostatic"):
+            train_calib = "auto"
+        else:
+            try:
+                train_calib = float(np.clip(float(train_calib_raw), 0.05, 1.0))
+            except (ValueError, TypeError):
+                train_calib = "auto"
+
         trainer = RecurrentPPOTrainer(
             agent=agent,
             env=env,
@@ -416,10 +424,10 @@ def main() -> None:
     parser.add_argument(
         "--train-calibration",
         "--exploration-scale",
-        type=float,
-        default=1.0,
+        type=str,
+        default="auto",
         dest="train_calibration",
-        help="Escala de exploração / calibração durante o treino PPO [0.05 a 1.0] (padrão: 1.0)",
+        help="Escala de exploração / calibração durante o treino PPO: 'auto' (homeostase dinâmica e auto-correção) ou float [0.05 a 1.0] (padrão: auto)",
     )
     parser.add_argument("--episodes", type=int, default=5, help="Number of episodes for run mode")
     parser.add_argument("--lr", type=float, default=7e-4, help="Learning rate")

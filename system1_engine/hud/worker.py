@@ -329,8 +329,17 @@ def run_worker_train(config: Dict[str, Any], hud_client: HUDClient) -> None:
     last_telemetry_ts = 0.0
     last_frame_ts = 0.0
 
-    train_calib_cfg = config.get("train_calibration", config.get("exploration_scale", 1.0))
-    train_calibration = float(np.clip(float(train_calib_cfg), 0.05, 1.0))
+    train_calib_cfg = config.get("train_calibration", config.get("exploration_scale", "auto"))
+    if str(train_calib_cfg).lower() in ("auto", "adaptive", "homeostatic"):
+        train_calibration = "auto"
+        print("⚡ Modo de Exploração no Treino: AUTO / HOMEOSTASE DINÂMICA (Auto-correção ativa)")
+    else:
+        try:
+            train_calibration = float(np.clip(float(train_calib_cfg), 0.05, 1.0))
+            print(f"🎯 Modo de Exploração no Treino: Fixa em {train_calibration:.2f}")
+        except (ValueError, TypeError):
+            train_calibration = "auto"
+            print("⚡ Modo de Exploração no Treino: AUTO / HOMEOSTASE DINÂMICA (Auto-correção ativa)")
 
     trainer = RecurrentPPOTrainer(
         agent=agent,

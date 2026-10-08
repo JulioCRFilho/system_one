@@ -542,19 +542,20 @@
                 <div class="flex items-center gap-1">
                   <span class="text-[10px] text-gray-400 block">Exploração Treino (0.05 a 1.0)</span>
                   <span class="tooltip-wrap tooltip-left">
-                    <span class="tooltip-icon" title="Escala contínua de exploração dos rollouts no treino PPO (temperatura Boltzmann para ações discretas / ruído de variância σ para contínuas).">ⓘ</span>
-                    <span class="tooltip-bubble"><strong>Exploração no Treino</strong>:<br>• <strong>1.0 (Padrão)</strong>: Exploração estocástica completa do PPO.<br>• <strong>0.5 - 0.8</strong>: Exploração focada, temperando os logits discretos e variância contínua com razão surrogate exata.<br>• <strong>0.05</strong>: Quase-determinístico.</span>
+                    <span class="tooltip-icon" title="Escala de exploração dos rollouts no treino PPO (temperatura Boltzmann para ações discretas / ruído σ para contínuas).">ⓘ</span>
+                    <span class="tooltip-bubble"><strong>Exploração no Treino</strong>:<br>• <strong>⚡ Auto</strong>: Homeostase dinâmica — esfria sob progresso para consolidação e aquece sob estagnação para auto-correção e quebra de loops.<br>• <strong>1.0 (Padrão)</strong>: Exploração estocástica completa do PPO.<br>• <strong>0.5 - 0.7</strong>: Exploração focada temperada.<br>• <strong>0.05</strong>: Quase-determinístico.</span>
                   </span>
                 </div>
                 <div class="flex gap-0.5">
+                  <button type="button" onclick="setTrainCalibration('auto')" class="badge-btn">⚡ Auto</button>
                   <button type="button" onclick="setTrainCalibration(1.0)" class="badge-btn">1.0</button>
                   <button type="button" onclick="setTrainCalibration(0.7)" class="badge-btn">0.7</button>
                   <button type="button" onclick="setTrainCalibration(0.5)" class="badge-btn">0.5</button>
                 </div>
               </div>
               <div class="flex items-center gap-2">
-                <input type="range" id="cfg-train-calib-range" min="0.05" max="1.0" step="0.05" value="1.0" oninput="onTrainCalibRangeChange(this.value)" class="w-full accent-emerald-500 cursor-pointer" />
-                <input type="number" id="cfg-train-calibration" value="1.0" min="0.05" max="1.0" step="0.05" oninput="onTrainCalibNumChange(this.value)" class="hud-input w-16 text-center" />
+                <input type="range" id="cfg-train-calib-range" min="0.05" max="1.0" step="0.05" value="0.8" oninput="onTrainCalibRangeChange(this.value)" class="w-full accent-emerald-500 cursor-pointer" />
+                <input type="text" id="cfg-train-calibration" value="auto" oninput="onTrainCalibNumChange(this.value)" class="hud-input w-16 text-center font-mono text-[11px]" />
               </div>
             </div>
           </div>
@@ -1790,16 +1791,27 @@
     function setTrainCalibration(val) {
       const numEl = document.getElementById('cfg-train-calibration');
       const rngEl = document.getElementById('cfg-train-calib-range');
-      if (numEl) numEl.value = val;
-      if (rngEl) rngEl.value = val;
+      if (val === 'auto') {
+        if (numEl) numEl.value = 'auto';
+        if (rngEl) rngEl.value = 0.8;
+      } else {
+        const fVal = typeof val === 'number' ? val : parseFloat(val);
+        if (numEl) numEl.value = fVal.toFixed(2);
+        if (rngEl) rngEl.value = fVal;
+      }
     }
     function onTrainCalibRangeChange(val) {
       const numEl = document.getElementById('cfg-train-calibration');
-      if (numEl) numEl.value = val;
+      const fVal = parseFloat(val);
+      if (numEl) numEl.value = fVal.toFixed(2);
     }
     function onTrainCalibNumChange(val) {
-      const rngEl = document.getElementById('cfg-train-calib-range');
-      if (rngEl) rngEl.value = val;
+      if (val === 'auto') return;
+      const fVal = parseFloat(val);
+      if (!isNaN(fVal)) {
+        const rngEl = document.getElementById('cfg-train-calib-range');
+        if (rngEl) rngEl.value = Math.min(1.0, Math.max(0.05, fVal));
+      }
     }
 
     function pushDataPoint(chart, datasetIdx, val) {
@@ -2175,7 +2187,7 @@
         inference_mode: document.getElementById('cfg-inference-mode').value,
         eval_action_mode: document.getElementById('cfg-eval-action-mode') ? document.getElementById('cfg-eval-action-mode').value : 'auto',
         eval_calibration: (document.getElementById('cfg-eval-calibration')?.value === 'auto' || document.getElementById('cfg-eval-action-mode')?.value === 'auto') ? 'auto' : (parseFloat(document.getElementById('cfg-eval-calibration')?.value) || 0.5),
-        train_calibration: document.getElementById('cfg-train-calibration') ? parseFloat(document.getElementById('cfg-train-calibration').value) : 1.0
+        train_calibration: (document.getElementById('cfg-train-calibration')?.value === 'auto' || !document.getElementById('cfg-train-calibration')?.value) ? 'auto' : (parseFloat(document.getElementById('cfg-train-calibration')?.value) || 'auto')
       };
 
       if (activeMode === 'run' && payload.load) {

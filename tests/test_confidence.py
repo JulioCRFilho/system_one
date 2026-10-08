@@ -369,4 +369,81 @@ def test_auto_calibration_homeostasis():
     assert 0.0 <= agent._adaptive_calibration <= 0.80
 
 
+def test_ppo_auto_exploration_training():
+    """Valida o modo de exploração automático e homeostase dinâmica no RecurrentPPOTrainer.
+    - Suporta string 'auto', 'adaptive' ou 'homeostatic'
+    - Ajusta a escala dinamicamente com base em recompensa/estagnação
+    - Registra a calibração corrente na telemetria
+    - Treina épocas sem divergência ou NaNs
+    """
+    from system1_engine.training.ppo import RecurrentPPOTrainer
+    from system1_engine.telemetry.tracker import LiveStatsTracker
+
+    # 1. Teste em ambiente discreto (CartPole-v1)
+    raw_env = gym.make("CartPole-v1")
+    env = UniversalS1Wrapper(raw_env)
+    agent = UniversalS1Agent(obs_space=env.observation_space, action_space=env.action_space)
+    tracker = LiveStatsTracker()
+
+    trainer = RecurrentPPOTrainer(
+        agent=agent,
+        env=env,
+        rollout_steps=64,
+        chunk_length=8,
+        chunk_batch_size=4,
+        exploration_scale="auto",
+        tracker=tracker,
+    )
+    assert trainer.is_auto_exploration is True
+    assert trainer._adaptive_scale == 0.80
+
+    obs_dict, _ = env.reset(seed=42)
+    obs_dict, hx, ep_start, ret = trainer.collect_rollouts(
+        current_obs_dict=obs_dict,
+        current_hx=None,
+        episode_start=True,
+    )
+    assert len(trainer.buffer.rewards) == 64
+    assert 0.15 <= trainer.exploration_scale <= 1.0
+
+    # Verifica telemetria populada com calibração
+    snapshot = tracker.snapshot()
+    assert "calibration" in snapshot
+    assert snapshot["calibration"] > 0.0
+
+    # Executa otimização de gradiente
+    metrics = trainer.train_epoch()
+    assert "policy_loss" in metrics
+    assert "value_loss" in metrics
+    assert not np.isnan(metrics["policy_loss"])
+    assert not np.isnan(metrics["value_loss"])
+
+    # 2. Teste em ambiente contínuo (Pendulum-v1)
+    raw_cont_env = gym.make("Pendulum-v1")
+    cont_env = UniversalS1Wrapper(raw_cont_env)
+    cont_agent = UniversalS1Agent(obs_space=cont_env.observation_space, action_space=cont_env.action_space)
+
+    cont_trainer = RecurrentPPOTrainer(
+        agent=cont_agent,
+        env=cont_env,
+        rollout_steps=64,
+        chunk_length=8,
+        chunk_batch_size=4,
+        exploration_scale="auto",
+    )
+    assert cont_trainer.is_auto_exploration is True
+
+    cont_obs, _ = cont_env.reset(seed=42)
+    cont_obs, _, _, _ = cont_trainer.collect_rollouts(
+        current_obs_dict=cont_obs,
+        current_hx=None,
+        episode_start=True,
+    )
+    assert len(cont_trainer.buffer.rewards) == 64
+    cont_metrics = cont_trainer.train_epoch()
+    assert not np.isnan(cont_metrics["policy_loss"])
+    assert not np.isnan(cont_metrics["value_loss"])
+
+
+
 

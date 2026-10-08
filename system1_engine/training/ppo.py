@@ -33,7 +33,7 @@ class RecurrentPPOTrainer:
         chunk_batch_size: int = 16,
         device: Union[str, torch.device] = "cpu",
         tracker: Optional[LiveStatsTracker] = None,
-        exploration_scale: float = 1.0,
+        exploration_scale: Union[float, str] = 1.0,
     ) -> None:
         self.agent = agent.to(device)
         self.env = env
@@ -50,7 +50,22 @@ class RecurrentPPOTrainer:
         self.chunk_batch_size = chunk_batch_size
         self.device = torch.device(device)
         self.tracker = tracker
-        self.exploration_scale = float(np.clip(exploration_scale, 0.05, 1.0))
+
+        # Suporte a exploração automática / homeostática no treino PPO
+        if isinstance(exploration_scale, str) and exploration_scale.lower() in ("auto", "adaptive", "homeostatic"):
+            self.is_auto_exploration = True
+            self.exploration_scale = 0.80
+            self._adaptive_scale = 0.80
+            self._reward_ema = 0.0
+            self._stagnation_count = 0
+            self._recent_actions: deque[int] = deque(maxlen=6)
+        else:
+            self.is_auto_exploration = False
+            self.exploration_scale = float(np.clip(float(exploration_scale), 0.05, 1.0))
+            self._adaptive_scale = self.exploration_scale
+            self._reward_ema = 0.0
+            self._stagnation_count = 0
+            self._recent_actions = deque(maxlen=6)
 
         # Optimize only parameters that require grad (respects frozen trunk)
         trainable_params = [p for p in self.agent.parameters() if p.requires_grad]
@@ -130,18 +145,38 @@ class RecurrentPPOTrainer:
                 # Step agent with latency tracking
                 t0 = time.perf_counter_ns()
                 dist, value, next_hx = self.agent.forward(input_dict, hx=current_hx, dones=None)
+
+                # Escala de exploração / homeostase dinâmica
+                if self.is_auto_exploration:
+                    curr_scale = float(self._adaptive_scale)
+                else:
+                    curr_scale = float(self.exploration_scale)
+
                 if self.agent.is_discrete:
-                    if self.exploration_scale != 1.0:
-                        scaled_logits = dist.logits / self.exploration_scale
+                    logits = dist.logits
+                    # Quebra de ciclos (Cycle Breaking) sob estagnação no modo automático
+                    if self.is_auto_exploration and self._stagnation_count >= 3 and len(self._recent_actions) >= 3:
+                        if self._recent_actions[-1] == self._recent_actions[-3]:
+                            avoid_act = self._recent_actions[-2]
+                            penalized_logits = logits.clone()
+                            penalized_logits[..., avoid_act] -= 3.0
+                            logits = penalized_logits
+
+                    if curr_scale != 1.0:
+                        scaled_logits = logits / curr_scale
                         dist_sample = torch.distributions.Categorical(logits=scaled_logits)
+                    elif self.is_auto_exploration and self._stagnation_count >= 3:
+                        dist_sample = torch.distributions.Categorical(logits=logits)
                     else:
                         dist_sample = dist
                     action = dist_sample.sample()
                     log_prob = dist_sample.log_prob(action)
                     env_action = int(action.item())
+                    if self.is_auto_exploration:
+                        self._recent_actions.append(env_action)
                 else:
-                    if self.exploration_scale != 1.0:
-                        scaled_std = dist.scale * self.exploration_scale
+                    if curr_scale != 1.0:
+                        scaled_std = dist.scale * curr_scale
                         dist_sample = torch.distributions.Normal(loc=dist.mean, scale=scaled_std)
                     else:
                         dist_sample = dist
@@ -174,11 +209,28 @@ class RecurrentPPOTrainer:
                         uncertainty=unc,
                         confidence=conf,
                         entropy=ent,
+                        calibration=curr_scale,
                     )
 
                 # Environment step
                 next_obs_dict, reward, terminated, truncated, _ = self.env.step(env_action)
                 done = terminated or truncated
+
+                # Auto-correção homeostática por momentum de recompensa
+                if self.is_auto_exploration:
+                    rew_f = float(reward)
+                    delta_r = rew_f - self._reward_ema
+                    self._reward_ema = 0.9 * self._reward_ema + 0.1 * rew_f
+
+                    if rew_f > 0.01 or delta_r > 0.01:
+                        # Progresso / recompensa: resfria para buscar o equilíbrio e estabilidade das decisões
+                        self._stagnation_count = 0
+                        self._adaptive_scale = max(0.15, self._adaptive_scale - 0.02)
+                    else:
+                        # Estagnação: aquece gradualmente para auto-correção e escape de armadilhas
+                        self._stagnation_count += 1
+                        if self._stagnation_count >= 3:
+                            self._adaptive_scale = min(1.0, self._adaptive_scale + 0.01)
 
                 if self.tracker is not None:
                     self.tracker.record_env_step(reward=reward, done=done)
@@ -259,6 +311,9 @@ class RecurrentPPOTrainer:
             # Global advantage normalization across entire rollout buffer
             adv = self.buffer.advantages
             self.buffer.advantages = (adv - adv.mean()) / (adv.std() + 1e-8)
+
+        if self.is_auto_exploration:
+            self.exploration_scale = float(self._adaptive_scale)
 
         mean_return = (
             float(np.mean(self.episode_returns)) if len(self.episode_returns) > 0 else 0.0
