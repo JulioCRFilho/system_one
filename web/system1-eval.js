@@ -1447,6 +1447,9 @@ class System1AgentWeb {
     this.actionHistory.push(chosenAction);
     if (this.actionHistory.length > 8) this.actionHistory.shift();
 
+    const maxEntropy = Math.log(logits.length);
+    const uncertainty = Math.min(1.0, Math.max(0.0, entropy / maxEntropy));
+
     this.prevAction = chosenAction;
 
     return {

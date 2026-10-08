@@ -689,6 +689,7 @@
     let isRunning = false;
     let animId = null;
     let lastScore = 0.0;
+    let lastReward = 0.0;
     let actionHistory = [];
     let stepCount = 0;
     let peakScore = 0.0;
@@ -1231,6 +1232,7 @@
         const mode = cfg.mode === "macro" ? "macro" : "atomic";
         const moves = sim.scramble(depth, mode);
         lastScore = sim.getScore();
+        lastReward = 0.0;
         peakScore = lastScore;
         window.visitedStates = [sim.getStateHash ? sim.getStateHash() : ""];
         actionHistory = [];
@@ -1307,6 +1309,7 @@
         window.visitedStates = [sim.getStateHash ? sim.getStateHash() : ""];
         lastScore = sim.getScore ? sim.getScore() : 0.0;
       }
+      lastReward = 0.0;
       actionHistory = [];
       isRunning = true;
       const btnStart = document.getElementById('btn-start');
@@ -1349,6 +1352,7 @@
         const mode = cfg.mode === "macro" ? "macro" : "atomic";
         const moves = sim.scramble(depth, mode);
         lastScore = sim.getScore();
+        lastReward = 0.0;
         peakScore = lastScore;
         window.visitedStates = [sim.getStateHash ? sim.getStateHash() : ""];
         actionHistory = [];
@@ -1365,6 +1369,7 @@
     function resetEnv() {
       sim.reset();
       lastScore = sim.getScore ? sim.getScore() : 0.0;
+      lastReward = 0.0;
       peakScore = lastScore;
       window.visitedStates = [sim.getStateHash ? sim.getStateHash() : ""];
       actionHistory = [];
@@ -1392,22 +1397,6 @@
       stepCount++;
       document.getElementById('kpi-steps').innerText = stepCount.toLocaleString();
 
-      let stepReward = 0.0;
-      if (isRubiks) {
-        const curScore = sim.getScore ? sim.getScore() : 0;
-        const deltaScore = curScore - lastScore;
-        lastScore = curScore;
-        let sRew = (deltaScore * 5.0) - 0.02;
-        if (sim.isSolved()) {
-          sRew += 10.0;
-        }
-        stepReward = sRew;
-        document.getElementById('kpi-return').innerText = curScore.toFixed(2);
-      } else {
-        stepReward = 1.0;
-        document.getElementById('kpi-return').innerText = stepCount.toFixed(0);
-      }
-
       // Prevenção de ciclos apenas sob estagnação persistente no modo auto (e nunca inibe o estado resolvido)
       const avoidList = [];
       if (isRubiks && isAutoCalibrate && actionHistory.length >= 3) {
@@ -1428,7 +1417,7 @@
       const calibEl = document.getElementById('cfg-eval-calibration');
       const webCalib = calibEl ? (calibEl.value === 'auto' ? 'auto' : parseFloat(calibEl.value)) : 0.5;
 
-      const decision = await agent.actWithConfidence(obs, stepReward, {
+      const decision = await agent.actWithConfidence(obs, lastReward, {
         calibration: isAutoCalibrate ? 'auto' : webCalib,
         autoCalibrate: isAutoCalibrate,
         avoidAction: avoidList.length > 0 ? avoidList : undefined
@@ -1461,10 +1450,6 @@
       pushDataPoint(chartLat, 0, decision.latencyMs);
       chartLat.update('none');
 
-      const plotScore = isRubiks ? (sim.getScore ? sim.getScore() : 0) : stepCount;
-      pushDataPoint(chartRew, 0, plotScore);
-      chartRew.update('none');
-
       pushDataPoint(chartHomeostasis, 0, calibVal);
       pushDataPoint(chartHomeostasis, 1, decision.uncertainty * 100);
       chartHomeostasis.update('none');
@@ -1485,6 +1470,16 @@
         window.visitedStates.push(sim.getStateHash());
         if (window.visitedStates.length > 24) window.visitedStates.shift();
 
+        const curScore = sim.getScore ? sim.getScore() : 0.0;
+        const deltaScore = curScore - lastScore;
+        lastScore = curScore;
+        let sRew = (deltaScore * 5.0) - 0.02;
+        if (sim.isSolved()) {
+          sRew += 10.0;
+        }
+        lastReward = sRew;
+        document.getElementById('kpi-return').innerText = curScore.toFixed(2);
+
         if (sim.isSolved()) {
           stopEvaluation();
           document.getElementById('status-desc').innerText = "🏆 CUBO RESOLVIDO COM SUCESSO!";
@@ -1492,12 +1487,19 @@
         }
       } else {
         const res = sim.step(decision.action);
+        lastReward = 1.0;
+        document.getElementById('kpi-return').innerText = stepCount.toFixed(0);
         document.getElementById('status-desc').innerText = `Passos: ${res.steps}`;
         if (res.done) {
           appendLog(`[DONE] Episódio concluído em ${res.steps} passos. Reiniciando ambiente.`);
           sim.reset();
+          lastReward = 0.0;
         }
       }
+
+      const plotScore = isRubiks ? (sim.getScore ? sim.getScore() : 0.0) : stepCount;
+      pushDataPoint(chartRew, 0, plotScore);
+      chartRew.update('none');
 
       // Stream para o terminal de logs
       if (stepCount % 5 === 1 || isRubiks || decision.isUncertain) {
