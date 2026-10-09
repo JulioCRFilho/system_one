@@ -273,13 +273,16 @@ class KnowledgeTransferManager:
             max_depth = extra.get("curriculum_max_depth") or extra.get("max_depth")
             if depth is None and info["env_id"] and "rubik" in info["env_id"].lower():
                 fn = os.path.basename(checkpoint_path).lower()
-                if "_v2" in fn:
+                if "_v3" in fn:
+                    depth = 7
+                    max_depth = 10
+                elif "_v2" in fn:
                     depth = 6
                     max_depth = 10
                 elif "_v1" in fn:
                     depth = 5
                     max_depth = 5
-                elif "trained" in fn:
+                elif "_v" not in fn and "trained" in fn:
                     depth = 1
                     max_depth = 1
 

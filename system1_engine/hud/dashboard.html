@@ -2255,10 +2255,10 @@
       if (item.curriculum_depth !== null && item.curriculum_depth !== undefined) return item.curriculum_depth;
       if (item.env_id && item.env_id.toLowerCase().includes('rubik')) {
         const fn = (item.filename || item.path || '').toLowerCase();
-        if (fn.includes('_v3')) return 6;
+        if (fn.includes('_v3')) return 7;
         if (fn.includes('_v2')) return 6;
         if (fn.includes('_v1')) return 5;
-        if (fn.includes('trained')) return 1;
+        if (!fn.includes('_v') && fn.includes('trained')) return 1;
       }
       return null;
     }
@@ -2271,7 +2271,7 @@
         const fn = (item.filename || item.path || '').toLowerCase();
         if (fn.includes('_v3') || fn.includes('_v2')) return 10;
         if (fn.includes('_v1')) return 5;
-        if (fn.includes('trained')) return 1;
+        if (!fn.includes('_v') && fn.includes('trained')) return 1;
       }
       return null;
     }
