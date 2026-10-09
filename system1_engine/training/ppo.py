@@ -54,18 +54,19 @@ class RecurrentPPOTrainer:
         # Suporte a exploração automática / homeostática no treino PPO
         self._min_adaptive_scale = 0.40
         self._max_adaptive_scale = 1.00
+        self._last_promotions: int = 0
         if isinstance(exploration_scale, str) and exploration_scale.lower() in ("auto", "adaptive", "homeostatic"):
             self.is_auto_exploration = True
             self.exploration_scale = 0.80
             self._adaptive_scale = 0.80
-            self._reward_ema = 0.0
+            self._reward_ema: Optional[float] = None
             self._stagnation_count = 0
             self._recent_actions: deque[int] = deque(maxlen=6)
         else:
             self.is_auto_exploration = False
             self.exploration_scale = float(np.clip(float(exploration_scale), 0.05, 1.0))
             self._adaptive_scale = self.exploration_scale
-            self._reward_ema = 0.0
+            self._reward_ema = None
             self._stagnation_count = 0
             self._recent_actions = deque(maxlen=6)
 
@@ -457,27 +458,57 @@ class RecurrentPPOTrainer:
             float(np.mean(self.episode_returns)) if len(self.episode_returns) > 0 else 0.0
         )
 
-        if self.is_auto_exploration:
-            delta_ret = mean_return - self._reward_ema
-            self._reward_ema = 0.85 * self._reward_ema + 0.15 * mean_return
-            if mean_return > 0.05 or delta_ret > 0.02:
-                self._stagnation_count = 0
-                self._adaptive_scale = max(self._min_adaptive_scale, self._adaptive_scale - 0.03)
-            else:
-                self._stagnation_count += 1
-                if self._stagnation_count >= 2:
-                    self._adaptive_scale = min(self._max_adaptive_scale, self._adaptive_scale + 0.04)
-
-            # Reativa energia de exploração quando houver promoção curricular
-            primary_info = env_infos[0] if isinstance(env_infos, list) and len(env_infos) > 0 else (env_infos if isinstance(env_infos, dict) else {})
-            cur_promotions = primary_info.get("curriculum_promotions", 0)
-            if primary_info.get("curriculum_promoted", False) or cur_promotions > getattr(self, "_last_promotions", 0):
-                self._last_promotions = cur_promotions
-                self._adaptive_scale = max(self._adaptive_scale, 0.70)
-
-            self.exploration_scale = float(self._adaptive_scale)
+        self._update_adaptive_exploration(mean_return, env_infos)
 
         return current_obs_dict, current_hx, ep_starts, mean_return
+
+    def _update_adaptive_exploration(
+        self,
+        mean_return: float,
+        env_infos: Union[List[Dict[str, Any]], Dict[str, Any]],
+    ) -> None:
+        """Atualiza a escala de auto-calibração com base no momentum real de recompensa e platôs curriculares."""
+        if not self.is_auto_exploration:
+            return
+
+        primary_info = (
+            env_infos[0]
+            if isinstance(env_infos, list) and len(env_infos) > 0
+            else (env_infos if isinstance(env_infos, dict) else {})
+        )
+
+        cur_promotions = primary_info.get("curriculum_promotions", 0)
+        cur_promoted = primary_info.get("curriculum_promoted", False)
+        cur_success_rate = primary_info.get("curriculum_success_rate", None)
+
+        if self._reward_ema is None:
+            self._reward_ema = float(mean_return)
+            delta_ret = 0.0
+        else:
+            delta_ret = mean_return - self._reward_ema
+            self._reward_ema = 0.85 * self._reward_ema + 0.15 * mean_return
+
+        # Escala de referência relativa independente da magnitude absoluta de recompensa
+        scale_ref = max(1.0, abs(self._reward_ema))
+        # Progresso real: ganho de pelo menos 2.5% em relação à escala de retorno típica
+        is_progress = delta_ret > 0.025 * scale_ref
+
+        if cur_promoted or cur_promotions > getattr(self, "_last_promotions", 0):
+            # Promoção curricular: novo patamar requer exploração revigorada
+            self._last_promotions = cur_promotions
+            self._stagnation_count = 0
+            self._adaptive_scale = max(self._adaptive_scale, 0.75)
+        elif is_progress or (cur_success_rate is not None and cur_success_rate >= 0.80):
+            # Progresso consistente ou quase domínio do nível: consolida e refina política
+            self._stagnation_count = 0
+            self._adaptive_scale = max(self._min_adaptive_scale, self._adaptive_scale - 0.03)
+        else:
+            # Platô ou declínio de retorno: incrementa contagem e aquece exploração para escapar de mínimos locais
+            self._stagnation_count += 1
+            if self._stagnation_count >= 2:
+                self._adaptive_scale = min(self._max_adaptive_scale, self._adaptive_scale + 0.04)
+
+        self.exploration_scale = float(self._adaptive_scale)
 
     def collect_rollouts(
         self,
@@ -494,6 +525,7 @@ class RecurrentPPOTrainer:
 
         self.buffer.reset()
         self.agent.eval()
+        last_env_info: Dict[str, Any] = {}
 
         with torch.no_grad():
             for _ in range(self.rollout_steps):
@@ -572,6 +604,7 @@ class RecurrentPPOTrainer:
                 # Environment step
                 next_obs_dict, reward, terminated, truncated, env_info = self.env.step(env_action)
                 done = terminated or truncated
+                last_env_info = env_info
 
                 if self.tracker is not None:
                     self.tracker.record_env_step(reward=reward, done=done, info=env_info)
@@ -623,18 +656,7 @@ class RecurrentPPOTrainer:
             float(np.mean(self.episode_returns)) if len(self.episode_returns) > 0 else 0.0
         )
 
-        if self.is_auto_exploration:
-            delta_ret = mean_return - self._reward_ema
-            self._reward_ema = 0.85 * self._reward_ema + 0.15 * mean_return
-            if mean_return > 0.05 or delta_ret > 0.02:
-                self._stagnation_count = 0
-                self._adaptive_scale = max(self._min_adaptive_scale, self._adaptive_scale - 0.03)
-            else:
-                self._stagnation_count += 1
-                if self._stagnation_count >= 2:
-                    self._adaptive_scale = min(self._max_adaptive_scale, self._adaptive_scale + 0.04)
-
-            self.exploration_scale = float(self._adaptive_scale)
+        self._update_adaptive_exploration(mean_return, last_env_info)
 
         return current_obs_dict, current_hx, episode_start, mean_return
 

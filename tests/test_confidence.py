@@ -445,5 +445,59 @@ def test_ppo_auto_exploration_training():
     assert not np.isnan(cont_metrics["value_loss"])
 
 
+def test_ppo_adaptive_exploration_plateau_and_curriculum():
+    """Valida que a auto-calibração no PPO não trava em 0.40 em platôs de retorno constante,
+    aquece a exploração sob estagnação, resfria em ganhos reais e reativa em promoção curricular."""
+    import gymnasium as gym
+    from system1_engine.core.agent import UniversalS1Agent
+    from system1_engine.env.wrapper import UniversalS1Wrapper
+    from system1_engine.training.ppo import RecurrentPPOTrainer
 
+    raw_env = gym.make("CartPole-v1")
+    env = UniversalS1Wrapper(raw_env)
+    agent = UniversalS1Agent(obs_space=env.observation_space, action_space=env.action_space)
 
+    trainer = RecurrentPPOTrainer(
+        agent=agent,
+        env=env,
+        rollout_steps=16,
+        chunk_length=4,
+        chunk_batch_size=2,
+        exploration_scale="auto",
+    )
+    assert trainer.is_auto_exploration is True
+    assert trainer._adaptive_scale == 0.80
+
+    # 1. Primeiro rollout com retorno de 4.0 (inicializa EMA sem salto artificial)
+    trainer._update_adaptive_exploration(mean_return=4.0, env_infos={})
+    assert trainer._reward_ema == 4.0
+
+    # 2. Platô: múltiplos rollouts mantendo 4.0 (retorno constante positivo)
+    # A implementação antiga travava em 0.40 porque 4.0 > 0.05.
+    # Agora ela deve detectar platô (delta_ret = 0.0) e AQUECER a exploração!
+    initial_scale = trainer._adaptive_scale
+    for _ in range(4):
+        trainer._update_adaptive_exploration(mean_return=4.0, env_infos={})
+
+    assert trainer._stagnation_count >= 2
+    assert trainer._adaptive_scale > initial_scale, (
+        f"A escala deveria ter aumentado sob platô, obtido {trainer._adaptive_scale}"
+    )
+
+    # 3. Salto de progresso: retorno sobe de 4.0 para 6.0 (+50% de ganho relativo)
+    trainer._update_adaptive_exploration(mean_return=6.0, env_infos={})
+    assert trainer._stagnation_count == 0
+    # Sob progresso comprovado, a escala de exploração refina e resfria
+    scale_after_progress = trainer._adaptive_scale
+    assert scale_after_progress < trainer._max_adaptive_scale
+
+    # 4. Promoção curricular: simula evento de promoção no env_info
+    trainer._adaptive_scale = 0.45  # simula escala fria
+    trainer._update_adaptive_exploration(
+        mean_return=6.0,
+        env_infos={"curriculum_promoted": True, "curriculum_promotions": 1},
+    )
+    assert trainer._adaptive_scale >= 0.75, (
+        f"Promoção curricular deveria reativar escala para >= 0.75, obtido {trainer._adaptive_scale}"
+    )
+    assert trainer._stagnation_count == 0

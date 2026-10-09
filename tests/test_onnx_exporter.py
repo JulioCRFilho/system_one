@@ -9,7 +9,7 @@ import pytest
 import torch
 
 from system1_engine.core.agent import UniversalS1Agent
-from system1_engine.core.onnx_exporter import auto_sync_web_model, resolve_web_model_filename
+from system1_engine.core.onnx_exporter import auto_sync_web_model, resolve_web_model_filename, generate_web_manifest
 from system1_engine.env.wrapper import UniversalS1Wrapper
 from system1_engine.transfer.manager import KnowledgeTransferManager
 
@@ -72,5 +72,6 @@ def test_auto_sync_web_model_vector():
         try:
             if os.path.exists(result):
                 os.remove(result)
+            generate_web_manifest()
         except OSError:
             pass
