@@ -234,31 +234,6 @@
           </div>
         </div>
 
-        <!-- ACESSO RÁPIDO: CUBO MÁGICO 3X3 (SYSTEM 1) -->
-        <div class="bg-gradient-to-br from-amber-950/50 via-purple-950/40 to-cyan-950/40 p-2.5 rounded-lg border border-amber-500/50 flex flex-col gap-2 shadow-sm">
-          <div class="flex items-center justify-between">
-            <span class="text-[11px] font-bold text-amber-300 flex items-center gap-1.5">
-              <span>🎲</span> Treino Rápido: Cubo Mágico 3x3
-            </span>
-            <span class="text-[9px] px-1.5 py-0.5 rounded bg-amber-900/70 text-amber-200 border border-amber-600/70 font-mono">CFOP / Macro</span>
-          </div>
-          <p class="text-[10px] text-gray-300 leading-tight">
-            Treine reflexos com 12 macro-ações de speedcubing ou giros atômicos com visualização 2D Net ao vivo no viewport.
-          </p>
-          <div class="grid grid-cols-2 gap-1.5">
-            <button type="button" onclick="quickLaunchRubiks('macro', 'train')" class="py-1.5 px-2 text-[10px] font-bold rounded bg-amber-600 hover:bg-amber-500 text-white border border-amber-400 transition flex items-center justify-center gap-1 cursor-pointer shadow-sm">
-              <span>⚡</span> Treinar Macro (CFOP)
-            </button>
-            <button type="button" onclick="quickLaunchRubiks('macro', 'run')" class="py-1.5 px-2 text-[10px] font-bold rounded bg-purple-700 hover:bg-purple-600 text-white border border-purple-400 transition flex items-center justify-center gap-1 cursor-pointer shadow-sm">
-              <span>▶</span> Avaliar Cubo
-            </button>
-          </div>
-          <div class="flex items-center justify-between text-[9px] text-gray-400 font-mono pt-0.5 border-t border-gray-800/80">
-            <button type="button" onclick="quickLaunchRubiks('atomic', 'train')" class="text-gray-400 hover:text-amber-300 underline cursor-pointer">Modo Atômico (12 Giros)</button>
-            <a href="/web/?env=rubiks_atomic" target="_blank" class="text-cyan-400 hover:text-cyan-300 underline cursor-pointer flex items-center gap-0.5">🌐 Ver no Web HUD ↗</a>
-          </div>
-        </div>
-
         <!-- Ambiente e Cenário -->
         <div>
           <div class="flex items-center justify-between mb-1">
@@ -279,13 +254,13 @@
             </div>
           </div>
           <select id="cfg-env" class="hud-input mb-1.5" onchange="onEnvChange()">
-            <option value="RubiksCubeMacro-v0">🎲 Cubo Mágico: Macro-Ações (CFOP / 12 Algoritmos)</option>
-            <option value="RubiksCube-v0">🎲 Cubo Mágico: Atômico (12 Giros Simples)</option>
             <option value="CartPole-v1">CartPole-v1 (Vetor, 4D, 2 Ações)</option>
             <option value="Acrobot-v1">Acrobot-v1 (Vetor, 6D, 3 Ações)</option>
             <option value="Pendulum-v1">Pendulum-v1 (Vetor, Contínuo Box)</option>
             <option value="MountainCar-v0">MountainCar-v0 (Vetor, 2D)</option>
             <option value="Ant-v5">🐜 Ant-v5 (MuJoCo, 105D, 8 Ações Contínuas)</option>
+            <option value="RubiksCube-v0">Cubo Mágico: Atômico (12 Giros Simples)</option>
+            <option value="RubiksCubeMacro-v0">Cubo Mágico: Macro-Ações (CFOP / 12 Algoritmos)</option>
             <option value="vizdoom">ViZDoom (Nativo / Visual IMPALA)</option>
             <option value="custom">Outro (Customizado Gymnasium...)</option>
           </select>
@@ -402,19 +377,21 @@
             <div id="load-compat-warning" class="hidden"></div>
           </div>
 
-          <!-- TRANSFERÊNCIA DE PESOS (--transfer-from & --freeze-trunk) - Modo Treino -->
+          <!-- CARREGAMENTO DE CHECKPOINT / TRANSFERÊNCIA (--load / --transfer-from) - Modo Treino -->
           <div id="group-transfer" class="bg-[#0b101c] p-2 rounded border border-gray-800/80 flex flex-col gap-2">
             <div>
               <div class="flex items-center gap-1.5 mb-1">
-                <label class="text-[11px] text-purple-400 font-semibold">Transferir Tronco (--transfer-from)</label>
+                <label class="text-[11px] text-purple-400 font-semibold">Checkpoint Base / Transferência</label>
                 <span class="tooltip-wrap tooltip-down tooltip-left">
-                  <span class="tooltip-icon" title="Checkpoint doador para transfer learning: reutiliza o tronco e treina apenas novas cabeças.">ⓘ</span>
-                  <span class="tooltip-bubble"><strong>--transfer-from</strong>: Aprendizado por transferência.<br>Carrega os pesos do tronco (IMPALA ou MLP) de outro ambiente previamente treinado, adaptando o agente a uma nova tarefa com maior velocidade de convergência.</span>
+                  <span class="tooltip-icon" title="Checkpoint para warm-start (mesmo ambiente) ou transferência de tronco (cross-domain).">ⓘ</span>
+                  <span class="tooltip-bubble"><strong>Checkpoint Base no Treino</strong>:<br>• <strong>Mesmo Ambiente</strong>: Restaura 100% dos parâmetros (percepção, tronco, política e valor) para continuar o treino sem regredir.<br>• <strong>Outro Ambiente</strong>: Transfere exclusivamente os 18 tensores do tronco universal reflexivo.</span>
                 </span>
               </div>
-              <select id="cfg-transfer" class="hud-input">
+              <select id="cfg-transfer" class="hud-input" onchange="onTransferCheckpointChange()">
                 <option value="">Nenhum (Treinar do zero)</option>
               </select>
+              <div id="transfer-meta" class="text-[10px] text-gray-400 font-mono italic mt-1">Nenhum checkpoint selecionado (treinar do zero).</div>
+              <div id="transfer-status-box" class="hidden mt-1.5"></div>
             </div>
             <div class="flex items-center justify-between border-t border-gray-800/80 pt-1.5 px-0.5">
               <div class="flex flex-col">
@@ -428,6 +405,13 @@
                 <span id="freeze-desc" class="text-[9px] text-amber-400">Fine-Tuning Ativo (Trunk adaptativo livre)</span>
               </div>
               <input type="checkbox" id="cfg-freeze-trunk" onchange="onFreezeTrunkChange()" class="w-4 h-4 rounded bg-gray-900 border-gray-700 text-purple-500 focus:ring-0" />
+            </div>
+            <div class="flex items-center justify-between border-t border-gray-800/80 pt-1 px-0.5">
+              <div class="flex flex-col">
+                <span class="text-[10px] text-gray-400">Apenas Tronco (Descartar cabeças)</span>
+                <span class="text-[9px] text-gray-500">Força reinício da política com pesos aleatórios</span>
+              </div>
+              <input type="checkbox" id="cfg-force-trunk-only" class="w-4 h-4 rounded bg-gray-900 border-gray-700 text-amber-500 focus:ring-0" />
             </div>
 
           </div>
@@ -1457,6 +1441,9 @@
 
       suggestCheckpointName();
       validateCheckpointCompatibility();
+      if (typeof onTransferCheckpointChange === 'function') {
+        onTransferCheckpointChange();
+      }
     }
 
     function setScrambleDepthInput(val) {
@@ -1466,34 +1453,7 @@
       }
     }
 
-    function quickLaunchRubiks(type, mode) {
-      const envId = type === 'macro' ? 'RubiksCubeMacro-v0' : 'RubiksCube-v0';
-      const envSel = document.getElementById('cfg-env');
-      if (envSel) {
-        envSel.value = envId;
-        onEnvChange();
-      }
-      const scrambleInp = document.getElementById('cfg-scramble-depth');
-      if (scrambleInp && (!scrambleInp.value || parseInt(scrambleInp.value, 10) <= 0)) {
-        scrambleInp.value = type === 'macro' ? '2' : '3';
-      }
-      setMode(mode);
 
-      if (mode === 'run') {
-        // Tenta auto-selecionar o checkpoint do cubo mágico se disponível
-        const chkSelect = document.getElementById('cfg-checkpoint-select');
-        if (chkSelect && chkSelect.options.length > 0) {
-          for (let i = 0; i < chkSelect.options.length; i++) {
-            const optVal = chkSelect.options[i].value.toLowerCase();
-            if (optVal.includes('rubiks')) {
-              chkSelect.selectedIndex = i;
-              onCheckpointSelectChange();
-              break;
-            }
-          }
-        }
-      }
-    }
 
     function onCustomEnvInput() {
       onEnvChange();
@@ -1742,12 +1702,13 @@
     function switchToTransfer(path) {
       setMode('train');
       document.getElementById('cfg-transfer').value = path;
-      document.getElementById('cfg-freeze-trunk').checked = false;
-      onFreezeTrunkChange();
+      onTransferCheckpointChange();
     }
 
     function onFreezeTrunkChange() {
-      const frozen = document.getElementById('cfg-freeze-trunk').checked;
+      const freezeEl = document.getElementById('cfg-freeze-trunk');
+      freezeEl.dataset.manuallyToggled = 'true';
+      const frozen = freezeEl.checked;
       const descEl = document.getElementById('freeze-desc');
       if (frozen) {
         descEl.innerText = 'Trunk Congelado (Apenas cabeças aprendem)';
@@ -1755,6 +1716,89 @@
       } else {
         descEl.innerText = 'Fine-Tuning Ativo (Trunk adaptativo livre)';
         descEl.className = 'text-[9px] text-amber-400';
+      }
+    }
+
+    function onTransferCheckpointChange() {
+      const transEl = document.getElementById('cfg-transfer');
+      if (!transEl) return;
+      const val = transEl.value;
+      const metaEl = document.getElementById('transfer-meta');
+      const boxEl = document.getElementById('transfer-status-box');
+      const freezeEl = document.getElementById('cfg-freeze-trunk');
+      const forceTrunkEl = document.getElementById('cfg-force-trunk-only');
+
+      if (!val) {
+        if (metaEl) metaEl.innerText = 'Nenhum checkpoint selecionado (treinar do zero).';
+        if (boxEl) {
+          boxEl.className = 'hidden';
+          boxEl.innerHTML = '';
+        }
+        return;
+      }
+
+      const item = availableCheckpointsDetailed.find(c => c.path === val);
+      if (!item) {
+        if (metaEl) metaEl.innerText = val;
+        if (boxEl) boxEl.className = 'hidden';
+        return;
+      }
+
+      const envInfo = item.env_id ? `Env: ${item.env_id}` : 'Env: não registrado';
+      const dimInfo = (item.obs_dim && item.act_dim) ? ` • ${item.obs_dim}D obs / ${item.act_dim} ações` : '';
+      const retInfo = (item.final_return !== null && item.final_return !== undefined) ? ` • Retorno: ${item.final_return.toFixed(1)}` : '';
+      if (metaEl) metaEl.innerText = `${envInfo}${dimInfo}${retInfo}`;
+
+      const currentEnv = document.getElementById('cfg-env').value;
+      const actualEnv = currentEnv === 'custom' ? (document.getElementById('cfg-custom-env').value || '') : currentEnv;
+
+      const isSameEnv = item.env_id && actualEnv && (
+        item.env_id.toLowerCase().replace(/[-_]/g, '') === actualEnv.toLowerCase().replace(/[-_]/g, '') ||
+        (item.env_id.toLowerCase().includes('rubik') && actualEnv.toLowerCase().includes('rubik'))
+      );
+
+      if (boxEl) {
+        boxEl.classList.remove('hidden');
+        if (isSameEnv) {
+          boxEl.className = 'mt-1.5 p-2 rounded bg-emerald-950/70 border border-emerald-600/80 text-[10px] text-emerald-200 flex flex-col gap-1';
+          const retStr = (item.final_return !== null && item.final_return !== undefined) ? item.final_return.toFixed(1) : '8.5+';
+          boxEl.innerHTML = `
+            <div class="flex items-center gap-1 font-bold text-emerald-300">
+              <span>🚀 Warm-Start Compatível (Mesmo Ambiente)</span>
+            </div>
+            <div>
+              Restaura <strong>100% dos parâmetros</strong> (percepção, tronco, política e valor).
+              O agente continuará com o conhecimento prévio de retorno <strong>${retStr}</strong> e avançará de nível no currículo sem regredir!
+            </div>
+          `;
+          if (freezeEl && !freezeEl.dataset.manuallyToggled) {
+            freezeEl.checked = false;
+            const descEl = document.getElementById('freeze-desc');
+            if (descEl) {
+              descEl.innerText = 'Fine-Tuning Ativo (Trunk e cabeças adaptativos livres)';
+              descEl.className = 'text-[9px] text-emerald-400';
+            }
+          }
+        } else {
+          boxEl.className = 'mt-1.5 p-2 rounded bg-purple-950/70 border border-purple-600/80 text-[10px] text-purple-200 flex flex-col gap-1';
+          boxEl.innerHTML = `
+            <div class="flex items-center gap-1 font-bold text-purple-300">
+              <span>🔄 Transferência Cross-Domain</span>
+            </div>
+            <div>
+              Checkpoint de <strong>${item.env_id || 'outro ambiente'}</strong> para <strong>${actualEnv}</strong>.
+              Apenas os <strong>18 tensores do Tronco Reflexivo</strong> serão transferidos; novas cabeças serão treinadas.
+            </div>
+          `;
+          if (freezeEl && !freezeEl.dataset.manuallyToggled) {
+            freezeEl.checked = true;
+            const descEl = document.getElementById('freeze-desc');
+            if (descEl) {
+              descEl.innerText = 'Trunk Congelado (0% de esquecimento catastrófico)';
+              descEl.className = 'text-[9px] text-purple-400';
+            }
+          }
+        }
       }
     }
 
@@ -2101,6 +2145,7 @@
       if (availableCheckpoints.includes(curTrans)) transSel.value = curTrans;
 
       onLoadCheckpointChange();
+      onTransferCheckpointChange();
     }
 
     function renderCheckpointsTable() {
@@ -2113,6 +2158,9 @@
         return;
       }
 
+      const currentEnv = document.getElementById('cfg-env').value;
+      const actualEnv = currentEnv === 'custom' ? (document.getElementById('cfg-custom-env').value || '') : currentEnv;
+
       cont.innerHTML = '';
       availableCheckpointsDetailed.forEach(item => {
         const div = document.createElement('div');
@@ -2120,6 +2168,14 @@
         const envBadge = item.env_id ? `<span class="px-1 py-0.2 rounded bg-cyan-950 text-cyan-400 text-[9px] border border-cyan-800 font-bold">${item.env_id}</span>` : '';
         const dimBadge = (item.obs_dim && item.act_dim) ? `<span class="text-[9px] text-gray-400 font-mono">${item.obs_dim}D obs • ${item.act_dim} ações</span>` : '';
         const retBadge = item.final_return !== null && item.final_return !== undefined ? `<span class="text-[9px] text-emerald-400 font-bold">Retorno: ${item.final_return.toFixed(1)}</span>` : '';
+
+        const isSameEnv = item.env_id && actualEnv && (
+          item.env_id.toLowerCase().replace(/[-_]/g, '') === actualEnv.toLowerCase().replace(/[-_]/g, '') ||
+          (item.env_id.toLowerCase().includes('rubik') && actualEnv.toLowerCase().includes('rubik'))
+        );
+        const trainBtnLabel = isSameEnv ? 'Continuar Treino' : 'Transfer';
+        const trainBtnClass = isSameEnv ? 'badge-btn bg-emerald-950 text-emerald-300 border border-emerald-700 font-semibold' : 'badge-btn';
+
         div.innerHTML = `
           <div class="flex flex-col min-w-0 pr-2 gap-0.5">
             <div class="flex items-center gap-1.5 flex-wrap">
@@ -2136,7 +2192,7 @@
           </div>
           <div class="flex gap-1 flex-shrink-0">
             <button type="button" onclick="selectCheckpointForEval('${item.path}')" class="badge-btn">Avaliar</button>
-            <button type="button" onclick="selectCheckpointForTransfer('${item.path}')" class="badge-btn">Transfer</button>
+            <button type="button" onclick="selectCheckpointForTransfer('${item.path}')" class="${trainBtnClass}">${trainBtnLabel}</button>
           </div>
         `;
         cont.appendChild(div);
@@ -2165,8 +2221,7 @@
     function selectCheckpointForTransfer(path) {
       setMode('train');
       document.getElementById('cfg-transfer').value = path;
-      document.getElementById('cfg-freeze-trunk').checked = false;
-      onFreezeTrunkChange();
+      onTransferCheckpointChange();
     }
 
 
@@ -2228,6 +2283,7 @@
         load: document.getElementById('cfg-load').value || null,
         transfer_from: document.getElementById('cfg-transfer').value || null,
         freeze_trunk: document.getElementById('cfg-freeze-trunk').checked,
+        force_trunk_only: document.getElementById('cfg-force-trunk-only') ? document.getElementById('cfg-force-trunk-only').checked : false,
         save: (activeMode === 'train' && saveEnabled && saveFile) ? saveFile : null,
         auto_sync_web: document.getElementById('chk-auto-sync-web') ? document.getElementById('chk-auto-sync-web').checked : true,
         render_mode: document.getElementById('cfg-render-mode').value,

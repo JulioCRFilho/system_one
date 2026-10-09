@@ -132,14 +132,15 @@ def train_mode(args: argparse.Namespace) -> None:
         action_space=env.action_space,
     )
 
-    if args.transfer_from:
-        print(f"Transferring trunk weights from: {args.transfer_from}")
-        loaded = KnowledgeTransferManager.load_transferable_weights(
+    checkpoint_to_load = getattr(args, "load", None) or getattr(args, "transfer_from", None)
+    if checkpoint_to_load:
+        res = KnowledgeTransferManager.load_for_training(
             agent=agent,
-            checkpoint_path=args.transfer_from,
+            checkpoint_path=checkpoint_to_load,
             freeze_trunk=args.freeze_trunk,
+            force_trunk_only=getattr(args, "force_trunk_only", False),
         )
-        print(f"Loaded {len(loaded)} trunk parameters. Trunk frozen: {args.freeze_trunk}")
+        print(f"Treino iniciado a partir de checkpoint ({res['mode']}): {res['total_params']} tensores ativos. Tronco congelado: {res['trunk_frozen']}")
 
     need_tracker = args.live_stats or args.web_panel
     tracker = LiveStatsTracker() if need_tracker else None
@@ -430,18 +431,31 @@ def main() -> None:
     )
     parser.add_argument("--steps", type=int, default=40000, help="Training steps or benchmark steps")
     parser.add_argument("--save", type=str, default=None, help="Path to save checkpoint (default: None)")
-    parser.add_argument("--load", type=str, default=None, help="Path to load checkpoint for run mode")
+    parser.add_argument(
+        "--load",
+        type=str,
+        default=None,
+        help="Path to load checkpoint for run/benchmark mode or for continual training / fine-tuning in train mode",
+    )
     parser.add_argument(
         "--transfer-from",
         type=str,
         default=None,
-        help="Path to load transferable trunk weights for cross-scenario transfer",
+        help="Path to load transferable trunk weights for cross-scenario transfer or training warm-start",
+    )
+    parser.add_argument(
+        "--force-trunk-only",
+        "--trunk-only",
+        action="store_true",
+        default=False,
+        dest="force_trunk_only",
+        help="Force loading only trunk parameters during training even if heads are compatible (default: False)",
     )
     parser.add_argument(
         "--freeze-trunk",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Freeze trunk parameters during transfer (use --no-freeze-trunk to fine-tune the trunk)",
+        default=None,
+        help="Freeze trunk parameters during transfer or warm-start (default: True for cross-domain, False for warm-start)",
     )
     parser.add_argument("--entropy-coef", type=float, default=0.005, help="Entropy coefficient for PPO exploration (default: 0.005)")
     parser.add_argument(

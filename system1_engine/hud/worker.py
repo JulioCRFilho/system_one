@@ -320,16 +320,19 @@ def run_worker_train(config: Dict[str, Any], hud_client: HUDClient) -> None:
     chunk_length = int(config.get("chunk_length", 16))
     chunk_batch_size = int(config.get("chunk_batch_size", 16))
     save_path = config.get("save")
+    load_path = config.get("load")
     transfer_from = config.get("transfer_from")
-    freeze_trunk = bool(config.get("freeze_trunk", True))
+    checkpoint_to_load = load_path or transfer_from
+    freeze_trunk_cfg = config.get("freeze_trunk")
+    force_trunk_only = bool(config.get("force_trunk_only", False))
 
     device = resolve_compute_device(device_pref, is_training=True)
 
     print(f"=== [HUD Worker] Modo de Treino Iniciado no Ambiente: {env_id} ===")
     print(f"Dispositivo de Execução: {device.type.upper()} (Preferência: {device_pref})")
     print(f"Configuração: steps={steps}, lr={lr}, entropy_coef={entropy_coef}, target_return={target_return}")
-    if transfer_from:
-        print(f"Transferência de pesos ativa a partir de: {transfer_from} (freeze_trunk={freeze_trunk})")
+    if checkpoint_to_load:
+        print(f"Carregamento de pesos para treino a partir de: {checkpoint_to_load}")
 
     scramble_depth = config.get("scramble_depth")
     if scramble_depth is not None:
@@ -357,13 +360,14 @@ def run_worker_train(config: Dict[str, Any], hud_client: HUDClient) -> None:
         action_space=env.action_space,
     )
 
-    if transfer_from:
-        loaded = KnowledgeTransferManager.load_transferable_weights(
+    if checkpoint_to_load:
+        res = KnowledgeTransferManager.load_for_training(
             agent=agent,
-            checkpoint_path=transfer_from,
-            freeze_trunk=freeze_trunk,
+            checkpoint_path=checkpoint_to_load,
+            freeze_trunk=freeze_trunk_cfg,
+            force_trunk_only=force_trunk_only,
         )
-        print(f"Trunk transferido com sucesso: {len(loaded)} parâmetros carregados.")
+        print(f"Pesos de treino carregados ({res['mode']}): {res['total_params']} parâmetros ativos. Trunk congelado: {res['trunk_frozen']}")
 
     tracker = LiveStatsTracker()
     last_telemetry_ts = 0.0

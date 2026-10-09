@@ -113,3 +113,81 @@ def test_checkpoint_inspection_and_evaluation_compatibility(tmp_path):
     # 5. But evaluating it on an Acrobot agent must return None (compatible!)
     err_compat = KnowledgeTransferManager.validate_evaluation_compatibility(acro_agent, state_dict, "Acrobot-v1", acro_path)
     assert err_compat is None
+
+
+def test_load_for_training_warm_start(tmp_path):
+    """Ensure load_for_training restores full model (warm-start) when architecture matches, preserving policy head."""
+    cart_env = UniversalS1Wrapper(gym.make("CartPole-v1"))
+    agent_source = UniversalS1Agent(cart_env.env.observation_space, cart_env.action_space)
+
+    ckpt_path = str(tmp_path / "cart_source.pt")
+    KnowledgeTransferManager.save_checkpoint(agent_source, ckpt_path)
+
+    # Create target agent with identical specs
+    agent_target = UniversalS1Agent(cart_env.env.observation_space, cart_env.action_space)
+
+    # Verify initial weights differ before loading
+    initial_phead_diff = torch.max(
+        torch.abs(agent_target.policy_head.linear.weight - agent_source.policy_head.linear.weight)
+    ).item()
+    assert initial_phead_diff > 0.0
+
+    # Load for training with default settings
+    res = KnowledgeTransferManager.load_for_training(agent_target, ckpt_path)
+    assert res["mode"] == "warm_start"
+    assert res["trunk_frozen"] is False
+    assert res["total_params"] == len(agent_target.state_dict())
+
+    # Verify policy head was loaded identically (knowledge preserved!)
+    phead_diff = torch.max(
+        torch.abs(agent_target.policy_head.linear.weight - agent_source.policy_head.linear.weight)
+    ).item()
+    assert phead_diff == 0.0
+
+    # Verify all parameters remain trainable for fine-tuning
+    for param in agent_target.parameters():
+        assert param.requires_grad
+
+
+def test_load_for_training_cross_domain_fallback(tmp_path):
+    """Ensure load_for_training falls back to trunk-only transfer when shapes mismatch."""
+    cart_env = UniversalS1Wrapper(gym.make("CartPole-v1"))
+    cart_agent = UniversalS1Agent(cart_env.env.observation_space, cart_env.action_space)
+    cart_path = str(tmp_path / "cart.pt")
+    KnowledgeTransferManager.save_checkpoint(cart_agent, cart_path)
+
+    acro_env = UniversalS1Wrapper(gym.make("Acrobot-v1"))
+    acro_agent = UniversalS1Agent(acro_env.env.observation_space, acro_env.action_space)
+
+    # Acrobot has different obs_dim (6 vs 4) and act_dim (3 vs 2)
+    res = KnowledgeTransferManager.load_for_training(acro_agent, cart_path)
+    assert res["mode"] == "cross_domain"
+    assert res["trunk_frozen"] is True
+
+    # Verify trunk is frozen and heads are trainable
+    for param in acro_agent.trunk.parameters():
+        assert not param.requires_grad
+    for param in acro_agent.policy_head.parameters():
+        assert param.requires_grad
+    for param in acro_agent.front_end.parameters():
+        assert param.requires_grad
+
+
+def test_load_for_training_force_trunk_only(tmp_path):
+    """Ensure force_trunk_only=True bypasses warm-start and loads only trunk even if shapes match."""
+    cart_env = UniversalS1Wrapper(gym.make("CartPole-v1"))
+    cart_agent = UniversalS1Agent(cart_env.env.observation_space, cart_env.action_space)
+    cart_path = str(tmp_path / "cart_force.pt")
+    KnowledgeTransferManager.save_checkpoint(cart_agent, cart_path)
+
+    agent_target = UniversalS1Agent(cart_env.env.observation_space, cart_env.action_space)
+    target_phead_before = agent_target.policy_head.linear.weight.detach().clone()
+
+    res = KnowledgeTransferManager.load_for_training(agent_target, cart_path, force_trunk_only=True, freeze_trunk=True)
+    assert res["mode"] == "cross_domain"
+    assert res["trunk_frozen"] is True
+
+    # Policy head must NOT have been overwritten by source checkpoint
+    diff = torch.max(torch.abs(agent_target.policy_head.linear.weight - target_phead_before)).item()
+    assert diff == 0.0
+

@@ -88,6 +88,131 @@ class KnowledgeTransferManager:
         return loaded_keys
 
     @staticmethod
+    def load_for_training(
+        agent: Any,
+        checkpoint_path: str,
+        freeze_trunk: Optional[bool] = None,
+        force_trunk_only: bool = False,
+    ) -> Dict[str, Any]:
+        """Loads weights for training, intelligently distinguishing between Continual Fine-Tuning (Warm-Start)
+        and Cross-Domain Trunk Transfer.
+
+        If all parameter shapes (front_end, trunk, policy_head, value_head) match the agent's architecture
+        and force_trunk_only is False:
+            -> Warm-Start / Continual Training: loads FULL model weights.
+            -> Preserves policy and value heads so the agent does not lose learned skills.
+            -> Default for freeze_trunk is False (free continual adaptation).
+
+        If parameter shapes do not match (e.g. cross-domain from CartPole to Rubiks) or force_trunk_only is True:
+            -> Cross-Domain Transfer: loads exclusively the 18 trunk tensors.
+            -> New heads are initialized to learn the new environment from scratch.
+            -> Default for freeze_trunk is True (protects learned representations from catastrophic forgetting).
+
+        Args:
+            agent: The UniversalS1Agent instance.
+            checkpoint_path: Path to .pt checkpoint file.
+            freeze_trunk: Optional boolean. If None:
+                - For warm-start: defaults to False (full model fine-tuning).
+                - For cross-domain: defaults to True (prevent catastrophic forgetting of shared trunk).
+            force_trunk_only: If True, only loads trunk parameters even if heads are compatible.
+
+        Returns:
+            Dict containing:
+                "mode": "warm_start" | "cross_domain"
+                "loaded_keys": List[str]
+                "trunk_frozen": bool
+                "total_params": int
+        """
+        assert os.path.exists(checkpoint_path), f"Checkpoint not found: {checkpoint_path}"
+        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+
+        if isinstance(checkpoint, dict) and "state_dict" in checkpoint:
+            raw_state_dict = checkpoint["state_dict"]
+        elif isinstance(checkpoint, dict):
+            raw_state_dict = checkpoint
+        else:
+            raise ValueError(f"Unrecognized checkpoint format at {checkpoint_path}")
+
+        agent_dict = agent.state_dict()
+
+        # Check compatibility of all agent keys present in checkpoint
+        mismatched_keys: List[str] = []
+        matching_keys: List[str] = []
+        for k, target_param in agent_dict.items():
+            if k in raw_state_dict and isinstance(raw_state_dict[k], torch.Tensor):
+                if raw_state_dict[k].shape == target_param.shape:
+                    matching_keys.append(k)
+                else:
+                    mismatched_keys.append(k)
+            else:
+                mismatched_keys.append(k)
+
+        # Check if heads and front_end specifically match
+        has_matching_policy = any(k.startswith("policy_head.") for k in matching_keys)
+        has_matching_front = any(k.startswith("front_end.") for k in matching_keys)
+        has_head_mismatch = any(k.startswith(("policy_head.", "front_end.", "value_head.")) for k in mismatched_keys)
+
+        heads_and_frontend_match = has_matching_policy and has_matching_front and not has_head_mismatch
+        is_warm_start = heads_and_frontend_match and not force_trunk_only
+
+        if is_warm_start:
+            # Continual Training / Warm-Start
+            eff_freeze_trunk = False if freeze_trunk is None else bool(freeze_trunk)
+            agent.load_state_dict(raw_state_dict, strict=False)
+
+            if eff_freeze_trunk:
+                for param in agent.trunk.parameters():
+                    param.requires_grad = False
+            else:
+                for param in agent.parameters():
+                    param.requires_grad = True
+
+            print(f"\n{'='*72}")
+            print(f"🚀 [Warm-Start / Continual Training Ativo]")
+            print(f"   Arquivo: {checkpoint_path}")
+            print(f"   Compatibilidade: 100% dos parâmetros compatíveis ({len(matching_keys)}/{len(agent_dict)} tensores)")
+            print(f"   -> Política, Valor e Percepção RESTAURADOS com sucesso!")
+            print(f"   -> Tronco: {'CONGELADO' if eff_freeze_trunk else 'LIVRE PARA FINE-TUNING'}")
+            print(f"{'='*72}\n")
+
+            return {
+                "mode": "warm_start",
+                "loaded_keys": matching_keys,
+                "trunk_frozen": eff_freeze_trunk,
+                "total_params": len(matching_keys),
+            }
+        else:
+            # Cross-Domain Transfer or Forced Trunk Only
+            eff_freeze_trunk = True if freeze_trunk is None else bool(freeze_trunk)
+            loaded_trunk_keys = KnowledgeTransferManager.load_transferable_weights(
+                agent=agent,
+                checkpoint_path=checkpoint_path,
+                freeze_trunk=eff_freeze_trunk,
+            )
+
+            # Ensure newly initialized heads and front_end are trainable
+            for name, param in agent.named_parameters():
+                if not name.startswith("trunk."):
+                    param.requires_grad = True
+
+            reason = "Opção force_trunk_only ativada" if force_trunk_only else "Dimensões de observação/ação incompatíveis com o checkpoint"
+            print(f"\n{'='*72}")
+            print(f"🔄 [Transferência Cross-Domain Ativa]")
+            print(f"   Arquivo: {checkpoint_path}")
+            print(f"   Motivo: {reason}")
+            print(f"   -> Apenas os {len(loaded_trunk_keys)} tensores do Tronco Reflexivo foram restaurados.")
+            print(f"   -> Novas cabeças de Percepção e Política inicializadas para aprender o novo domínio.")
+            print(f"   -> Tronco: {'CONGELADO (0% de esquecimento catastrófico)' if eff_freeze_trunk else 'LIVRE'}")
+            print(f"{'='*72}\n")
+
+            return {
+                "mode": "cross_domain",
+                "loaded_keys": loaded_trunk_keys,
+                "trunk_frozen": eff_freeze_trunk,
+                "total_params": len(loaded_trunk_keys),
+            }
+
+    @staticmethod
     def inspect_checkpoint(checkpoint_path: str) -> Dict[str, Any]:
         """Inspects a checkpoint and extracts metadata including environment, observation and action dimensions."""
         if not os.path.exists(checkpoint_path):
