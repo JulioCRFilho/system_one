@@ -197,7 +197,7 @@
     <!-- Quick KPIs -->
     <div class="flex flex-wrap items-center gap-4 text-xs bg-gray-900/80 px-4 py-1.5 rounded border border-gray-800">
       <div>FPS Simulação: <span id="kpi-fps" class="font-bold text-green-400">0.0</span></div>
-      <div>Passos: <span id="kpi-steps" class="font-bold text-yellow-400">0</span></div>
+      <div><span id="kpi-steps-label">Passos</span>: <span id="kpi-steps" class="font-bold text-yellow-400" title="Progresso da meta de passos">0.0%</span></div>
       <div>Pico: <span id="kpi-return" class="font-bold text-cyan-400" title="Maior pontuação alcançada em um único episódio">0.00</span></div>
       <div>Latência P50: <span id="kpi-latency" class="font-bold text-pink-400">0.0 µs</span></div>
       <div>Confiança: <span id="kpi-confidence" class="font-bold text-emerald-400">0.0%</span></div>
@@ -1376,6 +1376,11 @@
         document.getElementById('cfg-fps').value = 50;
       }
 
+      const elemLabel = document.getElementById('kpi-steps-label');
+      if (elemLabel) {
+        elemLabel.innerText = (mode === 'run') ? 'Episódios' : 'Passos';
+      }
+
       suggestCheckpointName();
       validateCheckpointCompatibility();
     }
@@ -1942,7 +1947,11 @@
         chartGrads.data.datasets[0].data = [0, 0, 0];
         chartGrads.update('none');
       } catch (e) {}
-      document.getElementById('kpi-steps').innerText = '0';
+      const elemSteps = document.getElementById('kpi-steps');
+      if (elemSteps) {
+        elemSteps.innerText = '0.0%';
+        elemSteps.title = 'Progresso zerado';
+      }
       document.getElementById('kpi-return').innerText = '0.00';
       document.getElementById('kpi-latency').innerText = '0.0 µs';
       document.getElementById('kpi-confidence').innerText = '0.0%';
@@ -2038,7 +2047,39 @@
         if (telemetry) {
           document.getElementById('kpi-fps').innerText = (telemetry.fps || 0).toFixed(1);
           document.getElementById('overlay-fps').innerText = (telemetry.fps || 0).toFixed(1) + ' FPS';
-          document.getElementById('kpi-steps').innerText = (telemetry.total_steps || 0).toLocaleString();
+          // Percentual de progresso em relação à meta
+          const runCfg = (runner && runner.config) ? runner.config : null;
+          const isRunMode = runCfg ? (runCfg.mode === 'run') : (activeMode === 'run');
+          const elemSteps = document.getElementById('kpi-steps');
+          const elemLabel = document.getElementById('kpi-steps-label');
+          if (elemLabel) {
+            elemLabel.innerText = isRunMode ? 'Episódios' : 'Passos';
+          }
+          if (elemSteps) {
+            if (isRunMode) {
+              const targetEps = (runCfg && runCfg.episodes) ? parseInt(runCfg.episodes, 10) : (parseInt(document.getElementById('cfg-episodes')?.value, 10) || 5);
+              const curEps = telemetry.episodes_completed || 0;
+              let pct = (targetEps > 0) ? (curEps / targetEps) * 100 : 0.0;
+              if (runner && runner.status === 'COMPLETED' && curEps > 0) {
+                pct = 100.0;
+              } else {
+                pct = Math.min(100.0, pct);
+              }
+              elemSteps.innerText = pct.toFixed(1) + '%';
+              elemSteps.title = `${curEps} / ${targetEps} episódios (${(telemetry.total_steps || 0).toLocaleString()} passos acumulados)`;
+            } else {
+              const targetSteps = (runCfg && runCfg.steps) ? parseInt(runCfg.steps, 10) : (parseInt(document.getElementById('cfg-steps')?.value, 10) || 40000);
+              const curSteps = telemetry.total_steps || 0;
+              let pct = (targetSteps > 0) ? (curSteps / targetSteps) * 100 : 0.0;
+              if (runner && runner.status === 'COMPLETED' && curSteps > 0) {
+                pct = 100.0;
+              } else {
+                pct = Math.min(100.0, pct);
+              }
+              elemSteps.innerText = pct.toFixed(1) + '%';
+              elemSteps.title = `${curSteps.toLocaleString()} / ${targetSteps.toLocaleString()} passos (${pct.toFixed(1)}%)`;
+            }
+          }
           const peakVal = (telemetry.best_return !== undefined && telemetry.best_return !== null && telemetry.best_return !== 0)
             ? telemetry.best_return 
             : (telemetry.mean_return_20 || 0);
