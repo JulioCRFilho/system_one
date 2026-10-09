@@ -198,10 +198,10 @@
     <div class="flex flex-wrap items-center gap-4 text-xs bg-gray-900/80 px-4 py-1.5 rounded border border-gray-800">
       <div>FPS Simulação: <span id="kpi-fps" class="font-bold text-green-400">0.0</span></div>
       <div><span id="kpi-steps-label">Passos</span>: <span id="kpi-steps" class="font-bold text-yellow-400" title="Progresso da meta de passos">0.0%</span></div>
-      <div>Pico: <span id="kpi-return" class="font-bold text-cyan-400" title="Maior pontuação alcançada em um único episódio">0.00</span></div>
+      <div>Pico: <span id="kpi-return" class="font-bold text-cyan-400" title="Maior pontuação alcançada em um único episódio">0.00</span> <span id="kpi-curriculum-peak-wrapper" class="hidden text-purple-300 font-mono text-[11px]" title="Maior pontuação alcançada na profundidade atual do currículo">(D<span id="kpi-curriculum-peak-depth">1</span>: <span id="kpi-curriculum-peak-val" class="font-bold text-cyan-300">0.00</span>)</span></div>
       <div>Latência P50: <span id="kpi-latency" class="font-bold text-pink-400">0.0 µs</span></div>
       <div>Confiança: <span id="kpi-confidence" class="font-bold text-emerald-400">0.0%</span></div>
-      <div id="kpi-curriculum-container" class="hidden flex items-center gap-1 bg-purple-950/60 px-2 py-0.5 rounded border border-purple-800/60">🎓 Currículo: <span id="kpi-curriculum-depth" class="font-bold text-purple-300">D1</span> <span id="kpi-curriculum-rate" class="text-purple-400 text-[10px]"></span></div>
+      <div id="kpi-curriculum-container" class="hidden flex items-center gap-1.5 bg-purple-950/60 px-2 py-0.5 rounded border border-purple-800/60">🎓 Currículo: <span id="kpi-curriculum-depth" class="font-bold text-purple-300">D1</span> <span id="kpi-curriculum-rate" class="text-purple-400 text-[10px]"></span> <span id="kpi-curriculum-peak-badge" class="hidden text-cyan-300 text-[10px] font-bold pl-1.5 border-l border-purple-700/60" title="Pico na profundidade atual">Pico D<span id="kpi-curriculum-badge-depth">1</span>: <span id="kpi-curriculum-badge-val">0.00</span></span></div>
     </div>
   </header>
 
@@ -1055,6 +1055,8 @@
     let availableCheckpoints = [];
     let availableCheckpointsDetailed = [];
     let currentVisionMode = 'normal';
+    let _clientCurriculumDepth = null;
+    let _clientCurriculumPeak = null;
 
     // Controle de Mapas de Atenção Visual (Grad-CAM / XAI)
     async function setVisionMode(mode) {
@@ -1959,6 +1961,12 @@
         elemSteps.title = 'Progresso zerado';
       }
       document.getElementById('kpi-return').innerText = '0.00';
+      _clientCurriculumDepth = null;
+      _clientCurriculumPeak = null;
+      const curPeakWrapper = document.getElementById('kpi-curriculum-peak-wrapper');
+      if (curPeakWrapper) curPeakWrapper.classList.add('hidden');
+      const curPeakBadge = document.getElementById('kpi-curriculum-peak-badge');
+      if (curPeakBadge) curPeakBadge.classList.add('hidden');
       document.getElementById('kpi-latency').innerText = '0.0 µs';
       document.getElementById('kpi-confidence').innerText = '0.0%';
       try {
@@ -2093,9 +2101,53 @@
           document.getElementById('kpi-latency').innerText = (telemetry.latency_p50_us || 0).toFixed(1) + ' µs';
           document.getElementById('kpi-confidence').innerText = ((telemetry.mean_confidence || 0) * 100).toFixed(1) + '%';
 
+          // Rastreamento e exibição do Pico para o Currículo Atual
+          const hasCurriculum = telemetry.curriculum_depth !== undefined && telemetry.curriculum_depth !== null;
+          const curPeakWrapper = document.getElementById('kpi-curriculum-peak-wrapper');
+          const curPeakBadge = document.getElementById('kpi-curriculum-peak-badge');
+
+          if (hasCurriculum) {
+            const currentD = telemetry.curriculum_depth;
+            if (_clientCurriculumDepth !== currentD) {
+              _clientCurriculumDepth = currentD;
+              _clientCurriculumPeak = null;
+            }
+
+            if (telemetry.curriculum_depth_best_return !== undefined && telemetry.curriculum_depth_best_return !== null) {
+              _clientCurriculumPeak = telemetry.curriculum_depth_best_return;
+            } else {
+              const curCand = Math.max(
+                telemetry.current_episode_return || 0,
+                telemetry.mean_return_20 || 0
+              );
+              if (_clientCurriculumPeak === null || curCand > _clientCurriculumPeak) {
+                if (curCand > 0) _clientCurriculumPeak = curCand;
+              }
+            }
+
+            const curPeakVal = _clientCurriculumPeak !== null ? Number(_clientCurriculumPeak).toFixed(2) : '0.00';
+
+            if (curPeakWrapper) {
+              curPeakWrapper.classList.remove('hidden');
+              document.getElementById('kpi-curriculum-peak-depth').innerText = currentD;
+              document.getElementById('kpi-curriculum-peak-val').innerText = curPeakVal;
+              document.getElementById('kpi-return').title = `Pico Geral: ${Number(peakVal).toFixed(2)} | Pico D${currentD}: ${curPeakVal}`;
+            }
+
+            if (curPeakBadge) {
+              curPeakBadge.classList.remove('hidden');
+              document.getElementById('kpi-curriculum-badge-depth').innerText = currentD;
+              document.getElementById('kpi-curriculum-badge-val').innerText = curPeakVal;
+            }
+          } else {
+            if (curPeakWrapper) curPeakWrapper.classList.add('hidden');
+            if (curPeakBadge) curPeakBadge.classList.add('hidden');
+            document.getElementById('kpi-return').title = 'Maior pontuação alcançada em um único episódio';
+          }
+
           const curContainer = document.getElementById('kpi-curriculum-container');
           if (curContainer) {
-            if (telemetry.curriculum_depth !== undefined && telemetry.curriculum_depth !== null) {
+            if (hasCurriculum) {
               curContainer.classList.remove('hidden');
               const maxD = telemetry.curriculum_max_depth ? `/ ${telemetry.curriculum_max_depth}` : '';
               document.getElementById('kpi-curriculum-depth').innerText = `D${telemetry.curriculum_depth} ${maxD}`;

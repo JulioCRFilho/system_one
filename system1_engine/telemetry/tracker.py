@@ -38,6 +38,7 @@ class PhaseMetrics:
     curriculum_max_depth: Optional[int] = None
     curriculum_success_rate: Optional[float] = None
     curriculum_promotions: int = 0
+    curriculum_depth_best_return: Optional[float] = None
 
     # Estado de Execução
     is_completed: bool = False
@@ -90,7 +91,11 @@ class LiveStatsTracker:
 
         if info:
             if "current_depth" in info:
-                m.curriculum_depth = int(info["current_depth"])
+                new_depth = int(info["current_depth"])
+                if m.curriculum_depth is not None and new_depth != m.curriculum_depth:
+                    # Mudança de profundidade no currículo: reseta pico do nível atual
+                    m.curriculum_depth_best_return = None
+                m.curriculum_depth = new_depth
             if "max_depth" in info:
                 m.curriculum_max_depth = info["max_depth"]
             if "curriculum_success_rate" in info:
@@ -104,6 +109,11 @@ class LiveStatsTracker:
             m.episode_lengths.append(m.current_episode_length)
             if m.best_return is None or ep_ret > m.best_return:
                 m.best_return = ep_ret
+
+            # Atualiza pico do currículo atual
+            if m.curriculum_depth is not None:
+                if m.curriculum_depth_best_return is None or ep_ret > m.curriculum_depth_best_return:
+                    m.curriculum_depth_best_return = ep_ret
 
             rolling_20 = list(m.episode_returns)[-20:]
             if rolling_20:
@@ -153,6 +163,7 @@ class LiveStatsTracker:
             "curriculum_max_depth": m.curriculum_max_depth,
             "curriculum_success_rate": m.curriculum_success_rate,
             "curriculum_promotions": m.curriculum_promotions,
+            "curriculum_depth_best_return": float(m.curriculum_depth_best_return) if m.curriculum_depth_best_return is not None else None,
             # Fase 3: Otimização PPO
             "policy_loss": m.policy_losses[-1] if m.policy_losses else 0.0,
             "value_loss": m.value_losses[-1] if m.value_losses else 0.0,

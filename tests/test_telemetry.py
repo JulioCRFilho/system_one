@@ -162,3 +162,26 @@ def test_trainer_integration_with_telemetry():
     assert "FrontEnd" in tracker.metrics.grad_norms
     assert "Trunk" in tracker.metrics.grad_norms
     assert "PolicyHead" in tracker.metrics.grad_norms
+
+
+def test_livestats_tracker_curriculum_depth_peak():
+    """Valida o isolamento e reset do pico de retorno para a profundidade atual do currículo."""
+    tracker = LiveStatsTracker()
+
+    # Episódio em D1 com retorno alto
+    tracker.record_env_step(reward=10.0, done=False, info={"current_depth": 1, "max_depth": 10})
+    tracker.record_env_step(reward=5.0, done=True, info={"current_depth": 1, "max_depth": 10})
+
+    snap = tracker.snapshot()
+    assert snap["best_return"] == 15.0
+    assert snap["curriculum_depth"] == 1
+    assert snap["curriculum_depth_best_return"] == 15.0
+
+    # Promovido para D2: pico global continua 15.0, mas pico do nível D2 é resetado e atualizado
+    tracker.record_env_step(reward=2.0, done=False, info={"current_depth": 2, "max_depth": 10})
+    tracker.record_env_step(reward=3.0, done=True, info={"current_depth": 2, "max_depth": 10})
+
+    snap2 = tracker.snapshot()
+    assert snap2["best_return"] == 15.0  # Pico global permanece
+    assert snap2["curriculum_depth"] == 2
+    assert snap2["curriculum_depth_best_return"] == 5.0  # Pico isolado do D2!
