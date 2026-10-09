@@ -458,22 +458,37 @@ def run_worker_train(config: Dict[str, Any], hud_client: HUDClient) -> None:
         )
 
         if save_path:
+            best_ret = getattr(trainer, "best_mean_return", None)
+            if best_ret is None and tracker and tracker.metrics.best_mean_return is not None:
+                best_ret = tracker.metrics.best_mean_return
+            if best_ret is None:
+                best_ret = final_return
+
+            successful_d = tracker.get_successful_depth() if tracker else None
+
             extra_info = {
                 "env_id": env_id,
-                "final_return": final_return,
+                "final_return": float(final_return),
+                "best_mean_return": float(best_ret),
                 "steps": trainer.total_steps,
             }
             if tracker.metrics.curriculum_depth is not None:
                 extra_info["curriculum_depth"] = tracker.metrics.curriculum_depth
-                extra_info["depth"] = tracker.metrics.curriculum_depth
+                extra_info["successful_depth"] = successful_d if successful_d is not None else tracker.metrics.curriculum_depth
+                extra_info["depth"] = extra_info["successful_depth"]
             elif config.get("scramble_depth") is not None:
-                extra_info["scramble_depth"] = int(config["scramble_depth"])
-                extra_info["depth"] = int(config["scramble_depth"])
+                sd = int(config["scramble_depth"])
+                extra_info["scramble_depth"] = sd
+                extra_info["successful_depth"] = sd
+                extra_info["depth"] = sd
 
             if tracker.metrics.curriculum_max_depth is not None:
                 extra_info["curriculum_max_depth"] = tracker.metrics.curriculum_max_depth
             elif config.get("scramble_depth") is not None:
                 extra_info["curriculum_max_depth"] = int(config["scramble_depth"])
+
+            if getattr(tracker.metrics, "best_return_depth", None) is not None:
+                extra_info["best_return_depth"] = tracker.metrics.best_return_depth
 
             KnowledgeTransferManager.save_checkpoint(
                 agent=agent,

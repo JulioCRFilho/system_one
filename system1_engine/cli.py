@@ -200,16 +200,29 @@ def train_mode(args: argparse.Namespace) -> None:
             )
 
         if args.save:
+            best_ret = getattr(trainer, "best_mean_return", None)
+            if best_ret is None and tracker and tracker.metrics.best_mean_return is not None:
+                best_ret = tracker.metrics.best_mean_return
+            if best_ret is None:
+                best_ret = final_return
+
+            successful_d = tracker.get_successful_depth() if tracker else None
+
             extra_info = {
                 "env_id": args.env,
-                "final_return": final_return,
+                "final_return": float(final_return),
+                "best_mean_return": float(best_ret),
                 "steps": trainer.total_steps,
             }
             if tracker and tracker.metrics.curriculum_depth is not None:
                 extra_info["curriculum_depth"] = tracker.metrics.curriculum_depth
-                extra_info["depth"] = tracker.metrics.curriculum_depth
+                extra_info["successful_depth"] = successful_d if successful_d is not None else tracker.metrics.curriculum_depth
+                extra_info["depth"] = extra_info["successful_depth"]
             if tracker and tracker.metrics.curriculum_max_depth is not None:
                 extra_info["curriculum_max_depth"] = tracker.metrics.curriculum_max_depth
+            if tracker and getattr(tracker.metrics, "best_return_depth", None) is not None:
+                extra_info["best_return_depth"] = tracker.metrics.best_return_depth
+
             KnowledgeTransferManager.save_checkpoint(
                 agent=agent,
                 checkpoint_path=args.save,

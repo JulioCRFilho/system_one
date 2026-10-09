@@ -114,9 +114,12 @@ class HUDServer:
                     "obs_dim": meta.get("obs_dim"),
                     "act_dim": meta.get("act_dim"),
                     "final_return": meta.get("final_return"),
+                    "best_mean_return": meta.get("best_mean_return"),
                     "steps": meta.get("steps"),
                     "curriculum_depth": meta.get("curriculum_depth"),
                     "curriculum_max_depth": meta.get("curriculum_max_depth"),
+                    "successful_depth": meta.get("successful_depth"),
+                    "best_return_depth": meta.get("best_return_depth"),
                     "depth": meta.get("depth"),
                 })
             except Exception:

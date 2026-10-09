@@ -195,3 +195,32 @@ def test_load_for_training_force_trunk_only(tmp_path):
     diff = torch.max(torch.abs(agent_target.policy_head.linear.weight - target_phead_before)).item()
     assert diff == 0.0
 
+
+def test_inspect_checkpoint_both_returns_and_successful_depth(tmp_path):
+    """Verifica se inspect_checkpoint extrai pico médio, retorno final e aponta para a profundidade de sucesso."""
+    cart_env = UniversalS1Wrapper(gym.make("CartPole-v1"))
+    agent = UniversalS1Agent(cart_env.env.observation_space, cart_env.action_space)
+    ckpt_path = str(tmp_path / "s1_test_curriculum.pt")
+
+    extra = {
+        "env_id": "RubiksCube-v0",
+        "best_mean_return": 8.5,
+        "final_return": 2.1,
+        "successful_depth": 6,
+        "curriculum_depth": 7,
+        "curriculum_max_depth": 10,
+        "depth": 6,
+        "steps": 50000,
+    }
+    KnowledgeTransferManager.save_checkpoint(agent, ckpt_path, extra_info=extra, auto_sync_web=False)
+
+    meta = KnowledgeTransferManager.inspect_checkpoint(ckpt_path)
+    assert meta["best_mean_return"] == 8.5
+    assert meta["final_return"] == 2.1
+    assert meta["successful_depth"] == 6
+    assert meta["curriculum_depth"] == 7
+    assert meta["curriculum_max_depth"] == 10
+    # depth deve apontar para o nível com sucesso
+    assert meta["depth"] == 6
+
+

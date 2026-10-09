@@ -39,6 +39,8 @@ class PhaseMetrics:
     curriculum_success_rate: Optional[float] = None
     curriculum_promotions: int = 0
     curriculum_depth_best_return: Optional[float] = None
+    successful_depth: Optional[int] = None
+    best_return_depth: Optional[int] = None
 
     # Estado de Execução
     is_completed: bool = False
@@ -120,9 +122,24 @@ class LiveStatsTracker:
                 cur_mean = float(np.mean(rolling_20))
                 if m.best_mean_return is None or cur_mean > m.best_mean_return:
                     m.best_mean_return = cur_mean
+                    m.best_return_depth = m.curriculum_depth
 
             m.current_episode_return = 0.0
             m.current_episode_length = 0
+
+    def get_successful_depth(self) -> Optional[int]:
+        """Calcula o último nível de profundidade curricular executado com sucesso."""
+        m = self.metrics
+        if m.curriculum_depth is None:
+            return None
+
+        # Se houve promoções no treino, o nível anterior à promoção atual foi concluído com sucesso
+        if m.curriculum_promotions > 0:
+            if m.curriculum_success_rate is not None and m.curriculum_success_rate >= 0.85:
+                return m.curriculum_depth
+            return max(1, m.curriculum_depth - 1)
+        else:
+            return m.curriculum_depth
 
     def record_training_epoch(
         self,
@@ -164,6 +181,8 @@ class LiveStatsTracker:
             "curriculum_success_rate": m.curriculum_success_rate,
             "curriculum_promotions": m.curriculum_promotions,
             "curriculum_depth_best_return": float(m.curriculum_depth_best_return) if m.curriculum_depth_best_return is not None else None,
+            "successful_depth": self.get_successful_depth(),
+            "best_return_depth": m.best_return_depth,
             # Fase 3: Otimização PPO
             "policy_loss": m.policy_losses[-1] if m.policy_losses else 0.0,
             "value_loss": m.value_losses[-1] if m.value_losses else 0.0,

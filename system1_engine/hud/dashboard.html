@@ -1660,10 +1660,15 @@
       if (item) {
         const depthVal = getCheckpointDepth(item);
         const maxDepthVal = getCheckpointMaxDepth(item);
+        const reachedVal = getCheckpointReachedDepth(item);
         const envInfo = item.env_id ? ` • Ambiente: ${item.env_id}` : '';
         const dimInfo = (item.obs_dim && item.act_dim) ? ` (${item.obs_dim}D obs, ${item.act_dim} ações)` : '';
-        const depthInfo = depthVal ? ` • Profundidade: D${depthVal}${maxDepthVal ? '/' + maxDepthVal : ''}` : '';
-        const retInfo = item.final_return !== null && item.final_return !== undefined ? ` • Retorno Médio: ${item.final_return.toFixed(1)}` : '';
+        let depthInfo = depthVal ? ` • Profundidade: D${depthVal}${maxDepthVal ? '/' + maxDepthVal : ''}` : '';
+        if (reachedVal && depthVal && reachedVal > depthVal) {
+          depthInfo += ` (alcançou D${reachedVal})`;
+        }
+        const retStr = formatCheckpointReturns(item, false);
+        const retInfo = retStr ? ` • ${retStr}` : '';
         metaEl.innerText = `Tamanho: ${item.size_mb} MB${envInfo}${dimInfo}${depthInfo}${retInfo} • Modificado em: ${item.mtime}`;
       } else {
         metaEl.innerText = `Arquivo selecionado: ${val}`;
@@ -1779,10 +1784,15 @@
 
       const depthVal = getCheckpointDepth(item);
       const maxDepthVal = getCheckpointMaxDepth(item);
+      const reachedVal = getCheckpointReachedDepth(item);
       const envInfo = item.env_id ? `Env: ${item.env_id}` : 'Env: não registrado';
       const dimInfo = (item.obs_dim && item.act_dim) ? ` • ${item.obs_dim}D obs / ${item.act_dim} ações` : '';
-      const depthInfo = depthVal ? ` • Profundidade: D${depthVal}${maxDepthVal ? '/' + maxDepthVal : ''}` : '';
-      const retInfo = (item.final_return !== null && item.final_return !== undefined) ? ` • Retorno Médio: ${item.final_return.toFixed(1)}` : '';
+      let depthInfo = depthVal ? ` • Profundidade: D${depthVal}${maxDepthVal ? '/' + maxDepthVal : ''}` : '';
+      if (reachedVal && depthVal && reachedVal > depthVal) {
+        depthInfo += ` (alcançou D${reachedVal})`;
+      }
+      const retStr = formatCheckpointReturns(item, true);
+      const retInfo = retStr ? ` • ${retStr}` : '';
       if (metaEl) metaEl.innerText = `${envInfo}${dimInfo}${depthInfo}${retInfo}`;
 
       const currentEnv = document.getElementById('cfg-env').value;
@@ -1797,14 +1807,14 @@
         boxEl.classList.remove('hidden');
         if (isSameEnv) {
           boxEl.className = 'mt-1.5 p-2 rounded bg-emerald-950/70 border border-emerald-600/80 text-[10px] text-emerald-200 flex flex-col gap-1';
-          const retStr = (item.final_return !== null && item.final_return !== undefined) ? item.final_return.toFixed(1) : '8.5+';
+          const retSummary = formatCheckpointReturns(item, true) || (item.final_return !== null && item.final_return !== undefined ? `${item.final_return.toFixed(1)}` : '8.5+');
           boxEl.innerHTML = `
             <div class="flex items-center gap-1 font-bold text-emerald-300">
               <span>🚀 Warm-Start Compatível (Mesmo Ambiente)</span>
             </div>
             <div>
               Restaura <strong>100% dos parâmetros</strong> (percepção, tronco, política e valor).
-              O agente continuará com o conhecimento prévio de retorno <strong>${retStr}</strong> e avançará de nível no currículo sem regredir!
+              O agente continuará com o conhecimento prévio de retorno (<strong>${retSummary}</strong>) e avançará de nível no currículo sem regredir!
             </div>
           `;
           if (freezeEl && !freezeEl.dataset.manuallyToggled) {
@@ -2251,14 +2261,26 @@
 
     function getCheckpointDepth(item) {
       if (!item) return null;
+      if (item.successful_depth !== null && item.successful_depth !== undefined) return item.successful_depth;
       if (item.depth !== null && item.depth !== undefined) return item.depth;
       if (item.curriculum_depth !== null && item.curriculum_depth !== undefined) return item.curriculum_depth;
       if (item.env_id && item.env_id.toLowerCase().includes('rubik')) {
         const fn = (item.filename || item.path || '').toLowerCase();
-        if (fn.includes('_v3')) return 7;
-        if (fn.includes('_v2')) return 6;
+        if (fn.includes('_v4') || fn.includes('_v3') || fn.includes('_v2')) return 6;
         if (fn.includes('_v1')) return 5;
         if (!fn.includes('_v') && fn.includes('trained')) return 1;
+      }
+      return null;
+    }
+
+    function getCheckpointReachedDepth(item) {
+      if (!item) return null;
+      if (item.curriculum_depth !== null && item.curriculum_depth !== undefined) return item.curriculum_depth;
+      if (item.env_id && item.env_id.toLowerCase().includes('rubik')) {
+        const fn = (item.filename || item.path || '').toLowerCase();
+        if (fn.includes('_v3')) return 7;
+        if (fn.includes('_v4') || fn.includes('_v2')) return 6;
+        if (fn.includes('_v1')) return 5;
       }
       return null;
     }
@@ -2269,11 +2291,32 @@
       if (item.max_depth !== null && item.max_depth !== undefined) return item.max_depth;
       if (item.env_id && item.env_id.toLowerCase().includes('rubik')) {
         const fn = (item.filename || item.path || '').toLowerCase();
-        if (fn.includes('_v3') || fn.includes('_v2')) return 10;
+        if (fn.includes('_v4') || fn.includes('_v3') || fn.includes('_v2')) return 10;
         if (fn.includes('_v1')) return 5;
         if (!fn.includes('_v') && fn.includes('trained')) return 1;
       }
       return null;
+    }
+
+    function formatCheckpointReturns(item, withDepth = true) {
+      if (!item) return '';
+      const best = (item.best_mean_return !== null && item.best_mean_return !== undefined) ? item.best_mean_return : null;
+      const fin = (item.final_return !== null && item.final_return !== undefined) ? item.final_return : null;
+      if (best === null && fin === null) return '';
+
+      const successDepth = getCheckpointDepth(item);
+      const depthSub = (withDepth && successDepth) ? ` (D${successDepth})` : '';
+
+      if (best !== null && fin !== null) {
+        if (Math.abs(best - fin) < 0.05) {
+          return `Retorno: ${best.toFixed(1)}${depthSub}`;
+        }
+        return `Pico: ${best.toFixed(1)} • Final: ${fin.toFixed(1)}${depthSub}`;
+      } else if (fin !== null) {
+        return `Retorno: ${fin.toFixed(1)}${depthSub}`;
+      } else {
+        return `Pico: ${best.toFixed(1)}${depthSub}`;
+      }
     }
 
     function renderCheckpointDropdowns() {
@@ -2290,7 +2333,8 @@
         const maxDepthVal = getCheckpointMaxDepth(ckpt);
         const envTag = ckpt.env_id ? ` [${ckpt.env_id}]` : '';
         const depthTag = depthVal ? ` [🎓 D${depthVal}${maxDepthVal ? '/' + maxDepthVal : ''}]` : '';
-        const retTag = (ckpt.final_return !== null && ckpt.final_return !== undefined) ? ` [Ret: ${ckpt.final_return.toFixed(1)}]` : '';
+        const retText = formatCheckpointReturns(ckpt, false);
+        const retTag = retText ? ` [${retText}]` : '';
         const dimTag = (ckpt.obs_dim && ckpt.act_dim) ? ` (${ckpt.obs_dim}D→${ckpt.act_dim}A)` : '';
         const optText = `${ckpt.path}${envTag}${depthTag}${retTag}${dimTag} • ${ckpt.size_mb} MB`;
         loadSel.innerHTML += `<option value="${ckpt.path}">${optText}</option>`;
@@ -2321,16 +2365,22 @@
       availableCheckpointsDetailed.forEach(item => {
         const depthVal = getCheckpointDepth(item);
         const maxDepthVal = getCheckpointMaxDepth(item);
+        const reachedDepth = getCheckpointReachedDepth(item);
         const div = document.createElement('div');
         div.className = 'flex items-center justify-between p-1.5 rounded bg-gray-900/70 border border-gray-800 text-xs';
         const envBadge = item.env_id ? `<span class="px-1 py-0.2 rounded bg-cyan-950 text-cyan-400 text-[9px] border border-cyan-800 font-bold">${item.env_id}</span>` : '';
-        const depthBadge = depthVal ? `<span class="px-1.5 py-0.2 rounded bg-purple-950 text-purple-300 text-[9px] border border-purple-800 font-bold" title="Profundidade do currículo / embaralhamento">🎓 D${depthVal}${maxDepthVal ? '/' + maxDepthVal : ''}</span>` : '';
+        
+        let depthTitle = `Profundidade consolidada com sucesso: D${depthVal}${maxDepthVal ? '/' + maxDepthVal : ''}`;
+        if (reachedDepth && depthVal && reachedDepth > depthVal) {
+          depthTitle = `Último nível executado com sucesso: D${depthVal} (atingiu D${reachedDepth}/${maxDepthVal || '∞'} no treino)`;
+        }
+        const depthBadge = depthVal ? `<span class="px-1.5 py-0.2 rounded bg-purple-950 text-purple-300 text-[9px] border border-purple-800 font-bold" title="${depthTitle}">🎓 D${depthVal}${maxDepthVal ? '/' + maxDepthVal : ''}</span>` : '';
         const dimBadge = (item.obs_dim && item.act_dim) ? `<span class="text-[9px] text-gray-400 font-mono">${item.obs_dim}D obs • ${item.act_dim} ações</span>` : '';
         
         let retBadge = '';
-        if (item.final_return !== null && item.final_return !== undefined) {
-          const depthSub = depthVal ? ` (D${depthVal})` : '';
-          retBadge = `<span class="text-[9px] text-emerald-400 font-bold" title="Retorno médio obtido no treinamento">Retorno Médio: ${item.final_return.toFixed(1)}${depthSub}</span>`;
+        const retText = formatCheckpointReturns(item, true);
+        if (retText) {
+          retBadge = `<span class="text-[9px] text-emerald-400 font-bold" title="Pico Médio e Retorno Final associados à profundidade de sucesso D${depthVal}">${retText}</span>`;
         }
 
         const isSameEnv = item.env_id && actualEnv && (

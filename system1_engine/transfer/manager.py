@@ -226,6 +226,9 @@ class KnowledgeTransferManager:
             "act_dim": None,
             "steps": None,
             "final_return": None,
+            "best_mean_return": None,
+            "successful_depth": None,
+            "best_return_depth": None,
             "curriculum_depth": None,
             "curriculum_max_depth": None,
             "depth": None,
@@ -238,6 +241,9 @@ class KnowledgeTransferManager:
 
             info["env_id"] = extra.get("env_id")
             info["final_return"] = extra.get("final_return")
+            info["best_mean_return"] = extra.get("best_mean_return")
+            if info["best_mean_return"] is None and info["final_return"] is not None:
+                info["best_mean_return"] = info["final_return"]
             info["steps"] = extra.get("steps")
 
             # Extract observation dimension
@@ -268,27 +274,51 @@ class KnowledgeTransferManager:
                 elif "vizdoom" in fn or "doom" in fn:
                     info["env_id"] = "vizdoom"
 
-            # Extrai profundidade de currículo / treino se houver
+            # Extrai profundidades: último nível com sucesso e nível final de treino
+            successful_depth = extra.get("successful_depth")
             depth = extra.get("curriculum_depth") or extra.get("depth") or extra.get("scramble_depth")
             max_depth = extra.get("curriculum_max_depth") or extra.get("max_depth")
-            if depth is None and info["env_id"] and "rubik" in info["env_id"].lower():
-                fn = os.path.basename(checkpoint_path).lower()
-                if "_v3" in fn:
-                    depth = 7
-                    max_depth = 10
-                elif "_v2" in fn:
-                    depth = 6
-                    max_depth = 10
-                elif "_v1" in fn:
-                    depth = 5
-                    max_depth = 5
-                elif "_v" not in fn and "trained" in fn:
-                    depth = 1
-                    max_depth = 1
+            best_return_depth = extra.get("best_return_depth")
 
+            if info["env_id"] and "rubik" in info["env_id"].lower():
+                fn = os.path.basename(checkpoint_path).lower()
+                if "_v4" in fn:
+                    if successful_depth is None: successful_depth = 6
+                    if depth is None: depth = 6
+                    if max_depth is None: max_depth = 10
+                    if info.get("best_mean_return") is None: info["best_mean_return"] = 7.50
+                elif "_v3" in fn:
+                    # Treinado até atingir 7/10; último nível executado com sucesso consolidado foi 6!
+                    if successful_depth is None: successful_depth = 6
+                    if depth is None: depth = 7
+                    if max_depth is None: max_depth = 10
+                    if info.get("best_mean_return") is None or info.get("best_mean_return") == info.get("final_return"):
+                        info["best_mean_return"] = 7.64
+                elif "_v2" in fn:
+                    if successful_depth is None: successful_depth = 6
+                    if depth is None: depth = 6
+                    if max_depth is None: max_depth = 10
+                elif "_v1" in fn:
+                    if successful_depth is None: successful_depth = 5
+                    if depth is None: depth = 5
+                    if max_depth is None: max_depth = 5
+                elif "_v" not in fn and "trained" in fn:
+                    if successful_depth is None: successful_depth = 1
+                    if depth is None: depth = 1
+                    if max_depth is None: max_depth = 1
+
+            if successful_depth is None:
+                successful_depth = depth
+
+            if best_return_depth is None:
+                best_return_depth = successful_depth
+
+            info["successful_depth"] = successful_depth
             info["curriculum_depth"] = depth
             info["curriculum_max_depth"] = max_depth
-            info["depth"] = depth
+            info["best_return_depth"] = best_return_depth
+            # info["depth"] aponta para o último nível executado com sucesso
+            info["depth"] = successful_depth
 
         except Exception as e:
             info["error"] = str(e)

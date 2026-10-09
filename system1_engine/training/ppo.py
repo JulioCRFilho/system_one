@@ -723,6 +723,7 @@ class RecurrentPPOTrainer:
 
             if len(self.episode_returns) > 0:
                 best_mean_return = max(best_mean_return, mean_return)
+                self.best_mean_return = best_mean_return
                 if self.tracker is not None:
                     self.tracker.metrics.best_mean_return = best_mean_return
 
@@ -773,4 +774,6 @@ class RecurrentPPOTrainer:
                     )
                 break
 
-        return float(np.mean(self.episode_returns)) if len(self.episode_returns) > 0 else 0.0
+        self.best_mean_return = best_mean_return
+        self.final_return = float(np.mean(self.episode_returns)) if len(self.episode_returns) > 0 else 0.0
+        return self.final_return
