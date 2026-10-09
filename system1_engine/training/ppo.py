@@ -88,10 +88,43 @@ class RecurrentPPOTrainer:
             device=self.device,
         )
 
+        # Buffers de tensores pré-alocados no dispositivo para eliminar overhead de heap e alocações repetidas
+        self._buf_obs = torch.zeros((1, 1, *obs_shape), dtype=torch.float32, device=self.device)
+        if is_discrete:
+            self._buf_act = torch.zeros((1, 1), dtype=torch.long, device=self.device)
+        else:
+            self._buf_act = torch.zeros((1, 1, *act_shape), dtype=torch.float32, device=self.device)
+        self._buf_rew = torch.zeros((1, 1, 1), dtype=torch.float32, device=self.device)
+        if not env.is_visual:
+            self._buf_delta: Optional[torch.Tensor] = torch.zeros((1, 1, *obs_shape), dtype=torch.float32, device=self.device)
+        else:
+            self._buf_delta = None
+
+        self._rollout_input_dict: Dict[str, Any] = {
+            "obs": self._buf_obs,
+            "prev_action": self._buf_act,
+            "prev_reward": self._buf_rew,
+        }
+        if self._buf_delta is not None:
+            self._rollout_input_dict["delta_obs"] = self._buf_delta
+
         # Persistent episode statistics across rollout batches
         self.episode_returns: deque[float] = deque(maxlen=20)
         self.curr_ep_return: float = 0.0
         self.total_steps: int = 0
+
+    def _prepare_rollout_input(self, obs_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """Copia os dados do dicionário de observação diretamente para os tensores pré-alocados."""
+        self._buf_obs[0, 0].copy_(torch.as_tensor(obs_dict["obs"], dtype=torch.float32))
+        prev_act_raw = obs_dict["prev_action"]
+        if self.agent.is_discrete:
+            self._buf_act[0, 0] = int(prev_act_raw)
+        else:
+            self._buf_act[0, 0].copy_(torch.as_tensor(prev_act_raw, dtype=torch.float32))
+        self._buf_rew[0, 0, 0] = float(obs_dict["prev_reward"])
+        if self._buf_delta is not None and "delta_obs" in obs_dict and obs_dict["delta_obs"] is not None:
+            self._buf_delta[0, 0].copy_(torch.as_tensor(obs_dict["delta_obs"], dtype=torch.float32))
+        return self._rollout_input_dict
 
     def collect_rollouts(
         self,
@@ -106,41 +139,7 @@ class RecurrentPPOTrainer:
 
         with torch.no_grad():
             for _ in range(self.rollout_steps):
-                # Prepare tensor inputs for action selection
-                obs_t = (
-                    torch.from_numpy(current_obs_dict["obs"])
-                    .float()
-                    .unsqueeze(0)
-                    .to(self.device)
-                )
-                prev_act_raw = current_obs_dict["prev_action"]
-                if self.agent.is_discrete:
-                    act_t = torch.tensor([[int(prev_act_raw)]], dtype=torch.long, device=self.device)
-                else:
-                    act_t = (
-                        torch.from_numpy(np.asarray(prev_act_raw, dtype=np.float32))
-                        .unsqueeze(0)
-                        .to(self.device)
-                    )
-
-                rew_t = (
-                    torch.tensor([[[float(current_obs_dict["prev_reward"])]]], dtype=torch.float32)
-                    .to(self.device)
-                )
-
-                input_dict = {
-                    "obs": obs_t,
-                    "prev_action": act_t,
-                    "prev_reward": rew_t,
-                }
-                if not self.agent.is_visual:
-                    delta_t = (
-                        torch.from_numpy(current_obs_dict["delta_obs"])
-                        .float()
-                        .unsqueeze(0)
-                        .to(self.device)
-                    )
-                    input_dict["delta_obs"] = delta_t
+                input_dict = self._prepare_rollout_input(current_obs_dict)
 
                 # Step agent with latency tracking
                 t0 = time.perf_counter_ns()
@@ -213,7 +212,7 @@ class RecurrentPPOTrainer:
                     )
 
                 # Environment step
-                next_obs_dict, reward, terminated, truncated, _ = self.env.step(env_action)
+                next_obs_dict, reward, terminated, truncated, env_info = self.env.step(env_action)
                 done = terminated or truncated
 
                 # Auto-correção homeostática por momentum de recompensa
@@ -233,7 +232,7 @@ class RecurrentPPOTrainer:
                             self._adaptive_scale = min(1.0, self._adaptive_scale + 0.01)
 
                 if self.tracker is not None:
-                    self.tracker.record_env_step(reward=reward, done=done)
+                    self.tracker.record_env_step(reward=reward, done=done, info=env_info)
 
                 self.curr_ep_return += reward
                 self.total_steps += 1
@@ -265,41 +264,7 @@ class RecurrentPPOTrainer:
                     episode_start = False
 
             # Bootstrap value for last state
-            obs_t = (
-                torch.from_numpy(current_obs_dict["obs"])
-                .float()
-                .unsqueeze(0)
-                .to(self.device)
-            )
-            prev_act_raw = current_obs_dict["prev_action"]
-            if self.agent.is_discrete:
-                act_t = torch.tensor([[int(prev_act_raw)]], dtype=torch.long, device=self.device)
-            else:
-                act_t = (
-                    torch.from_numpy(np.asarray(prev_act_raw, dtype=np.float32))
-                    .unsqueeze(0)
-                    .to(self.device)
-                )
-
-            rew_t = (
-                torch.tensor([[[float(current_obs_dict["prev_reward"])]]], dtype=torch.float32)
-                .to(self.device)
-            )
-
-            input_dict = {
-                "obs": obs_t,
-                "prev_action": act_t,
-                "prev_reward": rew_t,
-            }
-            if not self.agent.is_visual:
-                delta_t = (
-                    torch.from_numpy(current_obs_dict["delta_obs"])
-                    .float()
-                    .unsqueeze(0)
-                    .to(self.device)
-                )
-                input_dict["delta_obs"] = delta_t
-
+            input_dict = self._prepare_rollout_input(current_obs_dict)
             _, last_value, _ = self.agent.forward(input_dict, hx=current_hx, dones=None)
             self.buffer.compute_gae(
                 last_value=last_value.item(),

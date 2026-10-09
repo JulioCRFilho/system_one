@@ -45,11 +45,18 @@ def build_environment(
     render_mode = "human" if render else None
     extra_kwargs = {}
     if env_id in ("RubiksCube-v0", "RubiksCubeMacro-v0"):
-        if scramble_depth is not None and scramble_depth > 0:
-            extra_kwargs["scramble_depth"] = int(scramble_depth)
-            extra_kwargs["curriculum"] = False
+        if is_training:
+            extra_kwargs["curriculum"] = True
+            extra_kwargs["min_depth"] = 1
+            if scramble_depth is not None and int(scramble_depth) > 0:
+                extra_kwargs["max_depth"] = int(scramble_depth)
+                extra_kwargs["scramble_depth"] = int(scramble_depth)
+            else:
+                extra_kwargs["max_depth"] = None
         else:
-            extra_kwargs["curriculum"] = is_training
+            extra_kwargs["curriculum"] = False
+            if scramble_depth is not None and int(scramble_depth) > 0:
+                extra_kwargs["scramble_depth"] = int(scramble_depth)
 
     raw_env = make_gym_env_with_auto_install(env_id, render_mode=render_mode, **extra_kwargs)
     if env_id == "MountainCar-v0":

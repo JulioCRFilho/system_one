@@ -13,6 +13,7 @@ from system1_engine.env.adapters import (
     RubiksCubeCore,
     RubiksCubeEnv,
     RubiksCubeMacroEnv,
+    VectorizedRubiksEnv,
 )
 from system1_engine.env.dependencies import (
     install_packages,
@@ -38,6 +39,7 @@ __all__ = [
     "RubiksCubeCore",
     "RubiksCubeEnv",
     "RubiksCubeMacroEnv",
+    "VectorizedRubiksEnv",
     "make_gym_env_with_auto_install",
     "resolve_missing_packages",
     "install_packages",

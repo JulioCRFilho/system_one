@@ -195,12 +195,13 @@
     </div>
 
     <!-- Quick KPIs -->
-    <div class="flex flex-wrap gap-4 text-xs bg-gray-900/80 px-4 py-1.5 rounded border border-gray-800">
+    <div class="flex flex-wrap items-center gap-4 text-xs bg-gray-900/80 px-4 py-1.5 rounded border border-gray-800">
       <div>FPS Simulação: <span id="kpi-fps" class="font-bold text-green-400">0.0</span></div>
       <div>Passos: <span id="kpi-steps" class="font-bold text-yellow-400">0</span></div>
       <div>Pico: <span id="kpi-return" class="font-bold text-cyan-400" title="Maior pontuação alcançada em um único episódio">0.00</span></div>
       <div>Latência P50: <span id="kpi-latency" class="font-bold text-pink-400">0.0 µs</span></div>
       <div>Confiança: <span id="kpi-confidence" class="font-bold text-emerald-400">0.0%</span></div>
+      <div id="kpi-curriculum-container" class="hidden flex items-center gap-1 bg-purple-950/60 px-2 py-0.5 rounded border border-purple-800/60">🎓 Currículo: <span id="kpi-curriculum-depth" class="font-bold text-purple-300">D1</span> <span id="kpi-curriculum-rate" class="text-purple-400 text-[10px]"></span></div>
     </div>
   </header>
 
@@ -1974,6 +1975,20 @@
           document.getElementById('kpi-return').innerText = Number(peakVal).toFixed(2);
           document.getElementById('kpi-latency').innerText = (telemetry.latency_p50_us || 0).toFixed(1) + ' µs';
           document.getElementById('kpi-confidence').innerText = ((telemetry.mean_confidence || 0) * 100).toFixed(1) + '%';
+
+          const curContainer = document.getElementById('kpi-curriculum-container');
+          if (curContainer) {
+            if (telemetry.curriculum_depth !== undefined && telemetry.curriculum_depth !== null) {
+              curContainer.classList.remove('hidden');
+              const maxD = telemetry.curriculum_max_depth ? `/ ${telemetry.curriculum_max_depth}` : '';
+              document.getElementById('kpi-curriculum-depth').innerText = `D${telemetry.curriculum_depth} ${maxD}`;
+              if (telemetry.curriculum_success_rate !== undefined && telemetry.curriculum_success_rate !== null) {
+                document.getElementById('kpi-curriculum-rate').innerText = `(${(telemetry.curriculum_success_rate * 100).toFixed(0)}% vitórias)`;
+              }
+            } else {
+              curContainer.classList.add('hidden');
+            }
+          }
 
           if (telemetry.latency_p50_us !== undefined) {
             pushDataPoint(chartLat, 0, telemetry.latency_p50_us);

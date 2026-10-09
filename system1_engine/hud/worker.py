@@ -231,11 +231,18 @@ def build_hud_env(
 
     extra_kwargs = {}
     if env_id in ("RubiksCube-v0", "RubiksCubeMacro-v0"):
-        if scramble_depth is not None and int(scramble_depth) > 0:
-            extra_kwargs["scramble_depth"] = int(scramble_depth)
-            extra_kwargs["curriculum"] = False
+        if is_training:
+            extra_kwargs["curriculum"] = True
+            extra_kwargs["min_depth"] = 1
+            if scramble_depth is not None and int(scramble_depth) > 0:
+                extra_kwargs["max_depth"] = int(scramble_depth)
+                extra_kwargs["scramble_depth"] = int(scramble_depth)
+            else:
+                extra_kwargs["max_depth"] = None
         else:
-            extra_kwargs["curriculum"] = is_training
+            extra_kwargs["curriculum"] = False
+            if scramble_depth is not None and int(scramble_depth) > 0:
+                extra_kwargs["scramble_depth"] = int(scramble_depth)
 
     raw_env = make_gym_env_with_auto_install(env_id, render_mode=gym_render_mode, **extra_kwargs)
     if env_id == "MountainCar-v0":
@@ -321,8 +328,11 @@ def run_worker_train(config: Dict[str, Any], hud_client: HUDClient) -> None:
         except (ValueError, TypeError):
             scramble_depth = None
 
-    if env_id.lower().replace("_", "-") in ("rubikscube-v0", "rubikscubemacro-v0", "rubiks", "rubik") and scramble_depth:
-        print(f"🎲 Cubo Mágico: Profundidade de Embaralhamento no Treino: {scramble_depth} passos")
+    if env_id.lower().replace("_", "-") in ("rubikscube-v0", "rubikscubemacro-v0", "rubiks", "rubik"):
+        if scramble_depth:
+            print(f"🎲 Cubo Mágico: Treino com Curriculum Ativo (1 -> {scramble_depth} passos)")
+        else:
+            print(f"🎲 Cubo Mágico: Treino com Curriculum Aberto (1 -> ∞ passos)")
 
     env = build_hud_env(
         env_id,

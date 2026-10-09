@@ -33,6 +33,12 @@ class PhaseMetrics:
     clip_fractions: deque = field(default_factory=lambda: deque(maxlen=100))
     learning_rate: float = 0.0
 
+    # Métricas de Currículo (Progresso Dinâmico)
+    curriculum_depth: Optional[int] = None
+    curriculum_max_depth: Optional[int] = None
+    curriculum_success_rate: Optional[float] = None
+    curriculum_promotions: int = 0
+
     # Estado de Execução
     is_completed: bool = False
 
@@ -61,8 +67,8 @@ class LiveStatsTracker:
         m.entropies.append(entropy)
         m.calibrations.append(calibration)
 
-    def record_env_step(self, reward: float, done: bool) -> None:
-        """Registra a fase de interação física com o ambiente."""
+    def record_env_step(self, reward: float, done: bool, info: Optional[Dict[str, Any]] = None) -> None:
+        """Registra a fase de interação física com o ambiente e metadados de currículo."""
         now = time.perf_counter_ns()
         dt = (now - self._last_step_time) / 1e9
         self._last_step_time = now
@@ -75,6 +81,16 @@ class LiveStatsTracker:
         m.total_steps += 1
         m.current_episode_return += reward
         m.current_episode_length += 1
+
+        if info:
+            if "current_depth" in info:
+                m.curriculum_depth = int(info["current_depth"])
+            if "max_depth" in info:
+                m.curriculum_max_depth = info["max_depth"]
+            if "curriculum_success_rate" in info:
+                m.curriculum_success_rate = float(info["curriculum_success_rate"])
+            if "curriculum_promotions" in info:
+                m.curriculum_promotions = int(info["curriculum_promotions"])
 
         if done:
             ep_ret = float(m.current_episode_return)
@@ -127,6 +143,10 @@ class LiveStatsTracker:
             "total_steps": m.total_steps,
             "episodes_completed": len(m.episode_returns),
             "current_episode_return": m.current_episode_return,
+            "curriculum_depth": m.curriculum_depth,
+            "curriculum_max_depth": m.curriculum_max_depth,
+            "curriculum_success_rate": m.curriculum_success_rate,
+            "curriculum_promotions": m.curriculum_promotions,
             # Fase 3: Otimização PPO
             "policy_loss": m.policy_losses[-1] if m.policy_losses else 0.0,
             "value_loss": m.value_losses[-1] if m.value_losses else 0.0,

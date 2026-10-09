@@ -182,8 +182,9 @@ class TestRubiksGymEnvironments:
         raw_macro.close()
 
     def test_curriculum_depth_promotion(self):
-        """Valida que o curriculum promove a profundidade quando o agente atinge a meta de vitórias."""
-        env = RubiksCubeEnv(curriculum=True, min_depth=1, max_depth=3, target_success_rate=0.80, curriculum_window=5)
+        """Valida que o curriculum promove a profundidade quando o agente atinge a meta de vitórias (90%)."""
+        env = RubiksCubeEnv(curriculum=True, min_depth=1, max_depth=3, target_success_rate=0.90, curriculum_window=5)
+        assert env.target_success_rate == 0.90
         assert env.current_depth == 1
 
         # Simula 5 episódios resolvidos
@@ -274,31 +275,42 @@ class TestRubiksSystemOneIntegration:
         assert cli_env.env.unwrapped.current_depth == 1
 
     def test_rubiks_open_scramble_depth_train_and_eval(self):
-        """Valida que valores abertos de profundidade (ex: 20, 50, 100) funcionam no treino e avaliação."""
+        """Valida que valores abertos de profundidade funcionam com currículo no treino e avaliação direta."""
         from system1_engine.hud.worker import build_hud_env
         from system1_engine.cli import build_environment
 
-        # Treino com scramble_depth aberto fixado (ex: 35)
+        # Treino com scramble_depth aberto fixado (ex: 35): sempre com currículo ativo até max_depth=35
         train_env = build_hud_env("RubiksCube-v0", is_training=True, scramble_depth=35)
         raw_train = train_env.env.unwrapped
         assert raw_train.scramble_depth == 35
-        assert raw_train.curriculum is False
+        assert raw_train.curriculum is True
+        assert raw_train.min_depth == 1
+        assert raw_train.max_depth == 35
+        assert raw_train.current_depth == 1
         obs, info = train_env.reset()
-        assert info["current_depth"] == 35
+        assert info["current_depth"] == 1
+        assert info["max_depth"] == 35
 
-        # Avaliação com scramble_depth aberto fixado (ex: 50)
+        # Avaliação com scramble_depth aberto fixado (ex: 50): avaliação direta sem currículo
         eval_env = build_hud_env("RubiksCubeMacro-v0", is_training=False, scramble_depth=50)
         raw_eval = eval_env.env.unwrapped
         assert raw_eval.scramble_depth == 50
+        assert raw_eval.curriculum is False
         obs, info = eval_env.reset()
         assert info["current_depth"] == 50
 
-        # CLI build_environment com scramble_depth aberto (ex: 100)
+        # CLI build_environment com scramble_depth aberto (ex: 100): treino sempre com currículo
         cli_train = build_environment("RubiksCube-v0", is_training=True, scramble_depth=100)
+        raw_cli_train = cli_train.env.unwrapped
+        assert raw_cli_train.curriculum is True
+        assert raw_cli_train.max_depth == 100
         obs, info = cli_train.reset()
-        assert info["current_depth"] == 100
+        assert info["current_depth"] == 1
 
+        # CLI build_environment com scramble_depth aberto (ex: 42): avaliação direta
         cli_eval = build_environment("RubiksCubeMacro-v0", is_training=False, scramble_depth=42)
+        raw_cli_eval = cli_eval.env.unwrapped
+        assert raw_cli_eval.curriculum is False
         obs, info = cli_eval.reset()
         assert info["current_depth"] == 42
 
@@ -312,4 +324,41 @@ class TestRubiksSystemOneIntegration:
         moves_75_macro = core.scramble(depth=75, use_macros=True)
         assert len(moves_75_macro) == 75
         assert not core.is_solved()
+
+    def test_vectorized_rubiks_env_shapes_and_throughput(self):
+        """Valida que VectorizedRubiksEnv avança múltiplos cubos em batch com alto throughput."""
+        from system1_engine.env.adapters.rubiks import VectorizedRubiksEnv
+        import time
+
+        num_envs = 16
+        vec_env = VectorizedRubiksEnv(num_envs=num_envs, scramble_depth=4)
+        assert vec_env.num_envs == 16
+        obs, infos = vec_env.reset()
+        assert obs.shape == (16, 324)
+        assert len(infos) == 16
+
+        # Executa 500 passos em lote (8.000 transições de cubo simultâneas)
+        t0 = time.perf_counter()
+        actions = np.zeros(num_envs, dtype=np.int64)
+        for _ in range(500):
+            obs, rews, terms, truncs, infos = vec_env.step(actions)
+            assert obs.shape == (16, 324)
+            assert rews.shape == (16,)
+            assert terms.shape == (16,)
+            assert truncs.shape == (16,)
+            assert len(infos) == 16
+        dt = time.perf_counter() - t0
+        total_transitions = 500 * num_envs
+        fps = total_transitions / dt
+        # O throughput em batch com Rust deve superar com folga 50.000 passos/segundo
+        assert fps > 10000, f"Throughput esperado > 10.000 FPS, obtido: {fps:.0f} FPS"
+
+    def test_vectorized_rubiks_curriculum_synchronization(self):
+        """Valida que a frota de ambientes sincroniza o progresso do currículo."""
+        from system1_engine.env.adapters.rubiks import VectorizedRubiksEnv
+
+        vec_env = VectorizedRubiksEnv(num_envs=4, curriculum=True, min_depth=1, max_depth=5)
+        assert vec_env.current_depth == 1
+        obs, infos = vec_env.reset()
+        assert all(info["current_depth"] == 1 for info in infos)
 

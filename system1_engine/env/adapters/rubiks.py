@@ -611,7 +611,7 @@ class RubiksCubeEnv(gym.Env):
         min_depth: int = 1,
         max_depth: Optional[int] = None,
         target_success_rate: float = 0.90,
-        curriculum_window: int = 25,
+        curriculum_window: int = 20,
     ) -> None:
         super().__init__()
         self.render_mode = render_mode
@@ -667,6 +667,14 @@ class RubiksCubeEnv(gym.Env):
                         f"\n🚀 [CURRICULUM ATÔMICO] Sucesso {success_rate*100:.1f}% >= {self.target_success_rate*100:.0f}%! "
                         f"Profundidade promovida: {old_d} -> {self.current_depth}/{max_d_str}"
                     )
+                elif self.current_depth > self.min_depth and success_rate < 0.15 and len(self.recent_successes) >= self.curriculum_window:
+                    old_d = self.current_depth
+                    self.current_depth -= 1
+                    self.recent_successes.clear()
+                    print(
+                        f"\n⚠️ [CURRICULUM ATÔMICO] Sucesso baixo ({success_rate*100:.1f}%). "
+                        f"Recuando para reforço: {old_d} -> {self.current_depth}"
+                    )
             depth = self.current_depth
         else:
             depth = self.scramble_depth
@@ -684,6 +692,9 @@ class RubiksCubeEnv(gym.Env):
             "score": self._prev_score,
             "is_solved": self.core.is_solved(),
             "current_depth": depth,
+            "max_depth": self.max_depth,
+            "curriculum": self.curriculum,
+            "curriculum_promotions": self.curriculum_promotions,
             "curriculum_success_rate": (
                 float(np.mean(self.recent_successes)) if len(self.recent_successes) > 0 else 0.0
             ),
@@ -711,7 +722,8 @@ class RubiksCubeEnv(gym.Env):
             reward += 10.0
 
         terminated = is_solved
-        truncated = self._steps >= self.max_steps
+        eff_max_steps = min(self.max_steps, max(12, self.current_depth * 4)) if self.curriculum else self.max_steps
+        truncated = self._steps >= eff_max_steps
 
         if (terminated or truncated) and self.curriculum:
             self.recent_successes.append(1.0 if is_solved else 0.0)
@@ -723,6 +735,9 @@ class RubiksCubeEnv(gym.Env):
             "is_solved": is_solved,
             "action_name": action_name,
             "current_depth": self.current_depth if self.curriculum else self.scramble_depth,
+            "max_depth": self.max_depth,
+            "curriculum": self.curriculum,
+            "curriculum_promotions": self.curriculum_promotions,
             "curriculum_success_rate": (
                 float(np.mean(self.recent_successes)) if len(self.recent_successes) > 0 else 0.0
             ),
@@ -768,7 +783,7 @@ class RubiksCubeMacroEnv(gym.Env):
         min_depth: int = 1,
         max_depth: Optional[int] = None,
         target_success_rate: float = 0.90,
-        curriculum_window: int = 25,
+        curriculum_window: int = 20,
     ) -> None:
         super().__init__()
         self.render_mode = render_mode
@@ -824,6 +839,14 @@ class RubiksCubeMacroEnv(gym.Env):
                         f"\n🚀 [CURRICULUM MACRO] Sucesso {success_rate*100:.1f}% >= {self.target_success_rate*100:.0f}%! "
                         f"Profundidade promovida: {old_d} -> {self.current_depth}/{max_d_str}"
                     )
+                elif self.current_depth > self.min_depth and success_rate < 0.15 and len(self.recent_successes) >= self.curriculum_window:
+                    old_d = self.current_depth
+                    self.current_depth -= 1
+                    self.recent_successes.clear()
+                    print(
+                        f"\n⚠️ [CURRICULUM MACRO] Sucesso baixo ({success_rate*100:.1f}%). "
+                        f"Recuando para reforço: {old_d} -> {self.current_depth}"
+                    )
             depth = self.current_depth
         else:
             depth = self.scramble_depth
@@ -841,6 +864,9 @@ class RubiksCubeMacroEnv(gym.Env):
             "score": self._prev_score,
             "is_solved": self.core.is_solved(),
             "current_depth": depth,
+            "max_depth": self.max_depth,
+            "curriculum": self.curriculum,
+            "curriculum_promotions": self.curriculum_promotions,
             "curriculum_success_rate": (
                 float(np.mean(self.recent_successes)) if len(self.recent_successes) > 0 else 0.0
             ),
@@ -865,7 +891,8 @@ class RubiksCubeMacroEnv(gym.Env):
             reward += 15.0
 
         terminated = is_solved
-        truncated = self._steps >= self.max_steps
+        eff_max_steps = min(self.max_steps, max(12, self.current_depth * 4)) if self.curriculum else self.max_steps
+        truncated = self._steps >= eff_max_steps
 
         if (terminated or truncated) and self.curriculum:
             self.recent_successes.append(1.0 if is_solved else 0.0)
@@ -877,6 +904,9 @@ class RubiksCubeMacroEnv(gym.Env):
             "is_solved": is_solved,
             "action_name": macro_name,
             "current_depth": self.current_depth if self.curriculum else self.scramble_depth,
+            "max_depth": self.max_depth,
+            "curriculum": self.curriculum,
+            "curriculum_promotions": self.curriculum_promotions,
             "curriculum_success_rate": (
                 float(np.mean(self.recent_successes)) if len(self.recent_successes) > 0 else 0.0
             ),
@@ -891,6 +921,114 @@ class RubiksCubeMacroEnv(gym.Env):
                 steps=self._steps,
             )
         return None
+
+
+class VectorizedRubiksEnv(gym.Env):
+    """Ambiente vetorizado nativo para múltiplos cubos mágicos em paralelo.
+
+    Permite simular N cubos simultaneamente em memória (usando o Core Rust),
+    sincronizando o progresso curricular de toda a frota e viabilizando forward pass
+    em lote (batch) na GPU para throughput massivo.
+    """
+    metadata = {"render_modes": ["rgb_array"]}
+
+    def __init__(
+        self,
+        num_envs: int = 16,
+        is_macro: bool = False,
+        render_mode: Optional[str] = "rgb_array",
+        **env_kwargs,
+    ) -> None:
+        super().__init__()
+        self.num_envs = max(1, int(num_envs))
+        self.is_macro = is_macro
+        self.render_mode = render_mode
+        env_cls = RubiksCubeMacroEnv if is_macro else RubiksCubeEnv
+        self.envs: List[RubiksCubeEnv] = [
+            env_cls(render_mode=render_mode, **env_kwargs) for _ in range(self.num_envs)
+        ]
+        self.action_space = self.envs[0].action_space
+        self.observation_space = self.envs[0].observation_space
+        self.view_mode = "3d"
+
+    @property
+    def unwrapped(self):
+        return self.envs[0].unwrapped
+
+    @property
+    def current_depth(self) -> int:
+        return self.envs[0].current_depth
+
+    @property
+    def curriculum(self) -> bool:
+        return self.envs[0].curriculum
+
+    def set_view_mode(self, mode: str) -> None:
+        self.view_mode = str(mode).lower()
+        for env in self.envs:
+            env.set_view_mode(mode)
+
+    def reset(
+        self,
+        *,
+        seed: Optional[int] = None,
+        options: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[np.ndarray, List[Dict[str, Any]]]:
+        obs_list = []
+        info_list = []
+        for i, env in enumerate(self.envs):
+            env_seed = (seed + i) if seed is not None else None
+            obs, info = env.reset(seed=env_seed, options=options)
+            obs_list.append(obs)
+            info_list.append(info)
+        return np.stack(obs_list, axis=0), info_list
+
+    def step(
+        self, actions: Any
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, List[Dict[str, Any]]]:
+        if hasattr(actions, "cpu"):
+            actions = actions.cpu().numpy()
+        act_arr = np.asarray(actions).flatten()
+
+        next_obs_list = []
+        rewards = np.empty(self.num_envs, dtype=np.float32)
+        terminateds = np.empty(self.num_envs, dtype=bool)
+        truncateds = np.empty(self.num_envs, dtype=bool)
+        info_list = []
+
+        shared_depth = self.envs[0].current_depth
+        for env in self.envs:
+            if env.curriculum and env.current_depth != shared_depth:
+                env.current_depth = shared_depth
+
+        for i, env in enumerate(self.envs):
+            act_i = int(act_arr[i])
+            obs, rew, term, trunc, info = env.step(act_i)
+            if term or trunc:
+                obs, reset_info = env.reset()
+                info["terminal_observation"] = obs
+                info["reset_info"] = reset_info
+                if env.curriculum and env.current_depth != shared_depth:
+                    shared_depth = env.current_depth
+                    for other in self.envs:
+                        other.current_depth = shared_depth
+
+            next_obs_list.append(obs)
+            rewards[i] = rew
+            terminateds[i] = term
+            truncateds[i] = trunc
+            info_list.append(info)
+
+        return (
+            np.stack(next_obs_list, axis=0),
+            rewards,
+            terminateds,
+            truncateds,
+            info_list,
+        )
+
+    def render(self) -> Optional[np.ndarray]:
+        return self.envs[0].render()
 
 
 # =====================================================================

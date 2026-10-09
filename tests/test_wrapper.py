@@ -154,3 +154,28 @@ def test_wrapper_continuous_action_clipping():
     env.close()
 
 
+def test_wrapper_vectorized_environment():
+    """Verify UniversalS1Wrapper cleanly supports batched vectorized environments."""
+    from system1_engine.env.adapters.rubiks import VectorizedRubiksEnv
+
+    raw_env = VectorizedRubiksEnv(num_envs=4, scramble_depth=2)
+    env = UniversalS1Wrapper(raw_env)
+    assert env.is_vectorized
+    assert env.num_envs == 4
+
+    obs0, info = env.reset()
+    assert obs0["obs"].shape == (4, 324)
+    assert obs0["delta_obs"].shape == (4, 324)
+    assert obs0["prev_action"].shape == (4,)
+    assert obs0["prev_reward"].shape == (4,)
+
+    actions = np.array([0, 1, 2, 3], dtype=np.int64)
+    obs1, rews, terms, truncs, info = env.step(actions)
+    assert obs1["obs"].shape == (4, 324)
+    assert obs1["delta_obs"].shape == (4, 324)
+    assert rews.shape == (4,)
+    assert terms.shape == (4,)
+    assert truncs.shape == (4,)
+    assert len(info) == 4
+
+

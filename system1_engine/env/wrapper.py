@@ -49,15 +49,26 @@ class UniversalS1Wrapper(gym.Wrapper):
             elif len(shp) == 2:
                 self.visual_channels = 1
 
+        self.num_envs = getattr(env, "num_envs", 1)
+        self.is_vectorized = self.num_envs > 1
+
         self.prev_obs: Optional[np.ndarray] = None
         self.prev_action: Optional[Union[int, np.ndarray]] = None
-        self.prev_reward: float = 0.0
+        self.prev_reward: Union[float, np.ndarray] = 0.0 if not self.is_vectorized else np.zeros(self.num_envs, dtype=np.float32)
         self.latest_obs_dict: Optional[S1Observation] = None
 
         # Build dictionary observation space
         self._setup_spaces()
 
     def _get_initial_action(self) -> Union[int, np.ndarray]:
+        if self.is_vectorized:
+            if isinstance(self.action_space, gym.spaces.Discrete):
+                return np.zeros(self.num_envs, dtype=np.int64)
+            elif isinstance(self.action_space, gym.spaces.Box):
+                return np.zeros((self.num_envs, *self.action_space.shape), dtype=np.float32)
+            else:
+                raise NotImplementedError(f"Unsupported action space: {type(self.action_space)}")
+
         if isinstance(self.action_space, gym.spaces.Discrete):
             return 0
         elif isinstance(self.action_space, gym.spaces.Box):
@@ -221,9 +232,25 @@ class UniversalS1Wrapper(gym.Wrapper):
         *,
         seed: Optional[int] = None,
         options: Optional[dict[str, Any]] = None,
-    ) -> tuple[S1Observation, dict[str, Any]]:
+    ) -> tuple[S1Observation, Any]:
         """Resets the environment and flushes all temporal and causal memory buffers."""
         raw_obs, info = self.env.reset(seed=seed, options=options)
+
+        if self.is_vectorized:
+            current_obs = np.asarray(raw_obs, dtype=np.float32)
+            self.prev_obs = np.array(current_obs, copy=True)
+            self.prev_action = self._get_initial_action()
+            self.prev_reward = np.zeros(self.num_envs, dtype=np.float32)
+
+            delta_obs = np.zeros_like(current_obs, dtype=np.float32)
+            obs_dict: S1Observation = {
+                "obs": current_obs,
+                "delta_obs": delta_obs,
+                "prev_action": copy.deepcopy(self.prev_action),
+                "prev_reward": np.array(self.prev_reward, copy=True),
+            }
+            self.latest_obs_dict = obs_dict
+            return obs_dict, info
 
         if self.is_visual:
             current_obs = self._format_visual_frame(np.asarray(raw_obs))
@@ -257,9 +284,27 @@ class UniversalS1Wrapper(gym.Wrapper):
 
     def step(
         self, action: Any
-    ) -> tuple[S1Observation, float, bool, bool, dict[str, Any]]:
+    ) -> tuple[S1Observation, Any, Any, Any, Any]:
         """Takes an environment step and computes temporal differential state."""
         assert self.prev_obs is not None, "step() called before reset()"
+        if self.is_vectorized:
+            next_obs, rewards, terminateds, truncateds, info = self.env.step(action)
+            current_obs = np.asarray(next_obs, dtype=np.float32)
+            delta_obs = current_obs - self.prev_obs
+            rew_arr = np.asarray(rewards, dtype=np.float32)
+
+            obs_dict: S1Observation = {
+                "obs": current_obs,
+                "delta_obs": delta_obs,
+                "prev_action": copy.deepcopy(action),
+                "prev_reward": rew_arr,
+            }
+            self.prev_obs = np.array(current_obs, copy=True)
+            self.prev_action = copy.deepcopy(action)
+            self.prev_reward = rew_arr
+            self.latest_obs_dict = obs_dict
+            return obs_dict, rew_arr, terminateds, truncateds, info
+
         if isinstance(self.action_space, gym.spaces.Box):
             action = np.clip(np.asarray(action, dtype=np.float32), self.action_space.low, self.action_space.high)
         next_obs, reward, terminated, truncated, info = self.env.step(action)

@@ -20,6 +20,7 @@ from system1_engine.env.adapters.rubiks import (
     RubiksCubeCore,
     RubiksCubeEnv,
     RubiksCubeMacroEnv,
+    VectorizedRubiksEnv,
 )
 
 __all__ = [
@@ -39,4 +40,5 @@ __all__ = [
     "RubiksCubeCore",
     "RubiksCubeEnv",
     "RubiksCubeMacroEnv",
+    "VectorizedRubiksEnv",
 ]
