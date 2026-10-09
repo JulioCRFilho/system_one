@@ -1656,10 +1656,13 @@
       }
       const item = availableCheckpointsDetailed.find(c => c.path === val);
       if (item) {
+        const depthVal = getCheckpointDepth(item);
+        const maxDepthVal = getCheckpointMaxDepth(item);
         const envInfo = item.env_id ? ` • Ambiente: ${item.env_id}` : '';
         const dimInfo = (item.obs_dim && item.act_dim) ? ` (${item.obs_dim}D obs, ${item.act_dim} ações)` : '';
-        const retInfo = item.final_return !== null && item.final_return !== undefined ? ` • Retorno: ${item.final_return.toFixed(1)}` : '';
-        metaEl.innerText = `Tamanho: ${item.size_mb} MB${envInfo}${dimInfo}${retInfo} • Modificado em: ${item.mtime}`;
+        const depthInfo = depthVal ? ` • Profundidade: D${depthVal}${maxDepthVal ? '/' + maxDepthVal : ''}` : '';
+        const retInfo = item.final_return !== null && item.final_return !== undefined ? ` • Retorno Médio: ${item.final_return.toFixed(1)}` : '';
+        metaEl.innerText = `Tamanho: ${item.size_mb} MB${envInfo}${dimInfo}${depthInfo}${retInfo} • Modificado em: ${item.mtime}`;
       } else {
         metaEl.innerText = `Arquivo selecionado: ${val}`;
       }
@@ -1772,10 +1775,13 @@
         return;
       }
 
+      const depthVal = getCheckpointDepth(item);
+      const maxDepthVal = getCheckpointMaxDepth(item);
       const envInfo = item.env_id ? `Env: ${item.env_id}` : 'Env: não registrado';
       const dimInfo = (item.obs_dim && item.act_dim) ? ` • ${item.obs_dim}D obs / ${item.act_dim} ações` : '';
-      const retInfo = (item.final_return !== null && item.final_return !== undefined) ? ` • Retorno: ${item.final_return.toFixed(1)}` : '';
-      if (metaEl) metaEl.innerText = `${envInfo}${dimInfo}${retInfo}`;
+      const depthInfo = depthVal ? ` • Profundidade: D${depthVal}${maxDepthVal ? '/' + maxDepthVal : ''}` : '';
+      const retInfo = (item.final_return !== null && item.final_return !== undefined) ? ` • Retorno Médio: ${item.final_return.toFixed(1)}` : '';
+      if (metaEl) metaEl.innerText = `${envInfo}${dimInfo}${depthInfo}${retInfo}`;
 
       const currentEnv = document.getElementById('cfg-env').value;
       const actualEnv = currentEnv === 'custom' ? (document.getElementById('cfg-custom-env').value || '') : currentEnv;
@@ -2191,6 +2197,33 @@
       }
     }
 
+    function getCheckpointDepth(item) {
+      if (!item) return null;
+      if (item.depth !== null && item.depth !== undefined) return item.depth;
+      if (item.curriculum_depth !== null && item.curriculum_depth !== undefined) return item.curriculum_depth;
+      if (item.env_id && item.env_id.toLowerCase().includes('rubik')) {
+        const fn = (item.filename || item.path || '').toLowerCase();
+        if (fn.includes('_v3')) return 6;
+        if (fn.includes('_v2')) return 6;
+        if (fn.includes('_v1')) return 5;
+        if (fn.includes('trained')) return 1;
+      }
+      return null;
+    }
+
+    function getCheckpointMaxDepth(item) {
+      if (!item) return null;
+      if (item.curriculum_max_depth !== null && item.curriculum_max_depth !== undefined) return item.curriculum_max_depth;
+      if (item.max_depth !== null && item.max_depth !== undefined) return item.max_depth;
+      if (item.env_id && item.env_id.toLowerCase().includes('rubik')) {
+        const fn = (item.filename || item.path || '').toLowerCase();
+        if (fn.includes('_v3') || fn.includes('_v2')) return 10;
+        if (fn.includes('_v1')) return 5;
+        if (fn.includes('trained')) return 1;
+      }
+      return null;
+    }
+
     function renderCheckpointDropdowns() {
       const loadSel = document.getElementById('cfg-load');
       const transSel = document.getElementById('cfg-transfer');
@@ -2201,9 +2234,13 @@
       transSel.innerHTML = '<option value="">Nenhum (Treinar do zero)</option>';
 
       availableCheckpointsDetailed.forEach(ckpt => {
+        const depthVal = getCheckpointDepth(ckpt);
+        const maxDepthVal = getCheckpointMaxDepth(ckpt);
         const envTag = ckpt.env_id ? ` [${ckpt.env_id}]` : '';
+        const depthTag = depthVal ? ` [🎓 D${depthVal}${maxDepthVal ? '/' + maxDepthVal : ''}]` : '';
+        const retTag = (ckpt.final_return !== null && ckpt.final_return !== undefined) ? ` [Ret: ${ckpt.final_return.toFixed(1)}]` : '';
         const dimTag = (ckpt.obs_dim && ckpt.act_dim) ? ` (${ckpt.obs_dim}D→${ckpt.act_dim}A)` : '';
-        const optText = `${ckpt.path}${envTag}${dimTag} • ${ckpt.size_mb} MB`;
+        const optText = `${ckpt.path}${envTag}${depthTag}${retTag}${dimTag} • ${ckpt.size_mb} MB`;
         loadSel.innerHTML += `<option value="${ckpt.path}">${optText}</option>`;
         transSel.innerHTML += `<option value="${ckpt.path}">${optText}</option>`;
       });
@@ -2230,11 +2267,19 @@
 
       cont.innerHTML = '';
       availableCheckpointsDetailed.forEach(item => {
+        const depthVal = getCheckpointDepth(item);
+        const maxDepthVal = getCheckpointMaxDepth(item);
         const div = document.createElement('div');
         div.className = 'flex items-center justify-between p-1.5 rounded bg-gray-900/70 border border-gray-800 text-xs';
         const envBadge = item.env_id ? `<span class="px-1 py-0.2 rounded bg-cyan-950 text-cyan-400 text-[9px] border border-cyan-800 font-bold">${item.env_id}</span>` : '';
+        const depthBadge = depthVal ? `<span class="px-1.5 py-0.2 rounded bg-purple-950 text-purple-300 text-[9px] border border-purple-800 font-bold" title="Profundidade do currículo / embaralhamento">🎓 D${depthVal}${maxDepthVal ? '/' + maxDepthVal : ''}</span>` : '';
         const dimBadge = (item.obs_dim && item.act_dim) ? `<span class="text-[9px] text-gray-400 font-mono">${item.obs_dim}D obs • ${item.act_dim} ações</span>` : '';
-        const retBadge = item.final_return !== null && item.final_return !== undefined ? `<span class="text-[9px] text-emerald-400 font-bold">Retorno: ${item.final_return.toFixed(1)}</span>` : '';
+        
+        let retBadge = '';
+        if (item.final_return !== null && item.final_return !== undefined) {
+          const depthSub = depthVal ? ` (D${depthVal})` : '';
+          retBadge = `<span class="text-[9px] text-emerald-400 font-bold" title="Retorno médio obtido no treinamento">Retorno Médio: ${item.final_return.toFixed(1)}${depthSub}</span>`;
+        }
 
         const isSameEnv = item.env_id && actualEnv && (
           item.env_id.toLowerCase().replace(/[-_]/g, '') === actualEnv.toLowerCase().replace(/[-_]/g, '') ||
@@ -2248,6 +2293,7 @@
             <div class="flex items-center gap-1.5 flex-wrap">
               <span class="font-bold text-gray-200 truncate font-mono text-[11px]">${item.path}</span>
               ${envBadge}
+              ${depthBadge}
             </div>
             <div class="flex items-center gap-2 text-[9px] text-gray-500 flex-wrap">
               <span>${item.size_mb} MB</span>

@@ -200,14 +200,20 @@ def train_mode(args: argparse.Namespace) -> None:
             )
 
         if args.save:
+            extra_info = {
+                "env_id": args.env,
+                "final_return": final_return,
+                "steps": trainer.total_steps,
+            }
+            if tracker and tracker.metrics.curriculum_depth is not None:
+                extra_info["curriculum_depth"] = tracker.metrics.curriculum_depth
+                extra_info["depth"] = tracker.metrics.curriculum_depth
+            if tracker and tracker.metrics.curriculum_max_depth is not None:
+                extra_info["curriculum_max_depth"] = tracker.metrics.curriculum_max_depth
             KnowledgeTransferManager.save_checkpoint(
                 agent=agent,
                 checkpoint_path=args.save,
-                extra_info={
-                    "env_id": args.env,
-                    "final_return": final_return,
-                    "steps": trainer.total_steps,
-                },
+                extra_info=extra_info,
             )
             print(f"Checkpoint successfully saved to: {args.save}")
 

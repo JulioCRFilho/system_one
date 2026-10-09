@@ -86,7 +86,7 @@ def test_checkpoint_inspection_and_evaluation_compatibility(tmp_path):
     KnowledgeTransferManager.save_checkpoint(
         acro_agent,
         acro_path,
-        extra_info={"env_id": "Acrobot-v1", "final_return": -85.0, "steps": 5000},
+        extra_info={"env_id": "Acrobot-v1", "final_return": -85.0, "steps": 5000, "curriculum_depth": 3, "curriculum_max_depth": 5},
         auto_sync_web=False,
     )
 
@@ -97,6 +97,9 @@ def test_checkpoint_inspection_and_evaluation_compatibility(tmp_path):
     assert meta["act_dim"] == 3
     assert meta["final_return"] == -85.0
     assert meta["steps"] == 5000
+    assert meta["curriculum_depth"] == 3
+    assert meta["depth"] == 3
+    assert meta["curriculum_max_depth"] == 5
 
     # 3. Create a CartPole agent (obs=4, act=2)
     cart_env = UniversalS1Wrapper(gym.make("CartPole-v1"))

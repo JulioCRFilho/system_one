@@ -458,10 +458,27 @@ def run_worker_train(config: Dict[str, Any], hud_client: HUDClient) -> None:
         )
 
         if save_path:
+            extra_info = {
+                "env_id": env_id,
+                "final_return": final_return,
+                "steps": trainer.total_steps,
+            }
+            if tracker.metrics.curriculum_depth is not None:
+                extra_info["curriculum_depth"] = tracker.metrics.curriculum_depth
+                extra_info["depth"] = tracker.metrics.curriculum_depth
+            elif config.get("scramble_depth") is not None:
+                extra_info["scramble_depth"] = int(config["scramble_depth"])
+                extra_info["depth"] = int(config["scramble_depth"])
+
+            if tracker.metrics.curriculum_max_depth is not None:
+                extra_info["curriculum_max_depth"] = tracker.metrics.curriculum_max_depth
+            elif config.get("scramble_depth") is not None:
+                extra_info["curriculum_max_depth"] = int(config["scramble_depth"])
+
             KnowledgeTransferManager.save_checkpoint(
                 agent=agent,
                 checkpoint_path=save_path,
-                extra_info={"env_id": env_id, "final_return": final_return, "steps": trainer.total_steps},
+                extra_info=extra_info,
                 auto_sync_web=config.get("auto_sync_web", True),
             )
             print(f"Checkpoint salvo com sucesso em: {save_path}")
@@ -739,10 +756,17 @@ def run_worker_eval(config: Dict[str, Any], hud_client: HUDClient) -> None:
             print(f"Episódio {ep + 1}/{episodes} finalizado | Retorno: {ep_reward:.1f} | Passos: {steps}")
 
         if save_path:
+            extra_info = {"env_id": env_id, "evaluated_episodes": episodes}
+            if tracker.metrics.curriculum_depth is not None:
+                extra_info["curriculum_depth"] = tracker.metrics.curriculum_depth
+                extra_info["depth"] = tracker.metrics.curriculum_depth
+            elif config.get("scramble_depth") is not None:
+                extra_info["scramble_depth"] = int(config["scramble_depth"])
+                extra_info["depth"] = int(config["scramble_depth"])
             KnowledgeTransferManager.save_checkpoint(
                 agent=agent,
                 checkpoint_path=save_path,
-                extra_info={"env_id": env_id, "evaluated_episodes": episodes},
+                extra_info=extra_info,
                 auto_sync_web=config.get("auto_sync_web", True),
             )
             print(f"Checkpoint salvo com sucesso em: {save_path}")

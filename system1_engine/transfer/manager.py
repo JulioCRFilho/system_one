@@ -226,6 +226,9 @@ class KnowledgeTransferManager:
             "act_dim": None,
             "steps": None,
             "final_return": None,
+            "curriculum_depth": None,
+            "curriculum_max_depth": None,
+            "depth": None,
             "is_visual": False,
         }
         try:
@@ -264,6 +267,25 @@ class KnowledgeTransferManager:
                     info["env_id"] = "MountainCar-v0"
                 elif "vizdoom" in fn or "doom" in fn:
                     info["env_id"] = "vizdoom"
+
+            # Extrai profundidade de currículo / treino se houver
+            depth = extra.get("curriculum_depth") or extra.get("depth") or extra.get("scramble_depth")
+            max_depth = extra.get("curriculum_max_depth") or extra.get("max_depth")
+            if depth is None and info["env_id"] and "rubik" in info["env_id"].lower():
+                fn = os.path.basename(checkpoint_path).lower()
+                if "_v2" in fn:
+                    depth = 6
+                    max_depth = 10
+                elif "_v1" in fn:
+                    depth = 5
+                    max_depth = 5
+                elif "trained" in fn:
+                    depth = 1
+                    max_depth = 1
+
+            info["curriculum_depth"] = depth
+            info["curriculum_max_depth"] = max_depth
+            info["depth"] = depth
 
         except Exception as e:
             info["error"] = str(e)

@@ -115,6 +115,9 @@ class HUDServer:
                     "act_dim": meta.get("act_dim"),
                     "final_return": meta.get("final_return"),
                     "steps": meta.get("steps"),
+                    "curriculum_depth": meta.get("curriculum_depth"),
+                    "curriculum_max_depth": meta.get("curriculum_max_depth"),
+                    "depth": meta.get("depth"),
                 })
             except Exception:
                 results.append({"path": path, "filename": os.path.basename(path), "size_mb": 0.0, "mtime": "—"})
