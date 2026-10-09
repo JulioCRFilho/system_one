@@ -222,6 +222,7 @@ class UniversalS1Agent(nn.Module):
         calibration: Optional[Union[float, str]] = None,
         auto_calibrate: bool = False,
         avoid_action: Optional[Union[int, List[int], Set[int]]] = None,
+        quality_filter: bool = True,
     ) -> Union[int, np.ndarray, ReflexDecision]:
         """Ultra-fast single-forward reflex inference.
 
@@ -284,8 +285,10 @@ class UniversalS1Agent(nn.Module):
                 prev_reward=t_rew,
             )
         else:
-            raw_delta = obs_dict["delta_obs"]
-            if isinstance(raw_delta, torch.Tensor):
+            raw_delta = obs_dict.get("delta_obs")
+            if raw_delta is None:
+                t_delta = torch.zeros_like(t_obs)
+            elif isinstance(raw_delta, torch.Tensor):
                 t_delta = raw_delta
                 if t_delta.dim() == 1:
                     t_delta = t_delta.unsqueeze(0).unsqueeze(0)
@@ -343,21 +346,6 @@ class UniversalS1Agent(nn.Module):
                 if self._stagnation_count >= 2:
                     self._adaptive_calibration = min(0.80, self._adaptive_calibration + 0.10)
 
-            calib = float(self._adaptive_calibration)
-            is_deterministic_mode = (calib <= 0.01)
-            eff_temp = 1.0 + 0.5 * calib
-            eff_scale = calib
-        elif calibration is not None:
-            calib = float(np.clip(float(calibration), 0.0, 1.0))
-            is_deterministic_mode = (calib <= 0.0)
-            eff_temp = 1.0 + 0.5 * calib
-            eff_scale = calib
-        else:
-            is_deterministic_mode = deterministic
-            eff_temp = 1.0
-            eff_scale = noise_scale if noise_scale > 0.0 else 1.0
-            calib = 0.0 if deterministic else (noise_scale if noise_scale > 0.0 else 1.0)
-
         # Resolução do conjunto de ações a evitar / quebra de ciclos
         avoid_set = set()
         if avoid_action is not None:
@@ -367,7 +355,7 @@ class UniversalS1Agent(nn.Module):
                 avoid_set.add(int(avoid_action))
 
         hist = getattr(self, "_action_history", [])
-        if is_auto_calib and self._stagnation_count >= 2:
+        if (is_auto_calib and self._stagnation_count >= 2) or (quality_filter and len(hist) >= 3):
             if len(hist) >= 3 and hist[-1] == hist[-3]:
                 # Oscilação A -> B -> A sob estagnação: evita B para romper o ciclo vicioso
                 avoid_set.add(hist[-2])
@@ -380,12 +368,50 @@ class UniversalS1Agent(nn.Module):
             logits_sq = self.policy_head.linear(h).squeeze(0).squeeze(0)
             probs = torch.softmax(logits_sq, dim=-1)
             best_action = int(torch.argmax(probs, dim=-1).item())
+            n_acts = probs.shape[0]
 
-            # Detecção de anulação imediata em cubo atômico (apenas quando estagnado em auto-calibração)
-            if is_auto_calib and self._stagnation_count >= 2 and len(hist) >= 1 and probs.shape[0] == 12:
+            if n_acts > 1:
+                top_probs, _ = torch.topk(probs, k=min(2, n_acts))
+                confidence = float(top_probs[0].item())
+                margin = float((top_probs[0] - top_probs[1]).item())
+                entropy = float(-torch.sum(probs * torch.log(probs + 1e-8)).item())
+                max_entropy = float(np.log(n_acts))
+                uncertainty = float(np.clip(entropy / max_entropy, 0.0, 1.0))
+            else:
+                confidence = 1.0
+                margin = 1.0
+                entropy = 0.0
+                uncertainty = 0.0
+
+            # Calibração efetiva modulada pela incerteza intrínseca da rede
+            if is_auto_calib:
+                if self._adaptive_calibration <= 0.0:
+                    calib = 0.0
+                else:
+                    calib = float(np.clip(
+                        self._adaptive_calibration * (0.6 + 0.4 * uncertainty) + 0.10 * max(0.0, uncertainty - 0.50),
+                        0.0,
+                        0.80,
+                    ))
+                is_deterministic_mode = (calib <= 0.01)
+                eff_temp = 1.0 + 0.5 * calib
+            elif calibration is not None:
+                calib = float(np.clip(float(calibration), 0.0, 1.0))
+                is_deterministic_mode = (calib <= 0.0)
+                eff_temp = 1.0 + 0.5 * calib
+            else:
+                is_deterministic_mode = deterministic
+                eff_temp = 1.0
+                calib = 0.0 if deterministic else (noise_scale if noise_scale > 0.0 else 1.0)
+
+            # Filtro de Qualidade de Ação (Action Quality Filter)
+            # Em cubo atômico (12 ações), o movimento imediatamente inverso (ex: U -> U')
+            # anula o passo anterior e desperdiça tempo. Evita reversão direta se não houver convicção quase total
+            if (quality_filter or (is_auto_calib and self._stagnation_count >= 2)) and len(hist) >= 1 and probs.shape[0] == 12:
                 last_act = hist[-1]
                 inv_act = (last_act + 1) if (last_act % 2 == 0) else (last_act - 1)
-                avoid_set.add(inv_act)
+                if confidence < 0.96:
+                    avoid_set.add(inv_act)
 
             if is_deterministic_mode:
                 action = best_action
@@ -397,7 +423,7 @@ class UniversalS1Agent(nn.Module):
                 else:
                     action = best_action
 
-            # Quebra estrita de ciclos (Cycle Breaker):
+            # Quebra estrita de ciclos (Cycle Breaker) e filtro de qualidade:
             if len(avoid_set) > 0 and action in avoid_set and probs.shape[0] > 1:
                 top_indices = torch.argsort(probs, descending=True)
                 for alt_idx in top_indices:
@@ -414,22 +440,6 @@ class UniversalS1Agent(nn.Module):
 
             if not return_decision:
                 return action
-
-            # Cálculo de incerteza do reflexo
-            n_acts = probs.shape[0]
-
-            if n_acts > 1:
-                top_probs, _ = torch.topk(probs, k=min(2, n_acts))
-                confidence = float(top_probs[0].item())
-                margin = float((top_probs[0] - top_probs[1]).item())
-                entropy = float(-torch.sum(probs * torch.log(probs + 1e-8)).item())
-                max_entropy = float(np.log(n_acts))
-                uncertainty = float(np.clip(entropy / max_entropy, 0.0, 1.0))
-            else:
-                confidence = 1.0
-                margin = 1.0
-                entropy = 0.0
-                uncertainty = 0.0
 
             is_uncertain = (uncertainty >= uncertainty_threshold) or (confidence < confidence_threshold)
             latent_val = float(self.value_head(h).squeeze().item()) if return_value else None
@@ -455,6 +465,35 @@ class UniversalS1Agent(nn.Module):
             std = torch.exp(log_std_clamped).cpu().numpy()
             std = np.clip(std, a_min=1e-6, a_max=100.0)
 
+            # Entropia diferencial contínua H = 0.5 * sum(1 + ln(2*pi*sigma^2))
+            entropy = float(0.5 * np.sum(1.0 + np.log(2.0 * np.pi * (std ** 2))))
+
+            # Variância média das ações contínuas
+            var = float(np.mean(std ** 2))
+            var_scale = 0.5
+            uncertainty = float(np.clip(2.0 / (1.0 + np.exp(-var / var_scale)) - 1.0, 0.0, 1.0))
+            confidence = float(np.clip(1.0 - uncertainty, 0.0, 1.0))
+
+            if is_auto_calib:
+                if self._adaptive_calibration <= 0.0:
+                    calib = 0.0
+                else:
+                    calib = float(np.clip(
+                        self._adaptive_calibration * (0.6 + 0.4 * uncertainty) + 0.10 * max(0.0, uncertainty - 0.50),
+                        0.0,
+                        0.80,
+                    ))
+                is_deterministic_mode = (calib <= 0.01)
+                eff_scale = calib
+            elif calibration is not None:
+                calib = float(np.clip(float(calibration), 0.0, 1.0))
+                is_deterministic_mode = (calib <= 0.0)
+                eff_scale = calib
+            else:
+                is_deterministic_mode = deterministic
+                eff_scale = noise_scale if noise_scale > 0.0 else 1.0
+                calib = 0.0 if deterministic else (noise_scale if noise_scale > 0.0 else 1.0)
+
             # Aplicação de amostragem estocástica ou ruído calibrado (ex: avaliação de locomoção fluida)
             if not is_deterministic_mode or (noise_scale > 0.0 and calibration is None and not is_auto_calib):
                 action_np = action_np + eff_scale * std * np.random.randn(*action_np.shape)
@@ -463,17 +502,6 @@ class UniversalS1Agent(nn.Module):
                 action_np = np.clip(action_np, self.action_space.low, self.action_space.high)
             if not return_decision:
                 return action_np
-
-            # Entropia diferencial contínua H = 0.5 * sum(1 + ln(2*pi*sigma^2))
-            entropy = float(0.5 * np.sum(1.0 + np.log(2.0 * np.pi * (std ** 2))))
-
-            # Variância média das ações contínuas
-            var = float(np.mean(std ** 2))
-
-            # Normalização estrita para [0.0, 1.0] via sigmoide na variância
-            var_scale = 0.5
-            uncertainty = float(np.clip(2.0 / (1.0 + np.exp(-var / var_scale)) - 1.0, 0.0, 1.0))
-            confidence = float(np.clip(1.0 - uncertainty, 0.0, 1.0))
 
             is_uncertain = (uncertainty >= uncertainty_threshold) or (confidence < confidence_threshold)
             latent_val = float(self.value_head(h).squeeze().item()) if return_value else None
@@ -503,6 +531,7 @@ class UniversalS1Agent(nn.Module):
         calibration: Optional[Union[float, str]] = None,
         auto_calibrate: bool = False,
         avoid_action: Optional[Union[int, List[int], Set[int]]] = None,
+        quality_filter: bool = True,
     ) -> ReflexDecision:
         """Executa a decisão reflexiva retornando a estrutura ReflexDecision com telemetria e calibração."""
         decision = self.act_fast(
@@ -516,6 +545,24 @@ class UniversalS1Agent(nn.Module):
             calibration=calibration,
             auto_calibrate=auto_calibrate,
             avoid_action=avoid_action,
+            quality_filter=quality_filter,
         )
         assert isinstance(decision, ReflexDecision)
         return decision
+
+    def solve_with_quality_ensemble(
+        self,
+        env: Any,
+        max_steps: int = 40,
+        calibrations: Optional[List[Any]] = None,
+        is_atomic_cube: bool = True,
+    ) -> Tuple[Any, List[Any]]:
+        """Executa múltiplos cenários sob diferentes calibrações e seleciona o melhor resultado garantindo qualidade."""
+        from system1_engine.core.ensemble import QualityEnsembleEvaluator
+        return QualityEnsembleEvaluator.evaluate_scenarios(
+            agent=self,
+            env=env,
+            max_steps=max_steps,
+            calibrations=calibrations,
+            is_atomic_cube=is_atomic_cube,
+        )

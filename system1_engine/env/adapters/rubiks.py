@@ -673,7 +673,7 @@ class RubiksCubeEnv(gym.Env):
 
         if options and "view_mode" in options:
             self.set_view_mode(options["view_mode"])
-        self.core.scramble(depth=depth, use_macros=False, rng=self.rng)
+        self._last_scramble_moves = self.core.scramble(depth=depth, use_macros=False, rng=self.rng)
         self._steps = 0
         self._last_action_name = "RESET"
         self._prev_score = self.core.get_score()
@@ -744,6 +744,29 @@ class RubiksCubeEnv(gym.Env):
                 steps=self._steps,
             )
         return None
+
+    def clone(self) -> "RubiksCubeEnv":
+        """Cria uma cópia idêntica e independente do ambiente no estado exato atual."""
+        new_env = RubiksCubeEnv(
+            render_mode=self.render_mode,
+            scramble_depth=self.scramble_depth,
+            max_steps=self.max_steps,
+            curriculum=self.curriculum,
+            min_depth=self.min_depth,
+            max_depth=self.max_depth,
+            target_success_rate=self.target_success_rate,
+            curriculum_window=self.curriculum_window,
+        )
+        new_env.reset()
+        new_env.core.reset()
+        for m in getattr(self, "_last_scramble_moves", []):
+            new_env.core.apply_atomic(m)
+        new_env.core.state = self.core.state.copy()
+        new_env._steps = self._steps
+        new_env._last_action_name = self._last_action_name
+        new_env._prev_score = self._prev_score
+        new_env._last_scramble_moves = list(getattr(self, "_last_scramble_moves", []))
+        return new_env
 
 
 class RubiksCubeMacroEnv(gym.Env):
@@ -837,7 +860,7 @@ class RubiksCubeMacroEnv(gym.Env):
 
         if options and "view_mode" in options:
             self.set_view_mode(options["view_mode"])
-        self.core.scramble(depth=depth, use_macros=True, rng=self.rng)
+        self._last_scramble_moves = self.core.scramble(depth=depth, use_macros=True, rng=self.rng)
         self._steps = 0
         self._last_action_name = "RESET"
         self._prev_score = self.core.get_score()
@@ -905,6 +928,29 @@ class RubiksCubeMacroEnv(gym.Env):
                 steps=self._steps,
             )
         return None
+
+    def clone(self) -> "RubiksCubeMacroEnv":
+        """Cria uma cópia idêntica e independente do ambiente no estado exato atual."""
+        new_env = RubiksCubeMacroEnv(
+            render_mode=self.render_mode,
+            scramble_depth=self.scramble_depth,
+            max_steps=self.max_steps,
+            curriculum=self.curriculum,
+            min_depth=self.min_depth,
+            max_depth=self.max_depth,
+            target_success_rate=self.target_success_rate,
+            curriculum_window=self.curriculum_window,
+        )
+        new_env.reset()
+        new_env.core.reset()
+        for m in getattr(self, "_last_scramble_moves", []):
+            new_env.core.apply_macro(m)
+        new_env.core.state = self.core.state.copy()
+        new_env._steps = self._steps
+        new_env._last_action_name = self._last_action_name
+        new_env._prev_score = self._prev_score
+        new_env._last_scramble_moves = list(getattr(self, "_last_scramble_moves", []))
+        return new_env
 
 
 class InfoList(list):

@@ -52,6 +52,8 @@ class RecurrentPPOTrainer:
         self.tracker = tracker
 
         # Suporte a exploração automática / homeostática no treino PPO
+        self._min_adaptive_scale = 0.40
+        self._max_adaptive_scale = 1.00
         if isinstance(exploration_scale, str) and exploration_scale.lower() in ("auto", "adaptive", "homeostatic"):
             self.is_auto_exploration = True
             self.exploration_scale = 0.80
@@ -136,6 +138,24 @@ class RecurrentPPOTrainer:
             }
             if self._vec_buf_delta is not None:
                 self._vec_input_dict["delta_obs"] = self._vec_buf_delta
+
+            self._vec_recent_actions: List[deque[int]] = [deque(maxlen=6) for _ in range(self.num_envs)]
+            if self.num_envs >= 4:
+                # Estratificação de Exploração Térmica / Quality-Diverse Ensemble em Ambientes Simultâneos:
+                # - Envs 0..E//4 - 1 (Elite / Anchor): 0.50x escala (alta precisão determinística, soluções de máxima pureza)
+                # - Envs E//4..3*E//4 - 1 (Balanced): 1.00x escala (aprendizado nominal equilibrado)
+                # - Envs 3*E//4..E - 1 (Exploratory): 1.35x escala (inovação contínua para escapar de mínimos locais)
+                n_elite = max(1, self.num_envs // 4)
+                n_exploratory = max(1, self.num_envs // 4)
+                n_balanced = self.num_envs - n_elite - n_exploratory
+                multipliers = np.concatenate([
+                    np.full(n_elite, 0.50, dtype=np.float32),
+                    np.full(n_balanced, 1.00, dtype=np.float32),
+                    np.full(n_exploratory, 1.35, dtype=np.float32),
+                ])
+                self._env_scale_multipliers = torch.from_numpy(multipliers).to(self.device).view(self.num_envs, 1, 1)
+            else:
+                self._env_scale_multipliers = torch.ones((self.num_envs, 1, 1), dtype=torch.float32, device=self.device)
 
         # Persistent episode statistics across rollout batches
         self.episode_returns: deque[float] = deque(maxlen=20)
@@ -232,20 +252,52 @@ class RecurrentPPOTrainer:
 
                 if self.agent.is_discrete:
                     logits = dist.logits
-                    if curr_scale != 1.0:
-                        scaled_logits = logits / curr_scale
-                        dist_sample = torch.distributions.Categorical(logits=scaled_logits)
+                    num_acts = logits.shape[-1]
+                    penalized_logits = logits.clone()
+
+                    # Vectorized Action Quality Filter & Inverse Move Pruning (Melhoria 3)
+                    if num_acts == 12:
+                        for e in range(E):
+                            e_hist = self._vec_recent_actions[e]
+                            if len(e_hist) >= 1:
+                                last_a = e_hist[-1]
+                                inv_a = (last_a + 1) if (last_a % 2 == 0) else (last_a - 1)
+                                penalized_logits[e, 0, inv_a] -= 4.0
+                            if len(e_hist) >= 3 and e_hist[-1] == e_hist[-3]:
+                                penalized_logits[e, 0, e_hist[-2]] -= 3.0
                     else:
-                        dist_sample = dist
+                        for e in range(E):
+                            e_hist = self._vec_recent_actions[e]
+                            if len(e_hist) >= 3 and e_hist[-1] == e_hist[-3]:
+                                penalized_logits[e, 0, e_hist[-2]] -= 3.0
+
+                    # Estratificação térmica por ambiente (Quality-Diverse Exploration)
+                    if hasattr(self, "_env_scale_multipliers") and self.num_envs >= 4:
+                        env_scales = (curr_scale * self._env_scale_multipliers).clamp(min=0.25, max=1.50)
+                        scaled_logits = penalized_logits / env_scales
+                    elif curr_scale != 1.0:
+                        scaled_logits = penalized_logits / curr_scale
+                    else:
+                        scaled_logits = penalized_logits
+
+                    dist_sample = torch.distributions.Categorical(logits=scaled_logits)
                     action = dist_sample.sample()
                     log_prob = dist_sample.log_prob(action)
                     env_action = action.squeeze(1).cpu().numpy()
+
+                    # Atualiza histórico de ações por ambiente
+                    for e in range(E):
+                        self._vec_recent_actions[e].append(int(env_action[e]))
                 else:
-                    if curr_scale != 1.0:
+                    if hasattr(self, "_env_scale_multipliers") and self.num_envs >= 4:
+                        env_scales = (curr_scale * self._env_scale_multipliers).clamp(min=0.25, max=1.50)
+                        scaled_std = dist.scale * env_scales
+                    elif curr_scale != 1.0:
                         scaled_std = dist.scale * curr_scale
-                        dist_sample = torch.distributions.Normal(loc=dist.mean, scale=scaled_std)
                     else:
-                        dist_sample = dist
+                        scaled_std = dist.scale
+
+                    dist_sample = torch.distributions.Normal(loc=dist.mean, scale=scaled_std)
                     action = dist_sample.sample()
                     log_prob = dist_sample.log_prob(action).sum(dim=-1)
                     env_action = action.squeeze(1).cpu().numpy()
@@ -312,6 +364,7 @@ class RecurrentPPOTrainer:
                     for d_i in done_indices:
                         self.episode_returns.append(float(curr_ep_returns[d_i]))
                         curr_ep_returns[d_i] = 0.0
+                        self._vec_recent_actions[d_i].clear()
                     next_hx[:, done_indices, :] = 0.0
                     ep_starts = dones.copy()
                 else:
@@ -319,18 +372,6 @@ class RecurrentPPOTrainer:
 
                 current_obs_dict = next_obs_dict
                 current_hx = next_hx
-
-                if self.is_auto_exploration:
-                    mean_r = float(np.mean(rewards))
-                    delta_r = mean_r - self._reward_ema
-                    self._reward_ema = 0.9 * self._reward_ema + 0.1 * mean_r
-                    if mean_r > 0.01 or delta_r > 0.01:
-                        self._stagnation_count = 0
-                        self._adaptive_scale = max(0.15, self._adaptive_scale - 0.02)
-                    else:
-                        self._stagnation_count += 1
-                        if self._stagnation_count >= 3:
-                            self._adaptive_scale = min(1.0, self._adaptive_scale + 0.01)
 
                 if step_callback is not None:
                     step_callback()
@@ -412,12 +453,30 @@ class RecurrentPPOTrainer:
             returns=flat_ret,
         )
 
-        if self.is_auto_exploration:
-            self.exploration_scale = float(self._adaptive_scale)
-
         mean_return = (
             float(np.mean(self.episode_returns)) if len(self.episode_returns) > 0 else 0.0
         )
+
+        if self.is_auto_exploration:
+            delta_ret = mean_return - self._reward_ema
+            self._reward_ema = 0.85 * self._reward_ema + 0.15 * mean_return
+            if mean_return > 0.05 or delta_ret > 0.02:
+                self._stagnation_count = 0
+                self._adaptive_scale = max(self._min_adaptive_scale, self._adaptive_scale - 0.03)
+            else:
+                self._stagnation_count += 1
+                if self._stagnation_count >= 2:
+                    self._adaptive_scale = min(self._max_adaptive_scale, self._adaptive_scale + 0.04)
+
+            # Reativa energia de exploração quando houver promoção curricular
+            primary_info = env_infos[0] if isinstance(env_infos, list) and len(env_infos) > 0 else (env_infos if isinstance(env_infos, dict) else {})
+            cur_promotions = primary_info.get("curriculum_promotions", 0)
+            if primary_info.get("curriculum_promoted", False) or cur_promotions > getattr(self, "_last_promotions", 0):
+                self._last_promotions = cur_promotions
+                self._adaptive_scale = max(self._adaptive_scale, 0.70)
+
+            self.exploration_scale = float(self._adaptive_scale)
+
         return current_obs_dict, current_hx, ep_starts, mean_return
 
     def collect_rollouts(
@@ -514,22 +573,6 @@ class RecurrentPPOTrainer:
                 next_obs_dict, reward, terminated, truncated, env_info = self.env.step(env_action)
                 done = terminated or truncated
 
-                # Auto-correção homeostática por momentum de recompensa
-                if self.is_auto_exploration:
-                    rew_f = float(reward)
-                    delta_r = rew_f - self._reward_ema
-                    self._reward_ema = 0.9 * self._reward_ema + 0.1 * rew_f
-
-                    if rew_f > 0.01 or delta_r > 0.01:
-                        # Progresso / recompensa: resfria para buscar o equilíbrio e estabilidade das decisões
-                        self._stagnation_count = 0
-                        self._adaptive_scale = max(0.15, self._adaptive_scale - 0.02)
-                    else:
-                        # Estagnação: aquece gradualmente para auto-correção e escape de armadilhas
-                        self._stagnation_count += 1
-                        if self._stagnation_count >= 3:
-                            self._adaptive_scale = min(1.0, self._adaptive_scale + 0.01)
-
                 if self.tracker is not None:
                     self.tracker.record_env_step(reward=reward, done=done, info=env_info)
 
@@ -576,12 +619,23 @@ class RecurrentPPOTrainer:
             adv = self.buffer.advantages
             self.buffer.advantages = (adv - adv.mean()) / (adv.std() + 1e-8)
 
-        if self.is_auto_exploration:
-            self.exploration_scale = float(self._adaptive_scale)
-
         mean_return = (
             float(np.mean(self.episode_returns)) if len(self.episode_returns) > 0 else 0.0
         )
+
+        if self.is_auto_exploration:
+            delta_ret = mean_return - self._reward_ema
+            self._reward_ema = 0.85 * self._reward_ema + 0.15 * mean_return
+            if mean_return > 0.05 or delta_ret > 0.02:
+                self._stagnation_count = 0
+                self._adaptive_scale = max(self._min_adaptive_scale, self._adaptive_scale - 0.03)
+            else:
+                self._stagnation_count += 1
+                if self._stagnation_count >= 2:
+                    self._adaptive_scale = min(self._max_adaptive_scale, self._adaptive_scale + 0.04)
+
+            self.exploration_scale = float(self._adaptive_scale)
+
         return current_obs_dict, current_hx, episode_start, mean_return
 
     def train_epoch(self) -> Dict[str, float]:

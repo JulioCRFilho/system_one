@@ -1402,6 +1402,9 @@ class System1AgentWeb {
     }
     ranked.sort((a, b) => b.prob - a.prob);
 
+    const maxEntropy = Math.log(logits.length);
+    const uncertainty = Math.min(1.0, Math.max(0.0, entropy / maxEntropy));
+
     // Calibração Contínua de Ação [0.0 = Determinístico/argmax, 1.0 = Estocástico Total] ou Auto-Calibração Homeostática
     let calib = 0.5;
     const isAuto = Boolean(options.autoCalibrate || options.calibration === 'auto');
@@ -1419,7 +1422,11 @@ class System1AgentWeb {
           this.dynamicCalibration = Math.min(0.80, this.dynamicCalibration + 0.10);
         }
       }
-      calib = this.dynamicCalibration;
+      if (this.dynamicCalibration <= 0.0) {
+        calib = 0.0;
+      } else {
+        calib = Math.min(0.80, Math.max(0.0, this.dynamicCalibration * (0.6 + 0.4 * uncertainty) + 0.10 * Math.max(0.0, uncertainty - 0.50)));
+      }
     } else {
       const calibration = options.calibration !== undefined 
         ? options.calibration 
@@ -1427,7 +1434,7 @@ class System1AgentWeb {
       calib = Math.min(1.0, Math.max(0.0, typeof calibration === 'number' ? calibration : 0.5));
     }
 
-    // Resolução do conjunto de ações a evitar / quebra de ciclos
+    // Resolução do conjunto de ações a evitar / quebra de ciclos e qualidade
     const avoidSet = new Set();
     if (options.avoidAction !== undefined) {
       if (Array.isArray(options.avoidAction)) {
@@ -1438,16 +1445,21 @@ class System1AgentWeb {
     }
 
     const hist = this.actionHistory || [];
-    if (isAuto && this.stagnationCount >= 2) {
+    if ((isAuto && this.stagnationCount >= 2) || (options.qualityFilter !== false && hist.length >= 3)) {
       if (hist.length >= 3 && hist[hist.length - 1] === hist[hist.length - 3]) {
         // Oscilação A -> B -> A sob estagnação: evita B para romper o ciclo vicioso
         avoidSet.add(hist[hist.length - 2]);
       } else if (hist.length >= 3 && hist[hist.length - 1] === hist[hist.length - 2] && hist[hist.length - 2] === hist[hist.length - 3]) {
         avoidSet.add(hist[hist.length - 1]);
       }
-      if (hist.length >= 1 && logits.length === 12) {
-        const last = hist[hist.length - 1];
-        const inv = (last % 2 === 0) ? last + 1 : last - 1;
+    }
+    // Action Quality Filter & Inverse Pruning:
+    // Em cubo atômico (12 ações), o movimento imediatamente inverso (ex: U -> U')
+    // anula o passo anterior e desperdiça tempo. Evita reversão direta se houver histórico e maxProb < 0.96.
+    if (options.qualityFilter !== false && hist.length >= 1 && logits.length === 12) {
+      const last = hist[hist.length - 1];
+      const inv = (last % 2 === 0) ? last + 1 : last - 1;
+      if (maxProb < 0.96) {
         avoidSet.add(inv);
       }
     }
@@ -1492,9 +1504,6 @@ class System1AgentWeb {
     if (!this.actionHistory) this.actionHistory = [];
     this.actionHistory.push(chosenAction);
     if (this.actionHistory.length > 8) this.actionHistory.shift();
-
-    const maxEntropy = Math.log(logits.length);
-    const uncertainty = Math.min(1.0, Math.max(0.0, entropy / maxEntropy));
 
     this.prevAction = chosenAction;
 

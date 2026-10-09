@@ -1,0 +1,105 @@
+"""Testes formais do mecanismo de garantia de qualidade e ensemble multicalibrado."""
+
+import pytest
+import numpy as np
+import gymnasium as gym
+import torch
+
+from system1_engine.core.agent import UniversalS1Agent, ReflexDecision
+from system1_engine.core.ensemble import QualityEnsembleEvaluator, TrajectoryResult
+from system1_engine.env.adapters.rubiks import RubiksCubeEnv
+from system1_engine.training.ppo import RecurrentPPOTrainer
+from system1_engine.env.wrapper import UniversalS1Wrapper
+
+
+def test_action_quality_filter_prevents_immediate_inverse():
+    """Garante que o Action Quality Filter impede a anulação imediata do movimento anterior no cubo atômico."""
+    env = RubiksCubeEnv(scramble_depth=2)
+    obs, _ = env.reset(seed=42)
+
+    agent = UniversalS1Agent(obs_space=env.observation_space, action_space=env.action_space)
+    agent.eval()
+
+    obs_dict = {
+        "obs": obs,
+        "prev_action": 0,
+        "prev_reward": 0.0,
+        "delta_obs": None,
+    }
+
+    # Executa primeiro passo: suponha que escolheu ação A
+    dec1 = agent.act_with_confidence(obs_dict, quality_filter=True)
+    first_act = dec1.action
+
+    # O inverso de first_act
+    inv_act = (first_act + 1) if (first_act % 2 == 0) else (first_act - 1)
+
+    # Executa segundo passo com o mesmo agente (histórico ativo)
+    dec2 = agent.act_with_confidence(obs_dict, quality_filter=True)
+    second_act = dec2.action
+
+    # O segundo passo NÃO deve ser o inverso do primeiro, pois desfaria o cubo
+    assert second_act != inv_act, f"Action Quality Filter falhou: escolheu inverso {second_act} de {first_act}"
+
+
+def test_multi_scenario_quality_ensemble_solves_or_ranks():
+    """Valida que o QualityEnsembleEvaluator executa múltiplos cenários sob calibrações distintas e seleciona o melhor."""
+    env = RubiksCubeEnv(scramble_depth=1)
+    env.reset(seed=123)
+
+    agent = UniversalS1Agent(obs_space=env.observation_space, action_space=env.action_space)
+    agent.eval()
+
+    best_traj, all_trajs = agent.solve_with_quality_ensemble(
+        env=env,
+        max_steps=15,
+        calibrations=[0.0, 0.15, "auto", 0.35],
+    )
+
+    assert len(all_trajs) == 4
+    assert isinstance(best_traj, TrajectoryResult)
+    # Deve estar ordenado por quality_score
+    for i in range(len(all_trajs) - 1):
+        assert all_trajs[i].quality_score >= all_trajs[i + 1].quality_score
+
+    # Todos os resultados devem ter métricas preenchidas
+    for t in all_trajs:
+        assert 0.0 <= t.purity_score <= 1.0
+        assert t.steps > 0
+        assert len(t.actions) == t.steps
+
+
+def test_ppo_vectorized_exploration_scale_does_not_collapse():
+    """Garante que a escala de exploração adaptativa no treino PPO vetorizado não colapsa para 0.15."""
+    from system1_engine.env.adapters.rubiks import VectorizedRubiksEnv
+
+    vec_env = VectorizedRubiksEnv(num_envs=4, scramble_depth=2)
+    wrapper_env = UniversalS1Wrapper(vec_env)
+
+    agent = UniversalS1Agent(obs_space=wrapper_env.observation_space, action_space=wrapper_env.action_space)
+
+    trainer = RecurrentPPOTrainer(
+        agent=agent,
+        env=wrapper_env,
+        rollout_steps=32,
+        chunk_length=8,
+        chunk_batch_size=4,
+        exploration_scale="auto",
+    )
+
+    assert trainer.is_auto_exploration is True
+    assert trainer._adaptive_scale == 0.80
+
+    obs_dict, _ = wrapper_env.reset(seed=42)
+
+    # Executa múltiplos rollouts
+    for _ in range(3):
+        obs_dict, hx, ep_start, ret = trainer.collect_rollouts(
+            current_obs_dict=obs_dict,
+            current_hx=None,
+            episode_start=True,
+        )
+
+    # A escala deve se manter saudável e NÃO cair abaixo do piso configurado (0.40)
+    assert trainer._adaptive_scale >= 0.40, f"Escala colapsou para {trainer._adaptive_scale}"
+    assert trainer.exploration_scale >= 0.40
