@@ -572,36 +572,59 @@
           </div>
 
           <!-- BPTT Recorrente Chunking -->
-          <div class="bg-[#090d16] p-2 rounded border border-gray-800/60 grid grid-cols-3 gap-1.5 text-xs">
-            <div>
-              <div class="flex items-center justify-center gap-1 mb-0.5">
-                <span class="text-[9px] text-gray-400 block">Rollout</span>
-                <span class="tooltip-wrap tooltip-left">
-                  <span class="tooltip-icon" title="Tamanho do buffer de coleta de passos antes de cada época de otimização PPO.">ⓘ</span>
-                  <span class="tooltip-bubble"><strong>--rollout-steps</strong>: Tamanho do buffer de coleta.<br>Número de timesteps executados e armazenados antes de rodar os gradientes do PPO (ex: 1024 ou 2048).</span>
-                </span>
-              </div>
-              <input type="number" id="cfg-rollout-steps" value="1024" class="hud-input text-center" />
+          <div class="bg-[#090d16] p-2 rounded border border-gray-800/60 flex flex-col gap-1.5 text-xs">
+            <div class="flex justify-between items-center text-[10px] text-gray-400 font-semibold px-0.5">
+              <span>BPTT Recorrente & Rollouts</span>
+              <span class="text-[9px] text-gray-500 font-mono italic">Memória & Gradientes</span>
             </div>
-            <div>
-              <div class="flex items-center justify-center gap-1 mb-0.5">
-                <span class="text-[9px] text-gray-400 block">Chunk Len</span>
-                <span class="tooltip-wrap">
-                  <span class="tooltip-icon" title="Comprimento temporal (T) de cada chunk para BPTT truncado em redes recorrentes.">ⓘ</span>
-                  <span class="tooltip-bubble"><strong>--chunk-length</strong>: Comprimento temporal (T) de cada chunk para BPTT recorrente. Permite que o estado oculto da rede aprenda dependências temporais.</span>
-                </span>
+            <div class="grid grid-cols-3 gap-1.5">
+              <div>
+                <div class="flex items-center justify-center gap-1 mb-0.5">
+                  <span class="text-[9px] text-gray-400 block">Rollout</span>
+                  <span class="tooltip-wrap tooltip-left">
+                    <span class="tooltip-icon" title="Tamanho do buffer de coleta de passos antes de cada época de otimização PPO.">ⓘ</span>
+                    <span class="tooltip-bubble"><strong>--rollout-steps</strong>: Tamanho do buffer de coleta.<br>Número de timesteps executados e armazenados antes de rodar os gradientes do PPO (ex: 512, 1024, 2048, 4096).</span>
+                  </span>
+                </div>
+                <input type="number" id="cfg-rollout-steps" value="1024" class="hud-input text-center" />
+                <div class="flex justify-center gap-0.5 mt-1 flex-wrap">
+                  <button type="button" onclick="setRolloutSteps(512)" class="badge-btn" title="512 passos">512</button>
+                  <button type="button" onclick="setRolloutSteps(1024)" class="badge-btn" title="1024 passos">1k</button>
+                  <button type="button" onclick="setRolloutSteps(2048)" class="badge-btn" title="2048 passos">2k</button>
+                  <button type="button" onclick="setRolloutSteps(4096)" class="badge-btn" title="4096 passos">4k</button>
+                </div>
               </div>
-              <input type="number" id="cfg-chunk-length" value="16" class="hud-input text-center" />
-            </div>
-            <div>
-              <div class="flex items-center justify-center gap-1 mb-0.5">
-                <span class="text-[9px] text-gray-400 block">Batch Chunks</span>
-                <span class="tooltip-wrap tooltip-right">
-                  <span class="tooltip-icon" title="Número de sequências temporais processadas em paralelo por mini-batch no PPO recorrente.">ⓘ</span>
-                  <span class="tooltip-bubble"><strong>--chunk-batch-size</strong>: Tamanho do batch de sequências temporais processadas conjuntamente durante as passadas de otimização de gradiente.</span>
-                </span>
+              <div>
+                <div class="flex items-center justify-center gap-1 mb-0.5">
+                  <span class="text-[9px] text-gray-400 block">Chunk Len</span>
+                  <span class="tooltip-wrap">
+                    <span class="tooltip-icon" title="Comprimento temporal (T) de cada chunk para BPTT truncado em redes recorrentes.">ⓘ</span>
+                    <span class="tooltip-bubble"><strong>--chunk-length</strong>: Comprimento temporal (T) de cada chunk para BPTT recorrente. Permite que o estado oculto da rede aprenda dependências temporais (ex: 8, 16, 32, 64).</span>
+                  </span>
+                </div>
+                <input type="number" id="cfg-chunk-length" value="16" class="hud-input text-center" />
+                <div class="flex justify-center gap-0.5 mt-1 flex-wrap">
+                  <button type="button" onclick="setChunkLength(8)" class="badge-btn" title="Chunk T=8">8</button>
+                  <button type="button" onclick="setChunkLength(16)" class="badge-btn" title="Chunk T=16">16</button>
+                  <button type="button" onclick="setChunkLength(32)" class="badge-btn" title="Chunk T=32">32</button>
+                  <button type="button" onclick="setChunkLength(64)" class="badge-btn" title="Chunk T=64">64</button>
+                </div>
               </div>
-              <input type="number" id="cfg-chunk-batch" value="16" class="hud-input text-center" />
+              <div>
+                <div class="flex items-center justify-center gap-1 mb-0.5">
+                  <span class="text-[9px] text-gray-400 block">Batch Chunks</span>
+                  <span class="tooltip-wrap tooltip-right">
+                    <span class="tooltip-icon" title="Número de sequências temporais processadas em paralelo por mini-batch no PPO recorrente.">ⓘ</span>
+                    <span class="tooltip-bubble"><strong>--chunk-batch-size</strong>: Tamanho do batch de sequências temporais processadas conjuntamente durante as passadas de otimização de gradiente.</span>
+                  </span>
+                </div>
+                <input type="number" id="cfg-chunk-batch" value="16" class="hud-input text-center" />
+                <div class="flex justify-center gap-0.5 mt-1 flex-wrap">
+                  <button type="button" onclick="setChunkBatch(8)" class="badge-btn" title="Batch size 8">8</button>
+                  <button type="button" onclick="setChunkBatch(16)" class="badge-btn" title="Batch size 16">16</button>
+                  <button type="button" onclick="setChunkBatch(32)" class="badge-btn" title="Batch size 32">32</button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -1826,6 +1849,9 @@
     function setLR(val) { document.getElementById('cfg-lr').value = val; }
     function setEpisodes(val) { document.getElementById('cfg-episodes').value = val; }
     function setEntropy(val) { document.getElementById('cfg-entropy').value = val; }
+    function setRolloutSteps(val) { document.getElementById('cfg-rollout-steps').value = val; }
+    function setChunkLength(val) { document.getElementById('cfg-chunk-length').value = val; }
+    function setChunkBatch(val) { document.getElementById('cfg-chunk-batch').value = val; }
 
     function setEvalCalibration(val) {
       const numEl = document.getElementById('cfg-eval-calibration');
