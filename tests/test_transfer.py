@@ -20,7 +20,7 @@ def test_transfer_without_catastrophic_forgetting(tmp_path):
         # Create a fresh agent and save state
         cart_env = UniversalS1Wrapper(gym.make("CartPole-v1"))
         cart_agent = UniversalS1Agent(cart_env.env.observation_space, cart_env.action_space)
-        KnowledgeTransferManager.save_checkpoint(cart_agent, ckpt_path)
+        KnowledgeTransferManager.save_checkpoint(cart_agent, ckpt_path, auto_sync_web=False)
 
     # 2. Initialize agent in Acrobot-v1 (obs_dim=6, act_dim=3)
     acrobot_raw = gym.make("Acrobot-v1")
@@ -87,6 +87,7 @@ def test_checkpoint_inspection_and_evaluation_compatibility(tmp_path):
         acro_agent,
         acro_path,
         extra_info={"env_id": "Acrobot-v1", "final_return": -85.0, "steps": 5000},
+        auto_sync_web=False,
     )
 
     # 2. Inspect checkpoint
@@ -121,7 +122,7 @@ def test_load_for_training_warm_start(tmp_path):
     agent_source = UniversalS1Agent(cart_env.env.observation_space, cart_env.action_space)
 
     ckpt_path = str(tmp_path / "cart_source.pt")
-    KnowledgeTransferManager.save_checkpoint(agent_source, ckpt_path)
+    KnowledgeTransferManager.save_checkpoint(agent_source, ckpt_path, auto_sync_web=False)
 
     # Create target agent with identical specs
     agent_target = UniversalS1Agent(cart_env.env.observation_space, cart_env.action_space)
@@ -154,7 +155,7 @@ def test_load_for_training_cross_domain_fallback(tmp_path):
     cart_env = UniversalS1Wrapper(gym.make("CartPole-v1"))
     cart_agent = UniversalS1Agent(cart_env.env.observation_space, cart_env.action_space)
     cart_path = str(tmp_path / "cart.pt")
-    KnowledgeTransferManager.save_checkpoint(cart_agent, cart_path)
+    KnowledgeTransferManager.save_checkpoint(cart_agent, cart_path, auto_sync_web=False)
 
     acro_env = UniversalS1Wrapper(gym.make("Acrobot-v1"))
     acro_agent = UniversalS1Agent(acro_env.env.observation_space, acro_env.action_space)
@@ -178,7 +179,7 @@ def test_load_for_training_force_trunk_only(tmp_path):
     cart_env = UniversalS1Wrapper(gym.make("CartPole-v1"))
     cart_agent = UniversalS1Agent(cart_env.env.observation_space, cart_env.action_space)
     cart_path = str(tmp_path / "cart_force.pt")
-    KnowledgeTransferManager.save_checkpoint(cart_agent, cart_path)
+    KnowledgeTransferManager.save_checkpoint(cart_agent, cart_path, auto_sync_web=False)
 
     agent_target = UniversalS1Agent(cart_env.env.observation_space, cart_env.action_space)
     target_phead_before = agent_target.policy_head.linear.weight.detach().clone()
