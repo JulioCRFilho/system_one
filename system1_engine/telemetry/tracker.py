@@ -67,18 +67,24 @@ class LiveStatsTracker:
         m.entropies.append(entropy)
         m.calibrations.append(calibration)
 
-    def record_env_step(self, reward: float, done: bool, info: Optional[Dict[str, Any]] = None) -> None:
+    def record_env_step(
+        self,
+        reward: float,
+        done: bool,
+        info: Optional[Dict[str, Any]] = None,
+        num_steps: int = 1,
+    ) -> None:
         """Registra a fase de interação física com o ambiente e metadados de currículo."""
         now = time.perf_counter_ns()
         dt = (now - self._last_step_time) / 1e9
         self._last_step_time = now
 
         if dt > 0:
-            self._fps_window.append(1.0 / dt)
+            self._fps_window.append(float(num_steps) / dt)
             self.metrics.fps = float(np.mean(self._fps_window))
 
         m = self.metrics
-        m.total_steps += 1
+        m.total_steps += int(num_steps)
         m.current_episode_return += reward
         m.current_episode_length += 1
 

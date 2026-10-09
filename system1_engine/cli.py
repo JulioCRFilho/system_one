@@ -58,7 +58,17 @@ def build_environment(
             if scramble_depth is not None and int(scramble_depth) > 0:
                 extra_kwargs["scramble_depth"] = int(scramble_depth)
 
-    raw_env = make_gym_env_with_auto_install(env_id, render_mode=render_mode, **extra_kwargs)
+    if is_training and env_id in ("RubiksCube-v0", "RubiksCubeMacro-v0"):
+        from system1_engine.env.adapters.rubiks import VectorizedRubiksEnv
+        is_macro = (env_id == "RubiksCubeMacro-v0")
+        raw_env = VectorizedRubiksEnv(
+            num_envs=16,
+            is_macro=is_macro,
+            render_mode=render_mode,
+            **extra_kwargs,
+        )
+    else:
+        raw_env = make_gym_env_with_auto_install(env_id, render_mode=render_mode, **extra_kwargs)
     if env_id == "MountainCar-v0":
         from system1_engine.env.adapters.mountain_car import (
             MountainCarEnergyRewardWrapper,

@@ -291,6 +291,11 @@ class UniversalS1Wrapper(gym.Wrapper):
             next_obs, rewards, terminateds, truncateds, info = self.env.step(action)
             current_obs = np.asarray(next_obs, dtype=np.float32)
             delta_obs = current_obs - self.prev_obs
+            # Ambientes que terminaram e resetaram iniciam novo episódio sem vazamento causal de delta
+            done_mask = np.asarray(terminateds | truncateds, dtype=bool)
+            if np.any(done_mask):
+                delta_obs[done_mask] = 0.0
+
             rew_arr = np.asarray(rewards, dtype=np.float32)
 
             obs_dict: S1Observation = {

@@ -923,6 +923,25 @@ class RubiksCubeMacroEnv(gym.Env):
         return None
 
 
+class InfoList(list):
+    """Lista de dicionários de informações que suporta acesso transparente tanto como lista quanto dicionário."""
+
+    def __getitem__(self, key: Any) -> Any:
+        if isinstance(key, str):
+            return self[0][key]
+        return super().__getitem__(key)
+
+    def __contains__(self, key: Any) -> bool:
+        if isinstance(key, str):
+            return len(self) > 0 and key in self[0]
+        return super().__contains__(key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        if len(self) > 0 and isinstance(self[0], dict):
+            return self[0].get(key, default)
+        return default
+
+
 class VectorizedRubiksEnv(gym.Env):
     """Ambiente vetorizado nativo para múltiplos cubos mágicos em paralelo.
 
@@ -947,13 +966,18 @@ class VectorizedRubiksEnv(gym.Env):
         self.envs: List[RubiksCubeEnv] = [
             env_cls(render_mode=render_mode, **env_kwargs) for _ in range(self.num_envs)
         ]
+        if len(self.envs) > 1:
+            shared_successes = self.envs[0].recent_successes
+            for env in self.envs[1:]:
+                env.recent_successes = shared_successes
+
         self.action_space = self.envs[0].action_space
         self.observation_space = self.envs[0].observation_space
         self.view_mode = "3d"
 
     @property
     def unwrapped(self):
-        return self.envs[0].unwrapped
+        return self
 
     @property
     def current_depth(self) -> int:
@@ -962,6 +986,30 @@ class VectorizedRubiksEnv(gym.Env):
     @property
     def curriculum(self) -> bool:
         return self.envs[0].curriculum
+
+    @property
+    def max_depth(self) -> Optional[int]:
+        return self.envs[0].max_depth
+
+    @property
+    def min_depth(self) -> int:
+        return self.envs[0].min_depth
+
+    @property
+    def scramble_depth(self) -> int:
+        return self.envs[0].scramble_depth
+
+    @property
+    def target_success_rate(self) -> float:
+        return self.envs[0].target_success_rate
+
+    @property
+    def curriculum_promotions(self) -> int:
+        return self.envs[0].curriculum_promotions
+
+    @property
+    def action_descriptions(self) -> List[str]:
+        return self.envs[0].action_descriptions
 
     def set_view_mode(self, mode: str) -> None:
         self.view_mode = str(mode).lower()
@@ -973,7 +1021,7 @@ class VectorizedRubiksEnv(gym.Env):
         *,
         seed: Optional[int] = None,
         options: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[np.ndarray, List[Dict[str, Any]]]:
+    ) -> Tuple[np.ndarray, InfoList]:
         obs_list = []
         info_list = []
         for i, env in enumerate(self.envs):
@@ -981,11 +1029,11 @@ class VectorizedRubiksEnv(gym.Env):
             obs, info = env.reset(seed=env_seed, options=options)
             obs_list.append(obs)
             info_list.append(info)
-        return np.stack(obs_list, axis=0), info_list
+        return np.stack(obs_list, axis=0), InfoList(info_list)
 
     def step(
         self, actions: Any
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, List[Dict[str, Any]]]:
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, InfoList]:
         if hasattr(actions, "cpu"):
             actions = actions.cpu().numpy()
         act_arr = np.asarray(actions).flatten()
@@ -1024,7 +1072,7 @@ class VectorizedRubiksEnv(gym.Env):
             rewards,
             terminateds,
             truncateds,
-            info_list,
+            InfoList(info_list),
         )
 
     def render(self) -> Optional[np.ndarray]:

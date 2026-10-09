@@ -248,6 +248,39 @@ class TestRubiksSystemOneIntegration:
         ret = trainer.train(max_steps=128, target_return=100.0, verbose=False)
         assert isinstance(ret, float)
 
+    def test_vectorized_rubiks_ppo_training_throughput(self):
+        """Valida que o RecurrentPPOTrainer treina sobre VectorizedRubiksEnv com throughput elevado."""
+        from system1_engine.env.adapters.rubiks import VectorizedRubiksEnv
+        import time
+
+        raw_env = VectorizedRubiksEnv(num_envs=8, is_macro=True, scramble_depth=2, max_steps=12)
+        wrapped_env = UniversalS1Wrapper(raw_env)
+        assert wrapped_env.is_vectorized
+        assert wrapped_env.num_envs == 8
+
+        agent = UniversalS1Agent(
+            obs_space=wrapped_env.observation_space,
+            action_space=wrapped_env.action_space,
+        )
+
+        trainer = RecurrentPPOTrainer(
+            agent=agent,
+            env=wrapped_env,
+            learning_rate=1e-3,
+            rollout_steps=128,
+            chunk_length=8,
+            chunk_batch_size=8,
+            device=torch.device("cpu"),
+        )
+
+        t0 = time.perf_counter()
+        ret = trainer.train(max_steps=256, target_return=100.0, verbose=False)
+        dt = time.perf_counter() - t0
+        fps = trainer.total_steps / dt
+        assert isinstance(ret, float)
+        assert trainer.total_steps >= 256
+        assert fps > 200, f"Expected vectorized training FPS > 200 on CPU, got {fps:.1f}"
+
     def test_rubiks_build_hud_env_and_cli_curriculum_activation(self):
         """Garante que o modo de treino (is_training=True) ativa o currículo (profundidade 1) no Rubik."""
         from system1_engine.hud.worker import build_hud_env

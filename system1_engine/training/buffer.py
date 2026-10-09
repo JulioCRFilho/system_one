@@ -145,6 +145,38 @@ class RecurrentRolloutBuffer:
 
         self.returns = self.advantages + np.asarray(self.values, dtype=np.float32)
 
+    def set_vectorized_data(
+        self,
+        obs: np.ndarray,
+        delta_obs: Optional[np.ndarray],
+        prev_actions: np.ndarray,
+        prev_rewards: np.ndarray,
+        actions: np.ndarray,
+        rewards: np.ndarray,
+        dones: np.ndarray,
+        episode_starts: np.ndarray,
+        values: np.ndarray,
+        log_probs: np.ndarray,
+        chunk_hx: List[torch.Tensor],
+        advantages: np.ndarray,
+        returns: np.ndarray,
+    ) -> None:
+        """Armazena transições coletadas diretamente em batch de ambientes vetorizados."""
+        self.obs = obs
+        self.delta_obs = delta_obs
+        self.prev_actions = prev_actions
+        self.prev_rewards = prev_rewards
+        self.actions = actions
+        self.rewards = rewards
+        self.dones = dones
+        self.episode_starts = episode_starts
+        self.values = values
+        self.log_probs = log_probs
+        self.chunk_hx = chunk_hx
+        self.advantages = advantages
+        self.returns = returns
+        self.step_idx = self.buffer_size
+
     def get_chunks_generator(
         self,
         chunk_batch_size: int = 4,

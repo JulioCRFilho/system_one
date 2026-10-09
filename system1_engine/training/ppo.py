@@ -78,8 +78,17 @@ class RecurrentPPOTrainer:
         obs_shape = env.observation_space["obs"].shape
         act_shape = () if is_discrete else env.action_space.shape
 
+        self.is_vectorized = getattr(env, "is_vectorized", False)
+        self.num_envs = getattr(env, "num_envs", 1)
+
+        if self.is_vectorized:
+            self.steps_per_env = max(1, rollout_steps // (self.num_envs * chunk_length)) * chunk_length
+            self.rollout_steps = self.steps_per_env * self.num_envs
+        else:
+            self.steps_per_env = self.rollout_steps
+
         self.buffer = RecurrentRolloutBuffer(
-            buffer_size=rollout_steps,
+            buffer_size=self.rollout_steps,
             chunk_length=chunk_length,
             is_visual=env.is_visual,
             is_discrete=is_discrete,
@@ -108,6 +117,26 @@ class RecurrentPPOTrainer:
         if self._buf_delta is not None:
             self._rollout_input_dict["delta_obs"] = self._buf_delta
 
+        if self.is_vectorized:
+            self._vec_buf_obs = torch.zeros((self.num_envs, 1, *obs_shape), dtype=torch.float32, device=self.device)
+            if is_discrete:
+                self._vec_buf_act = torch.zeros((self.num_envs, 1), dtype=torch.long, device=self.device)
+            else:
+                self._vec_buf_act = torch.zeros((self.num_envs, 1, *act_shape), dtype=torch.float32, device=self.device)
+            self._vec_buf_rew = torch.zeros((self.num_envs, 1, 1), dtype=torch.float32, device=self.device)
+            if not env.is_visual:
+                self._vec_buf_delta: Optional[torch.Tensor] = torch.zeros((self.num_envs, 1, *obs_shape), dtype=torch.float32, device=self.device)
+            else:
+                self._vec_buf_delta = None
+
+            self._vec_input_dict: Dict[str, Any] = {
+                "obs": self._vec_buf_obs,
+                "prev_action": self._vec_buf_act,
+                "prev_reward": self._vec_buf_rew,
+            }
+            if self._vec_buf_delta is not None:
+                self._vec_input_dict["delta_obs"] = self._vec_buf_delta
+
         # Persistent episode statistics across rollout batches
         self.episode_returns: deque[float] = deque(maxlen=20)
         self.curr_ep_return: float = 0.0
@@ -126,14 +155,284 @@ class RecurrentPPOTrainer:
             self._buf_delta[0, 0].copy_(torch.as_tensor(obs_dict["delta_obs"], dtype=torch.float32))
         return self._rollout_input_dict
 
+    def _prepare_vec_rollout_input(self, obs_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """Copia os dados vetorizados do dicionário diretamente para os tensores pré-alocados em lote."""
+        self._vec_buf_obs[:, 0].copy_(torch.as_tensor(obs_dict["obs"], dtype=torch.float32))
+        prev_act_raw = obs_dict["prev_action"]
+        if self.agent.is_discrete:
+            self._vec_buf_act[:, 0].copy_(torch.as_tensor(prev_act_raw, dtype=torch.long))
+        else:
+            self._vec_buf_act[:, 0].copy_(torch.as_tensor(prev_act_raw, dtype=torch.float32))
+        self._vec_buf_rew[:, 0, 0].copy_(torch.as_tensor(obs_dict["prev_reward"], dtype=torch.float32))
+        if self._vec_buf_delta is not None and "delta_obs" in obs_dict and obs_dict["delta_obs"] is not None:
+            self._vec_buf_delta[:, 0].copy_(torch.as_tensor(obs_dict["delta_obs"], dtype=torch.float32))
+        return self._vec_input_dict
+
+    def _collect_rollouts_vectorized(
+        self,
+        current_obs_dict: Dict[str, Any],
+        current_hx: Optional[torch.Tensor],
+        episode_start: Union[bool, np.ndarray],
+        step_callback: Optional[Callable[[], None]] = None,
+    ) -> Tuple[Dict[str, Any], Optional[torch.Tensor], np.ndarray, float]:
+        """Coleta interações vetorizadas em lote com num_envs simultâneos e inferência GPU batch."""
+        self.buffer.reset()
+        self.agent.eval()
+
+        S = self.steps_per_env
+        E = self.num_envs
+        T = self.chunk_length
+        K = S // T
+
+        obs_shape = self.buffer.obs_shape
+        stored_obs = np.empty((S, E, *obs_shape), dtype=np.float32)
+        stored_delta = np.empty((S, E, *obs_shape), dtype=np.float32) if not self.env.is_visual else None
+        if self.agent.is_discrete:
+            stored_prev_act = np.empty((S, E), dtype=np.int64)
+            stored_act = np.empty((S, E), dtype=np.int64)
+        else:
+            stored_prev_act = np.empty((S, E, *self.buffer.action_shape), dtype=np.float32)
+            stored_act = np.empty((S, E, *self.buffer.action_shape), dtype=np.float32)
+        stored_prev_rew = np.empty((S, E), dtype=np.float32)
+        stored_rew = np.empty((S, E), dtype=np.float32)
+        stored_done = np.empty((S, E), dtype=bool)
+        stored_ep_start = np.empty((S, E), dtype=bool)
+        stored_val = np.empty((S, E), dtype=np.float32)
+        stored_logp = np.empty((S, E), dtype=np.float32)
+
+        recorded_chunk_hx: List[List[torch.Tensor]] = [[None for _ in range(E)] for _ in range(K)]
+
+        if current_hx is None:
+            current_hx = torch.zeros((1, E, 256), dtype=torch.float32, device=self.device)
+        if isinstance(episode_start, bool):
+            ep_starts = np.full(E, episode_start, dtype=bool)
+        else:
+            ep_starts = np.asarray(episode_start, dtype=bool)
+
+        curr_ep_returns = np.zeros(E, dtype=np.float32)
+
+        with torch.inference_mode():
+            for step in range(S):
+                # 1. Salva hx inicial dos chunks nas fronteiras temporais
+                if step % T == 0:
+                    chunk_k = step // T
+                    hx_cpu = current_hx.detach().cpu()
+                    for e in range(E):
+                        recorded_chunk_hx[chunk_k][e] = hx_cpu[:, e : e + 1, :]
+
+                input_dict = self._prepare_vec_rollout_input(current_obs_dict)
+                t0 = time.perf_counter_ns()
+                dist, value, next_hx = self.agent.forward(input_dict, hx=current_hx, dones=None)
+
+                # Escala de exploração / homeostase dinâmica
+                if self.is_auto_exploration:
+                    curr_scale = float(self._adaptive_scale)
+                else:
+                    curr_scale = float(self.exploration_scale)
+
+                if self.agent.is_discrete:
+                    logits = dist.logits
+                    if curr_scale != 1.0:
+                        scaled_logits = logits / curr_scale
+                        dist_sample = torch.distributions.Categorical(logits=scaled_logits)
+                    else:
+                        dist_sample = dist
+                    action = dist_sample.sample()
+                    log_prob = dist_sample.log_prob(action)
+                    env_action = action.squeeze(1).cpu().numpy()
+                else:
+                    if curr_scale != 1.0:
+                        scaled_std = dist.scale * curr_scale
+                        dist_sample = torch.distributions.Normal(loc=dist.mean, scale=scaled_std)
+                    else:
+                        dist_sample = dist
+                    action = dist_sample.sample()
+                    log_prob = dist_sample.log_prob(action).sum(dim=-1)
+                    env_action = action.squeeze(1).cpu().numpy()
+                    if isinstance(self.env.action_space, gym.spaces.Box):
+                        env_action = np.clip(env_action, self.env.action_space.low, self.env.action_space.high)
+
+                lat_us = (time.perf_counter_ns() - t0) / 1000.0
+
+                if self.tracker is not None:
+                    if self.agent.is_discrete:
+                        probs = dist.probs[0, 0]
+                        n_acts = probs.shape[-1]
+                        top_probs, _ = torch.topk(probs, k=min(2, n_acts))
+                        conf = float(top_probs[0].item())
+                        ent = float(-torch.sum(probs * torch.log(probs + 1e-8)).item())
+                        max_ent = float(np.log(n_acts)) if n_acts > 1 else 1.0
+                        unc = float(np.clip(ent / max_ent, 0.0, 1.0))
+                    else:
+                        std = dist.scale[0, 0].cpu().numpy()
+                        std = np.clip(std, a_min=1e-6, a_max=100.0)
+                        ent = float(0.5 * np.sum(1.0 + np.log(2.0 * np.pi * (std ** 2))))
+                        var = float(np.mean(std ** 2))
+                        unc = float(np.clip(2.0 / (1.0 + np.exp(-var / 0.5)) - 1.0, 0.0, 1.0))
+                        conf = float(np.clip(1.0 - unc, 0.0, 1.0))
+
+                    self.tracker.record_inference(
+                        latency_us=lat_us,
+                        uncertainty=unc,
+                        confidence=conf,
+                        entropy=ent,
+                        calibration=curr_scale,
+                    )
+
+                # Environment step vetorizado
+                next_obs_dict, rewards, terminateds, truncateds, env_infos = self.env.step(env_action)
+                dones = terminateds | truncateds
+
+                if self.tracker is not None:
+                    primary_info = env_infos[0] if isinstance(env_infos, list) and len(env_infos) > 0 else {}
+                    self.tracker.record_env_step(
+                        reward=float(rewards[0]),
+                        done=bool(dones[0]),
+                        info=primary_info,
+                        num_steps=self.num_envs,
+                    )
+
+                stored_obs[step] = current_obs_dict["obs"]
+                if stored_delta is not None and "delta_obs" in current_obs_dict:
+                    stored_delta[step] = current_obs_dict["delta_obs"]
+                stored_prev_act[step] = current_obs_dict["prev_action"]
+                stored_prev_rew[step] = current_obs_dict["prev_reward"]
+                stored_act[step] = env_action
+                stored_rew[step] = rewards
+                stored_done[step] = terminateds
+                stored_ep_start[step] = ep_starts
+                stored_val[step] = value.squeeze(1).squeeze(1).cpu().numpy()
+                stored_logp[step] = log_prob.squeeze(1).cpu().numpy()
+
+                curr_ep_returns += rewards
+                self.total_steps += E
+
+                done_indices = np.where(dones)[0]
+                if len(done_indices) > 0:
+                    for d_i in done_indices:
+                        self.episode_returns.append(float(curr_ep_returns[d_i]))
+                        curr_ep_returns[d_i] = 0.0
+                    next_hx[:, done_indices, :] = 0.0
+                    ep_starts = dones.copy()
+                else:
+                    ep_starts.fill(False)
+
+                current_obs_dict = next_obs_dict
+                current_hx = next_hx
+
+                if self.is_auto_exploration:
+                    mean_r = float(np.mean(rewards))
+                    delta_r = mean_r - self._reward_ema
+                    self._reward_ema = 0.9 * self._reward_ema + 0.1 * mean_r
+                    if mean_r > 0.01 or delta_r > 0.01:
+                        self._stagnation_count = 0
+                        self._adaptive_scale = max(0.15, self._adaptive_scale - 0.02)
+                    else:
+                        self._stagnation_count += 1
+                        if self._stagnation_count >= 3:
+                            self._adaptive_scale = min(1.0, self._adaptive_scale + 0.01)
+
+                if step_callback is not None:
+                    step_callback()
+
+            # Bootstrap values para o último estado
+            input_dict = self._prepare_vec_rollout_input(current_obs_dict)
+            _, last_value, _ = self.agent.forward(input_dict, hx=current_hx, dones=None)
+            last_values = last_value.squeeze(1).squeeze(1).cpu().numpy()
+            last_dones = terminateds
+
+        # GAE computado em paralelo ao longo das trajetórias de cada ambiente
+        rew_es = stored_rew.T
+        done_es = stored_done.T
+        val_es = stored_val.T
+
+        adv_es = np.zeros((E, S), dtype=np.float32)
+        last_gae = np.zeros(E, dtype=np.float32)
+
+        for t in reversed(range(S)):
+            if t == S - 1:
+                next_non_terminal = 1.0 - last_dones.astype(np.float32)
+                next_val = last_values.astype(np.float32)
+            else:
+                next_non_terminal = 1.0 - done_es[:, t].astype(np.float32)
+                next_val = val_es[:, t + 1]
+
+            delta = rew_es[:, t] + self.gamma * next_val * next_non_terminal - val_es[:, t]
+            last_gae = delta + self.gamma * self.gae_lambda * next_non_terminal * last_gae
+            adv_es[:, t] = last_gae
+
+        ret_es = adv_es + val_es
+
+        # Transposição [S, E, ...] -> [E, S, ...] e linearização ordenada por ambiente
+        flat_obs = stored_obs.transpose(1, 0, *range(2, stored_obs.ndim)).reshape(E * S, *obs_shape)
+        flat_delta = (
+            stored_delta.transpose(1, 0, *range(2, stored_delta.ndim)).reshape(E * S, *obs_shape)
+            if stored_delta is not None
+            else None
+        )
+        if self.agent.is_discrete:
+            flat_prev_act = stored_prev_act.T.reshape(E * S)
+            flat_act = stored_act.T.reshape(E * S)
+        else:
+            flat_prev_act = stored_prev_act.transpose(1, 0, *range(2, stored_prev_act.ndim)).reshape(E * S, *self.buffer.action_shape)
+            flat_act = stored_act.transpose(1, 0, *range(2, stored_act.ndim)).reshape(E * S, *self.buffer.action_shape)
+
+        flat_prev_rew = stored_prev_rew.T.reshape(E * S)
+        flat_rew = rew_es.reshape(E * S)
+        flat_done = done_es.reshape(E * S)
+        flat_ep_start = stored_ep_start.T.reshape(E * S)
+        flat_val = val_es.reshape(E * S)
+        flat_logp = stored_logp.T.reshape(E * S)
+        flat_adv = adv_es.reshape(E * S)
+        flat_ret = ret_es.reshape(E * S)
+
+        # Montagem dos estados ocultos iniciais dos chunks em ordem de ambiente
+        all_chunk_hx: List[torch.Tensor] = []
+        for e in range(E):
+            for chunk_k in range(K):
+                all_chunk_hx.append(recorded_chunk_hx[chunk_k][e])
+
+        # Normalização global de vantagens
+        flat_adv = (flat_adv - flat_adv.mean()) / (flat_adv.std() + 1e-8)
+
+        # Atualiza buffer
+        self.buffer.set_vectorized_data(
+            obs=flat_obs,
+            delta_obs=flat_delta,
+            prev_actions=flat_prev_act,
+            prev_rewards=flat_prev_rew,
+            actions=flat_act,
+            rewards=flat_rew,
+            dones=flat_done,
+            episode_starts=flat_ep_start,
+            values=flat_val,
+            log_probs=flat_logp,
+            chunk_hx=all_chunk_hx,
+            advantages=flat_adv,
+            returns=flat_ret,
+        )
+
+        if self.is_auto_exploration:
+            self.exploration_scale = float(self._adaptive_scale)
+
+        mean_return = (
+            float(np.mean(self.episode_returns)) if len(self.episode_returns) > 0 else 0.0
+        )
+        return current_obs_dict, current_hx, ep_starts, mean_return
+
     def collect_rollouts(
         self,
         current_obs_dict: Dict[str, Any],
         current_hx: Optional[torch.Tensor],
-        episode_start: bool,
+        episode_start: Union[bool, np.ndarray],
         step_callback: Optional[Callable[[], None]] = None,
-    ) -> Tuple[Dict[str, Any], Optional[torch.Tensor], bool, float]:
+    ) -> Tuple[Dict[str, Any], Optional[torch.Tensor], Union[bool, np.ndarray], float]:
         """Collects rollout_steps interactions in the environment."""
+        if self.is_vectorized:
+            return self._collect_rollouts_vectorized(
+                current_obs_dict, current_hx, episode_start, step_callback=step_callback
+            )
+
         self.buffer.reset()
         self.agent.eval()
 
