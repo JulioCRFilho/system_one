@@ -196,6 +196,24 @@ class TestRubiksGymEnvironments:
         assert info["current_depth"] == 2
         assert info["curriculum_success_rate"] == 0.0  # resetado após promoção
 
+    def test_curriculum_monotonic_no_demotion(self):
+        """Valida que o currículo não recua de nível mesmo com taxa de sucesso baixa (< 10%)."""
+        env = RubiksCubeEnv(curriculum=True, min_depth=1, max_depth=5, target_success_rate=0.90, curriculum_window=5)
+        # Promove para depth 2
+        for _ in range(5):
+            env.recent_successes.append(1.0)
+        env.reset()
+        assert env.current_depth == 2
+
+        # Simula sucessivos fracassos na nova profundidade (taxa 0%)
+        for _ in range(20):
+            env.recent_successes.append(0.0)
+
+        obs, info = env.reset()
+        # O currículo deve se manter estritamente em depth 2 (mecanismo catraca/monotonic)
+        assert env.current_depth == 2
+        assert info["current_depth"] == 2
+
 
 class TestRubiksSystemOneIntegration:
     """Valida a integração completa com o UniversalS1Agent e o loop de PPO."""

@@ -667,14 +667,6 @@ class RubiksCubeEnv(gym.Env):
                         f"\n🚀 [CURRICULUM ATÔMICO] Sucesso {success_rate*100:.1f}% >= {self.target_success_rate*100:.0f}%! "
                         f"Profundidade promovida: {old_d} -> {self.current_depth}/{max_d_str}"
                     )
-                elif self.current_depth > self.min_depth and success_rate < 0.15 and len(self.recent_successes) >= self.curriculum_window:
-                    old_d = self.current_depth
-                    self.current_depth -= 1
-                    self.recent_successes.clear()
-                    print(
-                        f"\n⚠️ [CURRICULUM ATÔMICO] Sucesso baixo ({success_rate*100:.1f}%). "
-                        f"Recuando para reforço: {old_d} -> {self.current_depth}"
-                    )
             depth = self.current_depth
         else:
             depth = self.scramble_depth
@@ -838,14 +830,6 @@ class RubiksCubeMacroEnv(gym.Env):
                     print(
                         f"\n🚀 [CURRICULUM MACRO] Sucesso {success_rate*100:.1f}% >= {self.target_success_rate*100:.0f}%! "
                         f"Profundidade promovida: {old_d} -> {self.current_depth}/{max_d_str}"
-                    )
-                elif self.current_depth > self.min_depth and success_rate < 0.15 and len(self.recent_successes) >= self.curriculum_window:
-                    old_d = self.current_depth
-                    self.current_depth -= 1
-                    self.recent_successes.clear()
-                    print(
-                        f"\n⚠️ [CURRICULUM MACRO] Sucesso baixo ({success_rate*100:.1f}%). "
-                        f"Recuando para reforço: {old_d} -> {self.current_depth}"
                     )
             depth = self.current_depth
         else:
