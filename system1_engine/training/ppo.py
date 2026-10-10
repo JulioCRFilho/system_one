@@ -52,7 +52,7 @@ class RecurrentPPOTrainer:
         self.tracker = tracker
 
         # Suporte a exploração automática / homeostática no treino PPO (sem limite artificial, 0 à 1)
-        self._min_adaptive_scale = 0.00
+        self._min_adaptive_scale = 0.08
         self._max_adaptive_scale = 1.00
         self._last_promotions: int = 0
         if isinstance(exploration_scale, str) and exploration_scale.lower() in ("auto", "adaptive", "homeostatic"):
@@ -64,7 +64,7 @@ class RecurrentPPOTrainer:
             self._recent_actions: deque[int] = deque(maxlen=6)
         else:
             self.is_auto_exploration = False
-            self.exploration_scale = float(np.clip(float(exploration_scale), 0.05, 1.0))
+            self.exploration_scale = float(np.clip(float(exploration_scale), 0.08, 1.0))
             self._adaptive_scale = self.exploration_scale
             self._reward_ema = None
             self._stagnation_count = 0
@@ -292,10 +292,10 @@ class RecurrentPPOTrainer:
                             ).clamp(min=0.02, max=1.00)
                         else:
                             env_scales = dynamic_scales.clamp(min=0.02, max=1.00)
-                        scaled_logits = (penalized_logits / env_scales).clamp(min=-40.0, max=40.0)
+                        scaled_logits = torch.nan_to_num(penalized_logits / env_scales, nan=0.0, posinf=35.0, neginf=-35.0).clamp(min=-35.0, max=35.0)
                     elif curr_scale != 1.0:
                         eff_scale = max(0.02, curr_scale)
-                        scaled_logits = (penalized_logits / eff_scale).clamp(min=-40.0, max=40.0)
+                        scaled_logits = torch.nan_to_num(penalized_logits / eff_scale, nan=0.0, posinf=35.0, neginf=-35.0).clamp(min=-35.0, max=35.0)
                     else:
                         scaled_logits = penalized_logits
 
@@ -580,7 +580,7 @@ class RecurrentPPOTrainer:
 
                     if curr_scale != 1.0:
                         eff_scale = max(0.02, curr_scale)
-                        scaled_logits = (logits / eff_scale).clamp(min=-40.0, max=40.0)
+                        scaled_logits = torch.nan_to_num(logits / eff_scale, nan=0.0, posinf=35.0, neginf=-35.0).clamp(min=-35.0, max=35.0)
                         dist_sample = torch.distributions.Categorical(logits=scaled_logits)
                     elif self.is_auto_exploration and self._stagnation_count >= 3:
                         dist_sample = torch.distributions.Categorical(logits=logits)
@@ -712,7 +712,8 @@ class RecurrentPPOTrainer:
 
                 if self.agent.is_discrete:
                     if self.exploration_scale != 1.0:
-                        scaled_logits = dist.logits / self.exploration_scale
+                        eff_scale = max(0.08, float(self.exploration_scale))
+                        scaled_logits = torch.nan_to_num(dist.logits / eff_scale, nan=0.0, posinf=30.0, neginf=-30.0).clamp(min=-30.0, max=30.0)
                         dist_eval = torch.distributions.Categorical(logits=scaled_logits)
                     else:
                         dist_eval = dist
@@ -720,7 +721,8 @@ class RecurrentPPOTrainer:
                     entropy = dist_eval.entropy()                       # [B, T]
                 else:
                     if self.exploration_scale != 1.0:
-                        scaled_std = dist.scale * self.exploration_scale
+                        eff_scale = max(0.08, float(self.exploration_scale))
+                        scaled_std = dist.scale * eff_scale
                         dist_eval = torch.distributions.Normal(loc=dist.mean, scale=scaled_std)
                     else:
                         dist_eval = dist

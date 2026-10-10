@@ -524,8 +524,8 @@ def test_vectorized_32_envs_spectrum_coverage_0_to_1():
         exploration_scale="auto",
     )
 
-    # 2. Verifica ausência de limites artificiais inferiores na auto-calibração base
-    assert trainer._min_adaptive_scale == 0.00
+    # 2. Verifica piso numérico seguro da auto-calibração base anti-divisão por zero (0.08)
+    assert trainer._min_adaptive_scale == 0.08
     assert trainer._max_adaptive_scale == 1.00
 
     # 3. Verifica geradores de cobertura térmica contínua de 0 à 1
@@ -558,4 +558,12 @@ def test_vectorized_32_envs_spectrum_coverage_0_to_1():
     metrics = trainer.train_epoch()
     assert not torch.isnan(torch.tensor(metrics["policy_loss"]))
     assert not torch.isnan(torch.tensor(metrics["value_loss"]))
+
+    # 6. Imunidade absoluta contra colapso numérico sob escalas extremas (0.01 e 0.00)
+    trainer.exploration_scale = 0.00
+    metrics_zero = trainer.train_epoch()
+    assert not torch.isnan(torch.tensor(metrics_zero["policy_loss"]))
+    assert not torch.isinf(torch.tensor(metrics_zero["policy_loss"]))
+    assert not torch.isnan(torch.tensor(metrics_zero["value_loss"]))
+    assert not torch.isinf(torch.tensor(metrics_zero["value_loss"]))
 

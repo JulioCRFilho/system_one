@@ -402,13 +402,85 @@ def run_worker_train(config: Dict[str, Any], hud_client: HUDClient) -> None:
 
     explainer = GradCAMExplainer(agent)
 
+    last_ckpt_step = 0
+    last_ckpt_promotions = 0
+    best_saved_mean_return = -float("inf")
+
+    def _persist_checkpoint(reason: str = "") -> None:
+        if not save_path:
+            return
+        try:
+            best_ret = getattr(trainer, "best_mean_return", None)
+            if best_ret is None and tracker and tracker.metrics.best_mean_return is not None:
+                best_ret = tracker.metrics.best_mean_return
+            if best_ret is None:
+                best_ret = getattr(trainer, "final_return", 0.0)
+
+            successful_d = tracker.get_successful_depth() if tracker else None
+
+            extra_info = {
+                "env_id": env_id,
+                "final_return": float(getattr(trainer, "final_return", 0.0)),
+                "best_mean_return": float(best_ret),
+                "steps": trainer.total_steps,
+            }
+            if tracker.metrics.curriculum_depth is not None:
+                extra_info["curriculum_depth"] = tracker.metrics.curriculum_depth
+                extra_info["successful_depth"] = successful_d if successful_d is not None else tracker.metrics.curriculum_depth
+                extra_info["depth"] = extra_info["successful_depth"]
+            elif config.get("scramble_depth") is not None:
+                sd = int(config["scramble_depth"])
+                extra_info["scramble_depth"] = sd
+                extra_info["successful_depth"] = sd
+                extra_info["depth"] = sd
+
+            if tracker.metrics.curriculum_max_depth is not None:
+                extra_info["curriculum_max_depth"] = tracker.metrics.curriculum_max_depth
+            elif config.get("scramble_depth") is not None:
+                extra_info["curriculum_max_depth"] = int(config["scramble_depth"])
+
+            if getattr(tracker.metrics, "best_return_depth", None) is not None:
+                extra_info["best_return_depth"] = tracker.metrics.best_return_depth
+
+            KnowledgeTransferManager.save_checkpoint(
+                agent=agent,
+                checkpoint_path=save_path,
+                extra_info=extra_info,
+                auto_sync_web=config.get("auto_sync_web", True),
+            )
+            tag = f" [{reason}]" if reason else ""
+            print(f"💾 Checkpoint persistido com sucesso em: {save_path}{tag}")
+        except Exception as e:
+            print(f"⚠️ Aviso ao salvar checkpoint ({reason}): {e}")
+
     def train_callback(cur_steps: int, mean_ret: float) -> None:
-        nonlocal last_telemetry_ts
+        nonlocal last_telemetry_ts, last_ckpt_step, last_ckpt_promotions, best_saved_mean_return
         now = time.time()
         snap = tracker.snapshot()
         snap["grad_norms"] = tracker.metrics.grad_norms
         hud_client.send_telemetry(snap)
         last_telemetry_ts = now
+
+        # Salvamento automático periódico e por marcos (Curriculum Promotion & Novo Pico)
+        if save_path:
+            cur_promotions = tracker.metrics.curriculum_promotions if tracker else 0
+            is_new_level = cur_promotions > last_ckpt_promotions
+            is_periodic = (cur_steps - last_ckpt_step) >= 500_000
+            is_new_best = mean_ret > (best_saved_mean_return + 1.5) and cur_steps >= 20_000
+
+            if is_new_level or is_periodic or is_new_best:
+                reason_parts = []
+                if is_new_level:
+                    reason_parts.append(f"Promoção D{tracker.metrics.curriculum_depth}")
+                    last_ckpt_promotions = cur_promotions
+                if is_new_best:
+                    reason_parts.append(f"Novo Pico {mean_ret:.2f}")
+                    best_saved_mean_return = mean_ret
+                if is_periodic:
+                    reason_parts.append(f"Passo {cur_steps}")
+                    last_ckpt_step = cur_steps
+
+                _persist_checkpoint(reason=", ".join(reason_parts))
 
     def step_callback() -> None:
         nonlocal last_telemetry_ts, last_frame_ts
@@ -460,45 +532,7 @@ def run_worker_train(config: Dict[str, Any], hud_client: HUDClient) -> None:
         )
 
         if save_path:
-            best_ret = getattr(trainer, "best_mean_return", None)
-            if best_ret is None and tracker and tracker.metrics.best_mean_return is not None:
-                best_ret = tracker.metrics.best_mean_return
-            if best_ret is None:
-                best_ret = final_return
-
-            successful_d = tracker.get_successful_depth() if tracker else None
-
-            extra_info = {
-                "env_id": env_id,
-                "final_return": float(final_return),
-                "best_mean_return": float(best_ret),
-                "steps": trainer.total_steps,
-            }
-            if tracker.metrics.curriculum_depth is not None:
-                extra_info["curriculum_depth"] = tracker.metrics.curriculum_depth
-                extra_info["successful_depth"] = successful_d if successful_d is not None else tracker.metrics.curriculum_depth
-                extra_info["depth"] = extra_info["successful_depth"]
-            elif config.get("scramble_depth") is not None:
-                sd = int(config["scramble_depth"])
-                extra_info["scramble_depth"] = sd
-                extra_info["successful_depth"] = sd
-                extra_info["depth"] = sd
-
-            if tracker.metrics.curriculum_max_depth is not None:
-                extra_info["curriculum_max_depth"] = tracker.metrics.curriculum_max_depth
-            elif config.get("scramble_depth") is not None:
-                extra_info["curriculum_max_depth"] = int(config["scramble_depth"])
-
-            if getattr(tracker.metrics, "best_return_depth", None) is not None:
-                extra_info["best_return_depth"] = tracker.metrics.best_return_depth
-
-            KnowledgeTransferManager.save_checkpoint(
-                agent=agent,
-                checkpoint_path=save_path,
-                extra_info=extra_info,
-                auto_sync_web=config.get("auto_sync_web", True),
-            )
-            print(f"Checkpoint salvo com sucesso em: {save_path}")
+            _persist_checkpoint("Final")
 
         tracker.set_completed(True)
         final_snap = tracker.snapshot()

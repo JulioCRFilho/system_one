@@ -93,6 +93,9 @@ def auto_sync_web_model(
         # Modelos convolucionais pesados (ex: ViZDoom/CarRacing) não são exportados automaticamente para web
         return None
 
+    orig_device = next(agent.parameters()).device
+    orig_training = agent.training
+
     try:
         env_id = (extra_info or {}).get("env_id", "")
         model_filename = resolve_web_model_filename(env_id, checkpoint_path)
@@ -164,6 +167,12 @@ def auto_sync_web_model(
     except Exception as e:
         print(f"⚠️ [Auto-Sync Web] Falha na auto-exportação ONNX (não-bloqueante): {e}")
         return None
+    finally:
+        agent.to(orig_device)
+        if orig_training:
+            agent.train()
+        else:
+            agent.eval()
 
 
 def find_latest_trained_checkpoint(env_id: str, project_root: Optional[Path] = None) -> Optional[str]:
