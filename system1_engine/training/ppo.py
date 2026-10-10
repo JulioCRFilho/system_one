@@ -51,8 +51,8 @@ class RecurrentPPOTrainer:
         self.device = torch.device(device)
         self.tracker = tracker
 
-        # Suporte a exploração automática / homeostática no treino PPO
-        self._min_adaptive_scale = 0.40
+        # Suporte a exploração automática / homeostática no treino PPO (sem limite artificial, 0 à 1)
+        self._min_adaptive_scale = 0.00
         self._max_adaptive_scale = 1.00
         self._last_promotions: int = 0
         if isinstance(exploration_scale, str) and exploration_scale.lower() in ("auto", "adaptive", "homeostatic"):
@@ -142,21 +142,30 @@ class RecurrentPPOTrainer:
 
             self._vec_recent_actions: List[deque[int]] = [deque(maxlen=6) for _ in range(self.num_envs)]
             if self.num_envs >= 4:
-                # Estratificação de Exploração Térmica / Quality-Diverse Ensemble em Ambientes Simultâneos:
-                # - Envs 0..E//4 - 1 (Elite / Anchor): 0.50x escala (alta precisão determinística, soluções de máxima pureza)
-                # - Envs E//4..3*E//4 - 1 (Balanced): 1.00x escala (aprendizado nominal equilibrado)
-                # - Envs 3*E//4..E - 1 (Exploratory): 1.35x escala (inovação contínua para escapar de mínimos locais)
+                # Cobertura Completa de Exploração de 0 à 1 em Ambientes Simultâneos (Quality-Diverse Spectrum):
+                # - Estrato Elite (0 .. E//4 - 1): determinístico / ultra-greedy (0.02 a 0.20) para trajetórias ótimas
+                # - Estrato Balanced (E//4 .. 3*E//4 - 1): faixa central adaptativa modulada por curr_scale
+                # - Estrato Exploratory (3*E//4 .. E - 1): máxima dispersão térmica (0.75 a 1.00) para escapar de mínimos locais
                 n_elite = max(1, self.num_envs // 4)
                 n_exploratory = max(1, self.num_envs // 4)
                 n_balanced = self.num_envs - n_elite - n_exploratory
-                multipliers = np.concatenate([
-                    np.full(n_elite, 0.50, dtype=np.float32),
-                    np.full(n_balanced, 1.00, dtype=np.float32),
-                    np.full(n_exploratory, 1.35, dtype=np.float32),
-                ])
+
+                elite_mults = np.linspace(0.05, 0.40, n_elite, dtype=np.float32)
+                balanced_mults = np.linspace(0.60, 1.20, n_balanced, dtype=np.float32)
+                exploratory_mults = np.linspace(1.30, 2.00, n_exploratory, dtype=np.float32)
+                multipliers = np.concatenate([elite_mults, balanced_mults, exploratory_mults])
                 self._env_scale_multipliers = torch.from_numpy(multipliers).to(self.device).view(self.num_envs, 1, 1)
+
+                # Âncoras fixas para garantir cobertura absoluta de 0 à 1 em qualquer regime térmico
+                elite_fixed = np.linspace(0.02, 0.15, n_elite, dtype=np.float32)
+                exploratory_fixed = np.linspace(0.80, 1.00, n_exploratory, dtype=np.float32)
+                balanced_fixed = np.full(n_balanced, 0.0, dtype=np.float32)
+                self._env_fixed_anchors = torch.from_numpy(
+                    np.concatenate([elite_fixed, balanced_fixed, exploratory_fixed])
+                ).to(self.device).view(self.num_envs, 1, 1)
             else:
                 self._env_scale_multipliers = torch.ones((self.num_envs, 1, 1), dtype=torch.float32, device=self.device)
+                self._env_fixed_anchors = None
 
         # Persistent episode statistics across rollout batches
         self.episode_returns: deque[float] = deque(maxlen=20)
@@ -272,12 +281,21 @@ class RecurrentPPOTrainer:
                             if len(e_hist) >= 3 and e_hist[-1] == e_hist[-3]:
                                 penalized_logits[e, 0, e_hist[-2]] -= 3.0
 
-                    # Estratificação térmica por ambiente (Quality-Diverse Exploration)
+                    # Estratificação térmica por ambiente com cobertura garantida de 0 à 1 (Quality-Diverse Spectrum)
                     if hasattr(self, "_env_scale_multipliers") and self.num_envs >= 4:
-                        env_scales = (curr_scale * self._env_scale_multipliers).clamp(min=0.25, max=1.50)
-                        scaled_logits = penalized_logits / env_scales
+                        dynamic_scales = curr_scale * self._env_scale_multipliers
+                        if getattr(self, "_env_fixed_anchors", None) is not None:
+                            env_scales = torch.where(
+                                self._env_fixed_anchors > 0.0,
+                                0.5 * dynamic_scales + 0.5 * self._env_fixed_anchors,
+                                dynamic_scales,
+                            ).clamp(min=0.02, max=1.00)
+                        else:
+                            env_scales = dynamic_scales.clamp(min=0.02, max=1.00)
+                        scaled_logits = (penalized_logits / env_scales).clamp(min=-40.0, max=40.0)
                     elif curr_scale != 1.0:
-                        scaled_logits = penalized_logits / curr_scale
+                        eff_scale = max(0.02, curr_scale)
+                        scaled_logits = (penalized_logits / eff_scale).clamp(min=-40.0, max=40.0)
                     else:
                         scaled_logits = penalized_logits
 
@@ -291,10 +309,19 @@ class RecurrentPPOTrainer:
                         self._vec_recent_actions[e].append(int(env_action[e]))
                 else:
                     if hasattr(self, "_env_scale_multipliers") and self.num_envs >= 4:
-                        env_scales = (curr_scale * self._env_scale_multipliers).clamp(min=0.25, max=1.50)
+                        dynamic_scales = curr_scale * self._env_scale_multipliers
+                        if getattr(self, "_env_fixed_anchors", None) is not None:
+                            env_scales = torch.where(
+                                self._env_fixed_anchors > 0.0,
+                                0.5 * dynamic_scales + 0.5 * self._env_fixed_anchors,
+                                dynamic_scales,
+                            ).clamp(min=0.02, max=1.00)
+                        else:
+                            env_scales = dynamic_scales.clamp(min=0.02, max=1.00)
                         scaled_std = dist.scale * env_scales
                     elif curr_scale != 1.0:
-                        scaled_std = dist.scale * curr_scale
+                        eff_scale = max(0.02, curr_scale)
+                        scaled_std = dist.scale * eff_scale
                     else:
                         scaled_std = dist.scale
 
@@ -552,7 +579,8 @@ class RecurrentPPOTrainer:
                             logits = penalized_logits
 
                     if curr_scale != 1.0:
-                        scaled_logits = logits / curr_scale
+                        eff_scale = max(0.02, curr_scale)
+                        scaled_logits = (logits / eff_scale).clamp(min=-40.0, max=40.0)
                         dist_sample = torch.distributions.Categorical(logits=scaled_logits)
                     elif self.is_auto_exploration and self._stagnation_count >= 3:
                         dist_sample = torch.distributions.Categorical(logits=logits)
@@ -565,7 +593,8 @@ class RecurrentPPOTrainer:
                         self._recent_actions.append(env_action)
                 else:
                     if curr_scale != 1.0:
-                        scaled_std = dist.scale * curr_scale
+                        eff_scale = max(0.02, curr_scale)
+                        scaled_std = dist.scale * eff_scale
                         dist_sample = torch.distributions.Normal(loc=dist.mean, scale=scaled_std)
                     else:
                         dist_sample = dist

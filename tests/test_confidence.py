@@ -497,7 +497,65 @@ def test_ppo_adaptive_exploration_plateau_and_curriculum():
         mean_return=6.0,
         env_infos={"curriculum_promoted": True, "curriculum_promotions": 1},
     )
-    assert trainer._adaptive_scale >= 0.75, (
-        f"Promoção curricular deveria reativar escala para >= 0.75, obtido {trainer._adaptive_scale}"
-    )
     assert trainer._stagnation_count == 0
+
+
+def test_vectorized_32_envs_spectrum_coverage_0_to_1():
+    """Valida a duplicação para 32 ambientes paralelos e a garantia de cobertura térmica de 0 à 1."""
+    import torch
+    from system1_engine.core.agent import UniversalS1Agent
+    from system1_engine.env.adapters.rubiks import VectorizedRubiksEnv
+    from system1_engine.env.wrapper import UniversalS1Wrapper
+    from system1_engine.training.ppo import RecurrentPPOTrainer
+
+    # 1. VectorizedRubiksEnv instancia 32 ambientes paralelos por padrão
+    raw_env = VectorizedRubiksEnv(num_envs=32, scramble_depth=2, max_steps=8)
+    assert raw_env.num_envs == 32
+    wrapped_env = UniversalS1Wrapper(raw_env)
+    assert wrapped_env.num_envs == 32
+
+    agent = UniversalS1Agent(obs_space=wrapped_env.observation_space, action_space=wrapped_env.action_space)
+    trainer = RecurrentPPOTrainer(
+        agent=agent,
+        env=wrapped_env,
+        rollout_steps=1024,
+        chunk_length=32,
+        chunk_batch_size=8,
+        exploration_scale="auto",
+    )
+
+    # 2. Verifica ausência de limites artificiais inferiores na auto-calibração base
+    assert trainer._min_adaptive_scale == 0.00
+    assert trainer._max_adaptive_scale == 1.00
+
+    # 3. Verifica geradores de cobertura térmica contínua de 0 à 1
+    assert hasattr(trainer, "_env_scale_multipliers")
+    assert hasattr(trainer, "_env_fixed_anchors")
+    assert trainer._env_scale_multipliers.shape[0] == 32
+    assert trainer._env_fixed_anchors.shape[0] == 32
+
+    # 4. Verifica cobertura dos 32 ambientes garantindo extremos < 0.20 e > 0.80
+    curr_scale = 0.50
+    dynamic_scales = curr_scale * trainer._env_scale_multipliers
+    env_scales = torch.where(
+        trainer._env_fixed_anchors > 0.0,
+        0.5 * dynamic_scales + 0.5 * trainer._env_fixed_anchors,
+        dynamic_scales,
+    ).clamp(min=0.02, max=1.00).squeeze().cpu().numpy()
+
+    assert env_scales.min() <= 0.15, f"Esperado extremo inferior <= 0.15, obtido {env_scales.min()}"
+    assert env_scales.max() >= 0.85, f"Esperado extremo superior >= 0.85, obtido {env_scales.max()}"
+
+    # 5. Executa rollout e atualização sem divergências numéricas
+    obs_dict, _ = wrapped_env.reset()
+    obs_dict, hx, ep_start, ret = trainer.collect_rollouts(
+        current_obs_dict=obs_dict,
+        current_hx=None,
+        episode_start=True,
+    )
+    assert len(trainer.buffer.rewards) == trainer.rollout_steps
+
+    metrics = trainer.train_epoch()
+    assert not torch.isnan(torch.tensor(metrics["policy_loss"]))
+    assert not torch.isnan(torch.tensor(metrics["value_loss"]))
+

@@ -200,6 +200,7 @@ def build_hud_env(
     is_training: bool = False,
     frame_skip: Optional[int] = None,
     scramble_depth: Optional[int] = None,
+    num_envs: Optional[int] = None,
 ) -> UniversalS1Wrapper:
     """Instancia o ambiente com suporte a renderização in-browser (rgb_array), janela ou headless no Modo Puro Universal."""
     env_lower = env_id.lower().replace("_", "-")
@@ -248,7 +249,7 @@ def build_hud_env(
         from system1_engine.env.adapters.rubiks import VectorizedRubiksEnv
         is_macro = (env_id == "RubiksCubeMacro-v0")
         raw_env = VectorizedRubiksEnv(
-            num_envs=16,
+            num_envs=int(num_envs) if num_envs is not None else 32,
             is_macro=is_macro,
             render_mode=gym_render_mode,
             **extra_kwargs,
@@ -354,6 +355,7 @@ def run_worker_train(config: Dict[str, Any], hud_client: HUDClient) -> None:
         is_training=True,
         frame_skip=int(config.get("frame_skip", 4)),
         scramble_depth=scramble_depth,
+        num_envs=int(config.get("num_envs", 32)),
     )
     agent = UniversalS1Agent(
         obs_space=env.observation_space,
